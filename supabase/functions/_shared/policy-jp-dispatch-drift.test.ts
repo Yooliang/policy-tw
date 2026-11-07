@@ -245,7 +245,7 @@ const PAIRS: Pair[] = [
   { name: "manual_task_is_visitor" },
   { name: "manual_front_at" },
   { name: "manual_front_pull", before: "20261107010000_manual_front_pull_skips_not_found_cooling.sql", note: "取台灣加「查無冷卻中不拉」（20261107010000，日本站手動任務不走正見的 not_found 2 天冷卻，暫不跟）之前的版本" },
-  { name: "manual_task_closes_on_applied" },
+  { name: "manual_task_closes_on_applied", before: "20261107030000_roster_group_tasks.sql", note: "取台灣加多人任務豁免（target.multi_person，20261107030000，日本站沒有名冊分組任務，暫不跟）之前的版本" },
   {
     name: "seed_auto_task_queue",
     before: TW_VERIFY_TICKET,

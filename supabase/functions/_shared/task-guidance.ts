@@ -50,6 +50,15 @@ const notPolicyMisjudgmentNote =
 const soleSourceDeferNote =
   "**只有單一來源的那幾條先不交**（同一篇新聞稿被幾家轉載只算一個來源）：在你交的那筆 policy 的 note（一筆都交不了就在 no_change 的 finding）列出它們的標題與網址，等找到第二個網站或選舉公報上架再交。";
 
+/**
+ * 一張任務包著好幾個人（target.multi_person＝true，名冊分組任務，2026-11-07）：清單在 target.people（也在說明裡逐位寫明），
+ * 每位各交一筆貢獻、task_id 都填這張的；交完一位任務不會結束。SQL 對應 task_target_multi_person()。
+ */
+export const MULTI_PERSON_HINT =
+  "**這張任務有好幾個人（target.people，說明裡逐位列出做法）：每一位各交一筆貢獻，task_id 都填本任務的 id，不要把多位塞進同一筆。**" +
+  "交完一位任務不會結束，也不必一次做完——做幾位交幾位，沒做的留給下一個人；處理完的人系統每小時對帳後會從清單移除，全部處理完任務自動關閉。" +
+  "某一位查不到或官方資料有誤就對那一位交 no_change（附你看了哪裡），不影響其他人。每位的 politician_election_id、politician_id、官方網址都在那一位的 line 裡。";
+
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
     "**current 有 bulletins 的先看公報**：那是系統推得出來的中選會選舉公報與號次（候選人自己登記的政見原文），照公報交那一屆的政見。" +

@@ -24,7 +24,7 @@ import { renameCollision, renameCollisionMessage } from "./person-identity-guard
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
-import { manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
+import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { councilDistrictKey, isCouncilAboriginalDistrict, isRepElectionType, legislatorDistrictKey, officialCouncilDistricts, REP_ELECTION_TYPES, regionFitFor, repDistrictKey } from "./electoral-district.ts";
@@ -2509,14 +2509,19 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   // 提問任務不因 no_change 關閉（2026-09-20）：關了就沒人再答，訪客永遠看到「正在查證」。新的 no_change 在 contribute 就會被擋，這裡守舊資料。
   // 這次查詢順便拿來判斷任務存不存在（unreachable 分支要用，不能只靠 closeTask 的回傳值判斷）。
   // 測試的假 supabase 只有 update／insert：查不到就當非提問、當任務不存在（真 DB 一定查得到）
-  let manualTask: { task_type?: string } | null = null;
+  let manualTask: { task_type?: string; target?: unknown } | null = null;
   try {
     // query-bounds: ok — 按 id 查一列（maybeSingle），鏈被拆開只是為了容忍測試的假 supabase
-    const q = supabase.from("contribution_tasks") as { select?: (cols: string) => { eq: (k: string, v: unknown) => { maybeSingle: () => Promise<{ data: { task_type?: string } | null }> } } };
-    if (typeof q.select === "function") manualTask = (await q.select("id, task_type").eq("id", taskId).maybeSingle()).data ?? null;
+    const q = supabase.from("contribution_tasks") as { select?: (cols: string) => { eq: (k: string, v: unknown) => { maybeSingle: () => Promise<{ data: { task_type?: string; target?: unknown } | null }> } } };
+    if (typeof q.select === "function") manualTask = (await q.select("id, task_type, target").eq("id", taskId).maybeSingle()).data ?? null;
   } catch { /* 查不到就當非提問、當任務不存在 */ }
   if (manualTask?.task_type === "question") {
     return { status: "applied", message: "已記錄；提問任務不因 no_change 關閉，仍等有人用 question_answer 回一份說明", task_id: taskId };
+  }
+  // 多人任務（target.multi_person，名冊分組任務）：一位的 no_change 不能關掉整張，也不進冷卻（冷卻會把同一張的其他人一起擋掉）；
+  // 那一位留在清單裡，直到差異消失（roster_group_tasks_sweep）或維護者手動關。
+  if (manualTask && isMultiPersonTarget(manualTask.target)) {
+    return { status: "applied", message: "已記錄；這是多人任務，不因一位的 no_change 關閉也不進冷卻，其他人照常可做", task_id: taskId };
   }
   // 打不開不能關手動任務（2026-09-26）：「查不到來源」不是「這個任務做完了」，任務要留著換人再試，
   // 不然這條死路就永遠沒人再碰（跟 auto: 任務的 task_unreachable_cooldown 是同一個道理，只是手動任務沒有冷卻機制、
@@ -2625,10 +2630,10 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
 export async function closeTaskIfFulfilled(supabase: SupabaseLike, row: ContributionRow): Promise<boolean> {
   const taskId = manualTaskIdOf(row);
   if (!taskId) return false;
-  const { data: task, error } = await supabase.from("contribution_tasks").select("id, status, task_type").eq("id", taskId).maybeSingle();
+  const { data: task, error } = await supabase.from("contribution_tasks").select("id, status, task_type, target").eq("id", taskId).maybeSingle();
   throwIf(error, "contribution_tasks lookup");
   if (!task || task.status !== "open") return false;
-  if (!shouldCloseOnApplied(str(task.task_type), row.contribution_type)) return false;
+  if (!shouldCloseOnApplied(str(task.task_type), row.contribution_type, task.target)) return false;
   const closed = await closeTask(supabase, taskId, row.agent_name);
   if (!closed) return false;
   await recordUpdate(supabase, ctxOf(row), "contribution_tasks", taskId, "status", "open", "closed");

@@ -14,7 +14,8 @@ import { fetchPrimarySourceUrls, overlayPrimarySources, overlaySourceUrl } from 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
 type Obj = Record<string, unknown>;
-import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, MULTI_PERSON_HINT, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
+import { isMultiPersonTarget } from "./task-fulfilment.ts";
 import { shapeAvatarChoiceCurrent } from "./avatar-choice.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
@@ -451,7 +452,7 @@ export function shapeTaskCurrent(
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   // 不參選重查的 filing 那一種（#345 後續）收尾是 correction 改 withdrawn_after_filing，hint 另外給
-  const hint = inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
+  const hint = isMultiPersonTarget(target) ? MULTI_PERSON_HINT : inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
     : isPartyGapTask(taskType, target) ? PARTY_GAP_HINT
     : ballot ? BALLOT_NUMBERS_HINT
     : recheck ? BALLOT_NUMBERS_RECHECK_HINT
