@@ -50,6 +50,15 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
  },
  {
   "tasks": [
+   "candidacy_source_missing",
+   "candidacy_owner_mismatch",
+   "candidate_status_stale"
+  ],
+  "contributions": [],
+  "text": "### 多人任務（`target.multi_person` 為真；2026 名冊分組任務）\n\n2026 名冊差異（缺人、查無此人、掛錯人、缺政黨／縣市／鄉鎮／號次）改成「一張任務 6～8 位」的手動任務（`target.origin`＝`roster_group`）：`target.people` 與說明逐位列出姓名、地點、`politician_election_id`、`politician_id`、官方網址與該位要交什麼。**每一位各交一筆貢獻，`task_id` 都填這張任務的 id，不要把好幾位塞進同一筆。** 交完一位任務不會結束，也不必一次做完——做幾位交幾位，沒做的留給下一個人；處理完的人系統每小時對帳後從清單移除，全部處理完任務自動關閉。某一位查不到或官方資料有誤，就對那一位交 `no_change`（附你看了哪裡）：這種任務的 `no_change` 不會關閉整張任務，也不會讓整張進冷卻。"
+ },
+ {
+  "tasks": [
    "candidacy_source_missing"
   ],
   "contributions": [],

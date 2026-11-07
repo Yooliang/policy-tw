@@ -30,10 +30,20 @@ const KEEP_OPEN_TASK_TYPES: ReadonlySet<string> = new Set(["question", "adjudica
  */
 const SELF_CLOSING_CONTRIBUTION_TYPES: ReadonlySet<string> = new Set(["no_change", "adjudication", "task_suggestion", "question_answer", "roster_check"]);
 
+/**
+ * 一張任務包著好幾個人（target.multi_person＝true，2026-11-07 的名冊分組任務）：每位各交一筆貢獻，
+ * 第一位上線不代表做完，所以跟 KEEP_OPEN_TASK_TYPES 同樣不關、不停放。什麼時候關由 SQL 的 roster_group_tasks_sweep() 對帳決定。
+ * SQL 對應：task_target_multi_person(target)（20261107030000），守門 roster-group-tasks.test.ts。
+ */
+export function isMultiPersonTarget(target: unknown): boolean {
+  return !!target && typeof target === "object" && (target as Obj).multi_person === true;
+}
+
 /** 這筆貢獻上線後，它所屬的任務該不該關 */
-export function shouldCloseOnApplied(taskType: string | null | undefined, contributionType: string): boolean {
+export function shouldCloseOnApplied(taskType: string | null | undefined, contributionType: string, target?: unknown): boolean {
   if (!taskType) return false;
   if (KEEP_OPEN_TASK_TYPES.has(taskType)) return false;
+  if (isMultiPersonTarget(target)) return false;
   if (SELF_CLOSING_CONTRIBUTION_TYPES.has(contributionType)) return false;
   return true;
 }
