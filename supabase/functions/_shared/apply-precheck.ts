@@ -22,6 +22,7 @@ import { lineageIneligiblePolicies, loadLineageMembers, loadPartyChain, politici
 import { partyInfoIds, partyInfoItems, planPartyInfo } from "./party-info.ts";
 import { resultItems } from "./election-results.ts";
 import { candNoItems } from "./cand-numbers.ts";
+import { findMergeCandidacyConflict } from "./merge-candidacy-conflict.ts";
 import { loadReassignContext, reassignProblems } from "./reassign-candidacy.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -402,6 +403,15 @@ export async function precheckApplyTargets(
         const keep = str(p.keep_id), remove = str(p.remove_id);
         if (keep) checkPolitician(i, keep, "payload.keep_id", "無法合併（keep_id）");
         if (remove) checkPolitician(i, remove, "payload.remove_id", "無法合併（remove_id）");
+        // 判為同一人時，兩位在同一屆的參選紀錄不能對不起來（號次／選區／選舉別）；判為不同人（same_person=false）照常放行
+        if (keep && remove && p.same_person !== false && politicians.ok && politicianRows.get(keep) && politicianRows.get(remove)) {
+          try {
+            const conflict = await findMergeCandidacyConflict(supabase, keep, remove);
+            if (conflict) problems.push({ index: i, code: "apply_would_fail", path: "payload.remove_id", message: conflict });
+          } catch (e) {
+            console.error("precheck merge conflict lookup failed:", e instanceof Error ? e.message : String(e));
+          }
+        }
         break;
       }
       case "policy": {

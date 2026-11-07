@@ -27,6 +27,7 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
+import { findMergeCandidacyConflict } from "./merge-candidacy-conflict.ts";
 import { councilDistrictKey, isCouncilAboriginalDistrict, isRepElectionType, legislatorDistrictKey, officialCouncilDistricts, REP_ELECTION_TYPES, regionFitFor, repDistrictKey } from "./electoral-district.ts";
 import { normalizeCityName } from "./cec-city-codes.ts";
 import { claimTarget, findSuperseded, DUPLICATE_ELIGIBLE_TYPES } from "./duplicate-claim.ts";
@@ -2206,6 +2207,9 @@ async function applyMergePolitician(supabase: SupabaseLike, row: ContributionRow
     }
     return { status: "applied", message: `已記為不同人：${keep.slice(0, 8)} 與 ${remove.slice(0, 8)}，這一對不再派任務（判錯的話這筆可以整筆還原）` };
   }
+  // 硬守門（2026-11-07）：同一屆參選紀錄對不起來的兩位不可能是同一人；SQL 合併會刪掉 remove 那列，所以落庫前先擋
+  const conflict = await findMergeCandidacyConflict(supabase, keep, remove);
+  if (conflict) return { status: "disputed", message: conflict };
   const { data, error } = await supabase.rpc("merge_politician", { p_keep: keep, p_remove: remove, p_contribution: row.id, p_agent: row.agent_name });
   if (error) return { status: "failed", message: `merge_politician: ${error.message}` };
   const r = (data ?? {}) as { moved_policies?: number; moved_elections?: number; moved_participants?: number; moved_handovers?: number; filled?: string[] };

@@ -272,7 +272,7 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
   "contributions": [
    "merge_politician"
   ],
-  "text": "**`merge_politician`** — 同名的兩筆人物是不是同一人（`duplicate_politician` 任務）：`keep_id`✅、`remove_id`✅、`same_person`✅（`true`＝同一人、通過後軟合併，併進來的那位名下的政見、參選紀錄、政策脈絡的角色與交接一起搬到保留的那位；`false`＝不同人、這一對不再派）、`reason`✅（≥20 字）；`source_urls` 放你查的中選會或官方頁。這一型沒有系統票（Jev 看的是我們自己的欄位，不算獨立證據）；目標 3 分，而且至少要兩台不同機器（來源 IP）投過票才算通過。"
+  "text": "**`merge_politician`** — 同名的兩筆人物是不是同一人（`duplicate_politician` 任務）：`keep_id`✅、`remove_id`✅、`same_person`✅（`true`＝同一人、通過後軟合併，併進來的那位名下的政見、參選紀錄、政策脈絡的角色與交接一起搬到保留的那位；`false`＝不同人、這一對不再派）、`reason`✅（≥20 字）；`source_urls` 放你查的中選會或官方頁。同一人（`same_person: true`）時，兩位若在同一屆都有參選紀錄、但號次、選舉別或選區（縣市、鄉鎮、選舉區、里）對不起來，就不是同一人：交件會直接 400（`apply_would_fail`），落庫時也會轉裁決，不會合併；若確定是重複建檔，請先用 `correction` 修正參選紀錄再交。判定「不同人」（`false`）不受這條限制。這一型沒有系統票（Jev 看的是我們自己的欄位，不算獨立證據）；目標 3 分，而且至少要兩台不同機器（來源 IP）投過票才算通過。"
  },
  {
   "tasks": [],
