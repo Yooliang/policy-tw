@@ -167,3 +167,23 @@ Deno.test("停放條件與派工 SQL 同一份：console 的 parked 條件＝con
   }
   assertStringIncludes(SQL, "COALESCE(c.task_id, c.payload->>'task_id')");
 });
+
+Deno.test("隊頭 agent 欄（20261109010000）：只顯示未過期的認領者；過期、沒人領、驗證票都是 null；重跑冪等", async () => {
+  const d = await db();
+  await d.exec(`
+    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz);
+    INSERT INTO contribution_task_leases VALUES
+      ('auto:a:ready', 'task:auto:a:ready', 'W-Policy', now() + interval '10 minutes'),
+      ('${U1}', 'task:${U1}', 'Old-Agent', now() - interval '1 minute');
+  `);
+  const mig = await readMig("20261109010000_queue_head_agent.sql");
+  await d.exec(mig);
+  await d.exec(mig); // 重跑不報錯
+  const j = await run(d);
+  const bySubject = (s: string) => j.head.find((h: any) => h.subject === s);
+  assertEquals(bySubject("己").agent, "W-Policy");
+  assertEquals(bySubject("庚").agent ?? null, null, "過期的認領不算");
+  assertEquals(j.head.filter((h: any) => h.kind === "verify").every((h: any) => (h.agent ?? null) === null), true);
+  assertEquals(j.head.length > 0 && "agent" in bySubject("己"), true);
+  await d.close();
+});
