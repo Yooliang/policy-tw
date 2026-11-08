@@ -187,3 +187,28 @@ Deno.test("隊頭 agent 欄（20261109010000）：只顯示未過期的認領者
   assertEquals(j.head.length > 0 && "agent" in bySubject("己"), true);
   await d.close();
 });
+
+Deno.test("隊頭 agent 欄補驗證票（20261109020000）：30 分鐘內派到、還沒投票的代理，新的在前用「、」連；投過票、過期、其他票都不算；任務列不變", async () => {
+  const d = await db();
+  await d.exec(`
+    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz);
+    INSERT INTO contribution_task_leases VALUES ('auto:a:ready', 'task:auto:a:ready', 'W-Policy', now() + interval '10 minutes');
+    CREATE TABLE verify_dispatches (contribution_id int, ip_hash text, agent_name text, dispatched_at timestamptz, PRIMARY KEY (contribution_id, ip_hash));
+    CREATE TABLE contribution_votes (contribution_id int, agent_name text);
+    INSERT INTO verify_dispatches VALUES
+      (1, 'a', 'Agent-Old', now() - interval '20 minutes'), (1, 'b', 'Agent-New', now() - interval '2 minutes'),
+      (1, 'c', 'Agent-Voted', now() - interval '5 minutes'), (1, 'd', 'Agent-Stale', now() - interval '40 minutes'),
+      (3, 'a', 'Agent-X', now() - interval '1 minute');
+    INSERT INTO contribution_votes VALUES (1, 'agent-voted');
+  `);
+  await d.exec(await readMig("20261109010000_queue_head_agent.sql"));
+  const mig = await readMig("20261109020000_queue_head_agent_verify.sql");
+  await d.exec(mig);
+  await d.exec(mig); // 冪等
+  const j = await run(d);
+  const agents = j.head.filter((h: any) => h.kind === "verify").map((h: any) => h.agent ?? null);
+  assertEquals(agents.includes("Agent-New、Agent-Old"), true);
+  assertEquals(agents.includes("Agent-X"), true);
+  assertEquals(j.head.find((h: any) => h.subject === "己").agent, "W-Policy");
+  await d.close();
+});
