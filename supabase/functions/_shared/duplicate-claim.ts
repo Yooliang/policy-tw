@@ -108,8 +108,10 @@ export function claimKey(contributionType: string, payload: unknown): string | n
       // 進度要連日期一起看：同一筆政見的不同里程碑是不同的宣稱
       return `${head}|${norm(p.status)}|${norm(p.progress)}|${norm(p.date)}`;
     case "no_change":
-      // 「查了，這個任務沒東西要改」——同一個任務就是同一個宣稱
-      return head;
+      // 「查了，這個任務沒東西要改」——同一個任務就是同一個宣稱。
+      // 例外：多人任務（名冊分組任務）每位各答各的，帶 person_key 的要把那一位算進鍵，不然同一張任務裡
+      // 不同人的答案會被當成同一個宣稱，只有第一筆算數、其餘被收編成 superseded（2026-11-09，d9042ce1／a2035078 九輪不收斂）
+      return typeof p.person_key === "string" && p.person_key.trim() ? `${head}|person:${norm(p.person_key)}` : head;
     case "task_suggestion":
       // 同一個對象、同一種缺陷＝同一個提議；標題與描述各寫各的不影響。
       // 型別沒寫視為 other——同一個對象用 other 提兩次也是同一件事。

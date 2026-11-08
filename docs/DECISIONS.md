@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-11-09
+
+- [多人任務每筆交件帶 person_key，確認掛對人逐人落地（協議 1.122.0）](decisions/2026-11-09-多人任務每筆交件帶person_key確認逐人落地.md)
+
 ## 2026-11-08
 
 - [Jev 做兩道身份檢查（合併核對、新人物相似度），系統票只擋不放（只有 not_supporte…](decisions/2026-11-08-Jev身份檢查只擋不放.md)
