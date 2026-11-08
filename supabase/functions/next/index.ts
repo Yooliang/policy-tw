@@ -1,3 +1,4 @@
+import { shapeEstimate } from "../_shared/task-estimate.ts";
 import { PROTOCOL_URL, PROTOCOL_VERSION } from "../_shared/protocol.ts";
 import { loadElections, withElectionKey } from "../_shared/elections.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -34,7 +35,8 @@ import { createSecretWarner, dispatchTokenSecretFrom, issueDispatchToken, logDis
  * next — 統一派工端點（主流程之一）。無金鑰。
  * GET ?agent_name=<必填>&agent_tool=&region=
  *   → { kind:"verify", item:{contribution_id, contribution_type, payload, source_urls, agree_count, disagree_count} }
- *   → { kind:"task",   item:{task_id, task_type, target, what_we_need, hint_sources, suggested_contribution_type} }
+ *   → { kind:"task",   item:{task_id, task_type, target, what_we_need, hint_sources, suggested_contribution_type, estimate} }
+ *     estimate＝Jev 的難度／預估時間／模型強度／難點分類（2026-11-08；沒估過是 null）
  *   → { kind:"none",   reason, retry_after_min:30 }
  * 每個回應都帶 total_pending（排除你自己後的待驗證數）與 open_tasks。
  * 決策在伺服器：待驗證>0 時約 3 verify：1 task（依該 agent_name 今天已做的數量輪替）；=0 只派 task；
@@ -56,6 +58,19 @@ const RETRY_AFTER_MIN = 5;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+/** Jev 對這件任務的難度／時間／模型強度／難點估計（階段 1 只曝露、不影響派工）；沒估過、查不到都是 null，絕不擋派工 */
+// deno-lint-ignore no-explicit-any
+async function estimateOf(supabase: any, taskId: string) {
+  try {
+    const { data } = await supabase.from("task_estimates")
+      .select("difficulty, time_bucket, model_need, hardness, question_version, estimated_at").eq("task_id", taskId).maybeSingle();
+    return shapeEstimate(data);
+  } catch (e) {
+    console.error("task_estimates:", e instanceof Error ? e.message : String(e));
+    return null;
+  }
 }
 
 async function handle(req: Request, mark: (name: string) => void): Promise<Response> {
@@ -591,6 +606,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           task_id: t.id, task_type: t.task_type, source: t.source ?? "manual", suggested_by: t.suggested_by ?? null, target: withElectionKey(t.target, electionList), ...describeManualTask(t), hint_sources: t.hint_sources ?? [], reward: t.reward, suggested_contribution_type: SUGGESTED_TYPE[t.task_type] ?? null,
           current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, manualTarget), { task_id: t.id ?? null, target: manualTarget }),
           lookup: buildLookup(manualTarget),
+          estimate: await estimateOf(supabase, t.id),
           type_spec: typeSpecForTask(t.task_type),
         },
         how_to: howTo,
@@ -627,6 +643,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         suggested_contribution_type: isBallotNumbersTask(t.task_type, autoTarget) ? "cand_numbers" : (SUGGESTED_TYPE[t.task_type] ?? null),
         current: shapeTaskCurrent(t.task_type, await fetchTaskContext(supabase, t.task_type, autoTarget), { task_id: t.task_id ?? null, target: autoTarget }),
         lookup: buildLookup(autoTarget),
+        estimate: await estimateOf(supabase, t.task_id),
         // 這種任務的做法＋可能收尾的每一種交件型別的欄位（協議 1.93.0：從 skill.md 搬出來，隨派工送）
         type_spec: typeSpecForTask(t.task_type, isBallotNumbersTask(t.task_type, autoTarget) ? "cand_numbers" : undefined),
       },

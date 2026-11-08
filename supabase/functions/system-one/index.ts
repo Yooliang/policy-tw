@@ -24,6 +24,7 @@ import { MAX_CHECKED_SOURCES, perSourceCount, perSourceQuestions, pickIndependen
  *   ?action=results_batch POST                           整批補選舉結果的系統票：逐位核對中選會名單（SQL），全部對得上才投（2026-10-06）。不帶金鑰、冪等。
  *   ?action=reassign_check POST                          參選紀錄改掛的系統票：中選會名冊的出生年核新舊兩人（SQL，2026-10-06）。不帶金鑰、冪等。
  *   ?action=cand_no_check POST                           號次重複檢查的系統票：同一個號次單位裡跟已上線或等票中的另一位同號 → not_supported（目標 +1），內部一致性檢查、不核來源（SQL，2026-10-08）。不帶金鑰、冪等。
+ *   ?action=task_estimate POST                          派工列分類（難度／預估時間／模型強度／難點），存 task_estimates 並記 jev_decisions；?dry=1 只問不寫、?limit=。不帶金鑰、冪等、10 分鐘窗成本上限（2026-11-08）。
  *   ?action=news_screen POST                             新聞逐則初篩：沒人名的直接記無關，有人名的問 Jev 是哪條政見的進度／新承諾／無關，
  *                                                        有關的開 news_sweep 任務（2026-09-29）。news-fetch 收完就叫。守法同 backfill。
  *   ?action=judge    POST { contribution_id, url }       給代理用的第二來源判定（使用者 2026-09-19：「jev 提供端點，別給 key」）：
@@ -53,6 +54,7 @@ import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, groupRosterCandidates, pa
 import { loadRegistrationRows } from "../_shared/cec-registrations.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { buildNameIndex, buildNewsAsk, findNames, MAX_POLICIES_PER_PERSON, NEWS_QUESTION, newsTaskOf, pickPeople, type PolicyBrief, type ScreenPerson, verdictOf, NEWS_MIN_PROBABILITY, DEFAULT_NEWS_SETTINGS, isScreenDue, remainingCap, taipeiDayStart, type NewsSettings, type ScreenVerdict } from "../_shared/news-screen.ts";
+import { runTaskEstimate, TASK_ESTIMATE_DEFAULT_LIMIT, TASK_ESTIMATE_WINDOW_MAX, TASK_ESTIMATE_WINDOW_MINUTES, type Candidate } from "../_shared/task-estimate-run.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1345,6 +1347,33 @@ Deno.serve(async (req) => {
       if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
       const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || NEWS_SCREEN_MAX, 1), NEWS_SCREEN_MAX);
       return json({ success: true, min_probability: NEWS_MIN_PROBABILITY, ...(await newsScreen(supabase, apiKey, limit)) });
+    }
+
+    // ---- task_estimate：派工列的難度／時間／模型強度／難點分類（2026-11-08，階段 1：只分類與曝露，不改派工順序）----
+    // 不帶金鑰、冪等（只估沒估過／目標變了／題目版本不同的）、有上限（limit 與 10 分鐘窗）；?dry=1 只問不寫。
+    if (action === "task_estimate") {
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
+      const out = await runTaskEstimate({
+        recentCount: async (sinceIso) => {
+          const { count, error } = await supabase.from("jev_decisions").select("id", { count: "exact", head: true })
+            .eq("subject_type", "task").eq("question", "task_difficulty").gte("asked_at", sinceIso);
+          if (error) throw new Error(`jev_decisions recent count: ${error.message}`);
+          return count ?? 0;
+        },
+        candidates: async (limit, version) => {
+          const { data, error } = await supabase.rpc("task_estimate_candidates", { p_limit: limit, p_version: version });
+          if (error) throw new Error(`task_estimate_candidates: ${error.message}`);
+          return (data ?? []) as Candidate[];
+        },
+        ask: (state, questions) => askJev(apiKey, state, questions),
+        record: (rows) => insertRecords(supabase, rows),
+        save: async (row) => {
+          const { error } = await supabase.from("task_estimates").upsert(row, { onConflict: "task_id" });
+          if (error) throw new Error(`task_estimates upsert: ${error.message}`);
+        },
+      }, { limit: Number(url.searchParams.get("limit")) || TASK_ESTIMATE_DEFAULT_LIMIT, dry: url.searchParams.get("dry") === "1" });
+      return json({ success: true, window_max: TASK_ESTIMATE_WINDOW_MAX, window_minutes: TASK_ESTIMATE_WINDOW_MINUTES, ...out }, batchHttpStatus(out.asked, out.failures));
     }
 
     // ---- record：外部批次腳本寫入 ----
