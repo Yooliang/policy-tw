@@ -71,7 +71,7 @@ function dbFor(taskId = "auto:candidacy_owner_mismatch:777") {
 
 Deno.test("三題都在 QUESTIONS 白名單，migration 的 CHECK 也有", async () => {
   for (const q of Object.keys(clarifyQuestions())) assert((QUESTIONS as readonly string[]).includes(q), q);
-  const mig = await Deno.readTextFile(new URL("../../migrations/20261108010000_followup_clarify.sql", import.meta.url));
+  const mig = await Deno.readTextFile(new URL("../../migrations/20261108030000_followup_clarify.sql", import.meta.url));
   for (const q of Object.keys(clarifyQuestions())) assertStringIncludes(mig, `'${q}'`);
 });
 
@@ -272,7 +272,7 @@ Deno.test("closeDuplicates：精確重複與對既有任務的重複都走 follo
 // ---- migration 守門：只動 contribution_tasks ----
 
 Deno.test("migration：寫入只有 contribution_tasks（兩支窄函式），其他函式全是 STABLE 只讀；cron 已排", async () => {
-  const mig = await Deno.readTextFile(new URL("../../migrations/20261108010000_followup_clarify.sql", import.meta.url));
+  const mig = await Deno.readTextFile(new URL("../../migrations/20261108030000_followup_clarify.sql", import.meta.url));
   const stmts = [...mig.matchAll(/^\s*(UPDATE|INSERT INTO|DELETE FROM)\s+([a-z_]+)/gim)].map((m) => `${m[1].toUpperCase()} ${m[2]}`);
   assert(stmts.length > 0);
   for (const s of stmts) assertEquals(s, "UPDATE contribution_tasks");
