@@ -166,7 +166,7 @@ Deno.test("nameLikePatterns：差一字的 like 樣式；有逗號括號的名�
 });
 
 Deno.test("接線：migration 擴 CHECK／合格型別／候選函式／排程；TS 合格型別含 merge_politician；precheck 與 identity_check 都走同一組函式", async () => {
-  const mig = await Deno.readTextFile(new URL("../../migrations/20261108010000_jev_identity_checks.sql", import.meta.url));
+  const mig = await Deno.readTextFile(new URL("../../migrations/20261108020000_jev_identity_checks.sql", import.meta.url));
   assert(mig.includes("'new_person'") && mig.includes("'merge_politician'"));
   assert(mig.includes("system-one?action=identity_check"));
   assert((SYSTEM_VOTE_ELIGIBLE_TYPES as readonly string[]).includes("merge_politician"));
