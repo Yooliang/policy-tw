@@ -18,7 +18,7 @@
 -- 1. 題名白名單
 ALTER TABLE jev_decisions DROP CONSTRAINT IF EXISTS jev_decisions_question_check;
 ALTER TABLE jev_decisions ADD CONSTRAINT jev_decisions_question_check
-  CHECK (question IN ('is_policy', 'duplicate_of', 'election', 'identity', 'same_person', 'source_support', 'second_source', 'extract', 'vote_budget', 'followup', 'news_relevance', 'bio_education', 'bio_experience', 'ask_screen', 'clarify_kind', 'clarify_deliverable', 'clarify_resolved'));
+  CHECK (question IN ('is_policy', 'duplicate_of', 'election', 'identity', 'same_person', 'source_support', 'second_source', 'extract', 'vote_budget', 'followup', 'news_relevance', 'bio_education', 'bio_experience', 'ask_screen', 'task_difficulty', 'task_time', 'task_model', 'task_hardness', 'new_person', 'clarify_kind', 'clarify_deliverable', 'clarify_resolved'));
 
 -- 2. 小工具：安全轉型（壞字串回 NULL，不丟錯）
 CREATE OR REPLACE FUNCTION followup_uuid(p_text TEXT) RETURNS UUID

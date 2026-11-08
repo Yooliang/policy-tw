@@ -1158,7 +1158,7 @@ Deno.serve(async (req) => {
     }
 
     // ---- followup_clarify：Jev 把模糊的跟進任務釐清成具體指令，或關掉（2026-11-08 維護者核准）----
-    // 流程與取捨見 _shared/followup-clarify.ts 檔頭與 migration 20261108010000。一張任務問一次 Jev（三題），蓋章 target.clarify 後不重問。
+    // 流程與取捨見 _shared/followup-clarify.ts 檔頭與 migration 20261108030000。一張任務問一次 Jev（三題），蓋章 target.clarify 後不重問。
     // 先關掉「同一筆貢獻同一類問題」的精確重複（不花 Jev），問完再做「同人物＋同動作」的重複檢查。
     // limit 預設 30（上限 100）；dry=1 只回判定，不寫判決紀錄、不動任務；ids=逗號分隔的任務 id 指定幾張（dry 時也可試）。
     if (action === "followup_clarify") {
