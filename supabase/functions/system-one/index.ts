@@ -3,6 +3,8 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
 import { computeVoteBudget, dimensionQuestions, VOTE_DIMENSIONS } from "../_shared/vote-budget.ts";
 import { aggregateFieldVerdicts, askJev, stripNulDeep, JEV_KEY_MISSING, type JevKeyLike, jevKeyFromEnv, buildPolicyAsk, buildSourceSupportAsk, claimOf, combineSources, type DecisionRecord, type ElectionLite, fetchSource, focusText, MIN_PROBABILITY, type PolicyLite, toRecords, validateRecord, hasUsableText, aggregateExtract, buildExtractAsk, parseExtractTask, nameHit, buildPairAsk, textSimilarity, SAME_CONTENT_THRESHOLD, subjectNamesOf } from "../_shared/system-one.ts";
+import { buildMergeIdentityAsk, buildNewPersonAsk, gatherNewPersonCandidates, incomingOf, loadPersonFacts, MERGE_STATE_SCHEMA, mergeSystemVote, NEW_PERSON_QUESTION, newPersonRecords, supabaseIdentityDb, type NewPersonCandidate, type NewPersonVerdict } from "../_shared/jev-identity.ts";
+import type { JevAnswer, JevQuestion } from "../_shared/system-one.ts";
 import { selfCitationEvidenceVerdict } from "../_shared/self-hosts.ts";
 import { batchHttpStatus } from "../_shared/batch-status.ts";
 import { MAX_CHECKED_SOURCES, perSourceCount, perSourceQuestions, pickIndependentSources, systemVoteFromAnswers } from "../_shared/independent-sources.ts";
@@ -92,6 +94,38 @@ async function insertRecords(supabase: Sb, rows: DecisionRecord[]): Promise<{ in
   if (error) throw new Error(`jev_decisions insert: ${error.message}`);
   const inserted = (data ?? []).length;
   return { inserted, skipped: rows.length - inserted };
+}
+
+// ---- 新人物相似度（2026-11-08）：candidacy／politician 沒指 politician_id＝會建新人物 ----
+type NewPersonAsk = { ask: { state: Record<string, unknown>; questions: Record<string, JevQuestion> }; candidates: NewPersonCandidate[] };
+
+/** 這筆要不要問新人物題：會建新人物、還沒問過、同場同單位有同名／近名者 → 回題目；否則 null（不花錢） */
+async function newPersonAskFor(supabase: Sb, c: { contribution_id: string; contribution_type: string; payload: Record<string, unknown> }): Promise<NewPersonAsk | null> {
+  const { data: row, error } = await supabase.from("contributions").select("task_id").eq("id", c.contribution_id).maybeSingle();
+  if (error) throw new Error(`contributions task_id: ${error.message}`);
+  const inc = incomingOf({ contribution_type: c.contribution_type, payload: c.payload, task_id: row?.task_id });
+  if (!inc) return null;
+  const { count, error: cErr } = await supabase.from("jev_decisions").select("id", { count: "exact", head: true })
+    .eq("subject_type", "contribution").eq("subject_id", c.contribution_id).eq("question", NEW_PERSON_QUESTION);
+  if (cErr) throw new Error(`jev_decisions new_person count: ${cErr.message}`);
+  if ((count ?? 0) > 0) return null;   // 一筆只問一次
+  const candidates = await gatherNewPersonCandidates(supabaseIdentityDb(supabase), inc, c.contribution_id);
+  if (candidates.length === 0) return null;
+  return { ask: buildNewPersonAsk(inc, candidates), candidates };
+}
+
+/** 寫新人物判定：審計列先、擋票列後（分開寫入）；擋到另一筆等票交件時，對方也重算共識 */
+async function settleNewPerson(supabase: Sb, contributionId: string, idAsk: NewPersonAsk, res: { answer: JevAnswer | undefined; model: string }, costUsd = 0): Promise<NewPersonVerdict> {
+  const { audit, holds, verdict } = newPersonRecords({ contributionId, model: res.model, state: idAsk.ask.state, answer: res.answer, candidates: idAsk.candidates, costUsd });
+  await insertRecords(supabase, audit);
+  for (const h of holds) {
+    await insertRecords(supabase, [h]);
+    if (h.subject_id !== contributionId) {
+      const { error } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: h.subject_id });
+      if (error) throw new Error(`apply_consensus(other): ${error.message}`);
+    }
+  }
+  return verdict;
 }
 
 /** 組一筆政見的 state 並問 Jev。回傳寫入結果與答案；找不到政見回 null */
@@ -554,33 +588,34 @@ Deno.serve(async (req) => {
           .eq("subject_type", "politician_pair").eq("subject_id", pairKey).eq("question", "same_person").gte("asked_at", new Date(Date.now() - 30 * 86400_000).toISOString())
           .order("asked_at", { ascending: false }).limit(1).maybeSingle();
         let choice: string, probability: number, model: string, state: Record<string, unknown>;
-        if (prior) {
+        // 舊版（影子期，沒帶選區與號次）的判定不重用：只認 merge-identity-v2 的 state
+        const priorOk = prior && (((prior.state ?? {}) as Record<string, unknown>).schema === MERGE_STATE_SCHEMA);
+        if (prior && priorOk) {
           choice = String(prior.choice); probability = Number(prior.probability); model = String(prior.model); state = (prior.state ?? {}) as Record<string, unknown>;
         } else {
-          const [pa, pb, ea, eb] = await Promise.all([
-            supabase.from("politicians").select("id, name, party, region, birth_year, current_position").eq("id", keep).maybeSingle(),
-            supabase.from("politicians").select("id, name, party, region, birth_year, current_position").eq("id", remove).maybeSingle(),
-            supabase.from("politician_elections").select("election_id, election_type, candidacy_status").eq("politician_id", keep).limit(20),
-            supabase.from("politician_elections").select("election_id, election_type, candidacy_status").eq("politician_id", remove).limit(20),
-          ]);
-          if (!pa.data || !pb.data) { tally["fetch:noperson"] = (tally["fetch:noperson"] ?? 0) + 1; return; }
-          const el = (rows: unknown[] | null) => (rows ?? []).map((e) => { const r = e as Record<string, unknown>; return `${r.election_id} ${r.election_type ?? ""} ${r.candidacy_status ?? ""}`; });
-          const { state: st, questions } = buildPairAsk({ ...(pa.data as Record<string, unknown>), elections: el(ea.data) } as never, { ...(pb.data as Record<string, unknown>), elections: el(eb.data) } as never);
+          // 兩人的全部事實（基本資料、每筆參選紀錄的選區與號次、中選會 2026 名冊對應列）放 state；一筆貢獻只問這一次
+          const [pa, pb] = await Promise.all([loadPersonFacts(supabase, keep), loadPersonFacts(supabase, remove)]);
+          if (!pa || !pb) { tally["fetch:noperson"] = (tally["fetch:noperson"] ?? 0) + 1; return; }
+          const { state: st, questions } = buildMergeIdentityAsk(pa, pb);
           const res = await askJev(apiKey, st, questions);
           cost += res.usage.cost; asked++;
           const ans = res.answers.same_person;
           choice = ans.choice; probability = Number((ans.probabilities?.[ans.choice] ?? 0).toFixed(4)); model = res.model; state = st;
           await insertRecords(supabase, [{ subject_type: "politician_pair", subject_id: pairKey, question: "same_person", choice, probability, confidence: null, probabilities: ans.probabilities ?? null, model, state, cost_usd: Number(res.usage.cost.toFixed(8)) }]);
         }
-        // 配對判定 → 這筆貢獻的系統票：代理說同一人而 Jev 說 same → supported；相反 → not_supported；unclear → cannot_tell
-        const agentSays = c.payload.same_person === false ? "diff" : "same";
-        const mapped = choice === "unclear" ? "cannot_tell" : choice === agentSays ? "supported" : "not_supported";
+        // 配對判定 → 這筆貢獻的系統票（2026-11-08）：只留「擋」的一邊。Jev 與宣稱相反 → not_supported（機率 ≥0.95 才算，目標 +1，不觸發裁決）；
+        // Jev 同意宣稱或 unclear → cannot_tell（棄權，不給 −1）。見 mergeSystemVote
+        const claimsSame = c.payload.same_person !== false;
+        const vote = mergeSystemVote(choice, probability, claimsSame);
         await insertRecords(supabase, [{
           subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
-          choice: mapped, probability, confidence: null, probabilities: { same_person: { verdict: choice, p: probability } } as unknown as Record<string, number>,
-          model, state: { claim: { keep_id: keep, remove_id: remove, same_person: agentSays === "same" }, pair: state }, cost_usd: 0,
+          choice: vote.choice, probability: vote.probability, confidence: null, probabilities: { same_person: { verdict: choice, p: probability } } as unknown as Record<string, number>,
+          model, state: { claim: { keep_id: keep, remove_id: remove, same_person: claimsSame }, pair: state }, cost_usd: 0,
         }]);
-        const key = `${mapped}${probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
+        // 有票就重算共識（not_supported 讓目標 +1）
+        const { error: aErr } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: c.contribution_id });
+        if (aErr) throw new Error(`apply_consensus: ${aErr.message}`);
+        const key = `merge:${vote.choice}${vote.probability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
         tally[key] = (tally[key] ?? 0) + 1;
       };
       const one = async (c: Cand): Promise<void> => {
@@ -613,6 +648,8 @@ Deno.serve(async (req) => {
         const srcUrl = urls[0];
         let rows: DecisionRecord[];
         let key: string;
+        let idAsk: Awaited<ReturnType<typeof newPersonAskFor>> = null;
+        let idRes: { answer: JevAnswer | undefined; model: string } | null = null;
         // 主角名字不在文本裡（索引頁、附件沒接進來）→ 棄權，不問 Jev：它只會在別人的資料上判「矛盾」（2026-09-19 卡伊．馬賴）
         const noName = !!combined && !nameHit(combined, names);
         if (!combined || !hasUsableText(combined, names) || noName) {
@@ -636,8 +673,11 @@ Deno.serve(async (req) => {
           // 兩個以上獨立來源：每個來源各問一組欄位題（只看那一段），同一次呼叫；題數有上限（policy-ops#39）
           const asked = askedSources.slice(0, perSourceCount(Object.keys(questions).length, askedSources.length));
           const askedPages = asked.map((s) => ({ ...s, text: usable.find((p) => p.url === s.url)?.text ?? "" }));
-          const res = await askJev(apiKey, askState, { ...questions, ...budgetQs, ...perSourceQuestions(questions, asked) });
+          // 新人物相似度（2026-11-08）：這筆會建新人物、而且同場同單位有同名／近名的人或等票交件 → 同一次呼叫多問一題（一筆只問一次）
+          idAsk = await newPersonAskFor(supabase, c);
+          const res = await askJev(apiKey, idAsk ? { ...askState, ...idAsk.ask.state } : askState, { ...questions, ...budgetQs, ...perSourceQuestions(questions, asked), ...(idAsk?.ask.questions ?? {}) });
           cost += res.usage.cost;
+          if (idAsk) idRes = { answer: res.answers[NEW_PERSON_QUESTION], model: res.model };
           // 併起來那段收斂成一票（欄位細節放 probabilities 給 /next 與對帳看）；任一獨立來源明確矛盾 → not_supported；
           // supported 時記核得過的獨立來源數（那一頁要有主角名字），SQL 依它降 1～2 分。規則在 systemVoteFromAnswers
           const vote = systemVoteFromAnswers({ contributionType: c.contribution_type, claim, answers: res.answers, asked: askedPages, names: personNames });
@@ -668,6 +708,11 @@ Deno.serve(async (req) => {
           key = `${voteChoice}${voteProbability >= MIN_PROBABILITY ? "≥" : "<"}門檻`;
         }
         await insertRecords(supabase, rows);
+        // 新人物判定另寫（先審計列、再擋票列，分兩次寫入，擋票列的 asked_at 較晚＝共識取它）
+        if (idAsk && idRes) {
+          const settled = await settleNewPerson(supabase, c.contribution_id, idAsk, idRes);
+          key = `${key}|new_person:${settled.kind}${settled.hold ? "-hold" : ""}`;
+        }
         // 有票就重算共識：supported 可能讓門檻剛好達標、not_supported 可能直接進裁決
         const { error: aErr } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: c.contribution_id });
         if (aErr) throw new Error(`apply_consensus: ${aErr.message}`);
@@ -690,6 +735,48 @@ Deno.serve(async (req) => {
       }
       // 這一輪有失敗而且一筆都沒寫成 → 500（2026-10-09 系統票無聲停擺 16 小時的教訓）
       return json({ success: true, asked, cost_usd: Number(cost.toFixed(6)), candidates: list.length, remaining: list.length - cursor, out_of_time: outOfTime, elapsed_ms: Date.now() - startedAt, tally, failures, min_probability: MIN_PROBABILITY }, batchHttpStatus(asked, failures));
+    }
+
+    // ---- identity_check：新人物相似度的補問（2026-11-08）。預判（precheck）同一次呼叫會順便問；這裡補預判沒問到的
+    // （來源抓不到、沒附來源、之後才出現同名者）。只看近 60 分鐘新進的 pending candidacy／politician：後到的那筆進來時一定看得到先到的 ----
+    if (action === "identity_check") {
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), BACKFILL_MAX);
+      const since = new Date(Date.now() - BACKFILL_WINDOW_MINUTES * 60 * 1000).toISOString();
+      const { count, error: cErr } = await supabase.from("jev_decisions")
+        .select("id", { count: "exact", head: true }).eq("subject_type", "contribution").eq("question", NEW_PERSON_QUESTION).gte("asked_at", since);
+      if (cErr) throw new Error(`jev_decisions recent count: ${cErr.message}`);
+      const budget = Math.max(0, limit - (count ?? 0));
+      if (budget === 0) return json({ success: true, asked: 0, reason: `${BACKFILL_WINDOW_MINUTES} 分鐘內已判過 ${count} 筆，這輪不判` });
+      const fresh = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data: rows, error: qErr } = await supabase.from("contributions").select("id, contribution_type, payload")
+        .eq("status", "pending").in("contribution_type", ["candidacy", "politician"]).gte("created_at", fresh).order("created_at", { ascending: true }).limit(200);
+      if (qErr) throw new Error(`identity candidates: ${qErr.message}`);
+      let asked = 0, cost = 0, scanned = 0;
+      const tally: Record<string, number> = {};
+      const failures: Array<{ contribution_id: string; error: string }> = [];
+      const startedAt = Date.now();
+      for (const r of (rows ?? []) as Array<{ id: string; contribution_type: string; payload: Record<string, unknown> }>) {
+        if (asked >= budget || Date.now() - startedAt > 40_000 || failures.length >= 5) break;
+        scanned++;
+        try {
+          const idAsk = await newPersonAskFor(supabase, { contribution_id: r.id, contribution_type: r.contribution_type, payload: r.payload ?? {} });
+          if (!idAsk) continue;
+          const res = await askJev(apiKey, idAsk.ask.state, idAsk.ask.questions);
+          cost += res.usage.cost; asked++;
+          const v = await settleNewPerson(supabase, r.id, idAsk, { answer: res.answers[NEW_PERSON_QUESTION], model: res.model }, res.usage.cost);
+          const k = `${v.kind}${v.hold ? "-hold" : ""}`;
+          tally[k] = (tally[k] ?? 0) + 1;
+          if (v.hold) {
+            const { error: aErr } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: r.id });
+            if (aErr) throw new Error(`apply_consensus: ${aErr.message}`);
+          }
+        } catch (e) {
+          failures.push({ contribution_id: r.id, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return json({ success: true, asked, scanned, cost_usd: Number(cost.toFixed(6)), tally, failures, min_probability: MIN_PROBABILITY }, batchHttpStatus(asked, failures));
     }
 
     // ---- legacy：早期匯入、有來源、沒查核履歷的政見，系統先核（排程）----

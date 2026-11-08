@@ -76,10 +76,10 @@ Deno.test("b. activity_health：舊分支一字不動，只在最後加 system_v
   assert(added.endsWith("FROM system_vote_stall() s;"));
 });
 
-Deno.test("c. system-one：有失敗而且一筆都沒做成 → 500；部分成功、沒有失敗照舊 200；四個批次出口都套用", async () => {
+Deno.test("c. system-one：有失敗而且一筆都沒做成 → 500；部分成功、沒有失敗照舊 200；五個批次出口都套用（含 identity_check）", async () => {
   assertEquals(batchHttpStatus(0, [{ error: "x" }]), 500);
   assertEquals(batchHttpStatus(1, [{ error: "x" }]), 200, "部分成功");
   assertEquals(batchHttpStatus(0, []), 200, "沒有候選");
   const src = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
-  assertEquals(src.split("batchHttpStatus(asked, failures)").length - 1, 4);
+  assertEquals(src.split("batchHttpStatus(asked, failures)").length - 1, 5);
 });
