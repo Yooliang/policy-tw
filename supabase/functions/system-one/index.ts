@@ -50,6 +50,7 @@ import { loadElections } from "../_shared/elections.ts";
 import { protocolStatusFromCandidacy } from "../_shared/candidacy-status.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FOLLOWUP_QUESTION, submissionFollowupTask, submissionText, worthAsking, worthAskingSubmission, type FollowupChoice, type FollowupContribution, type FollowupVote, type SubmissionForFollowup } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
+import { CLARIFY_DEFAULT_LIMIT, CLARIFY_MAX_LIMIT, clarifyOne, closeDuplicates, type ClarifyDeps, type ClarifyOutcome, type FollowupTaskRow } from "../_shared/followup-clarify.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, groupRosterCandidates, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
@@ -148,9 +149,24 @@ async function askPolicy(supabase: Sb, apiKey: JevKeyLike, policyId: string) {
   return { model: res.model, answers: res.answers, cost_usd: res.usage.cost, ...wrote };
 }
 
+/** 釐清用的依賴：問 Jev、寫判決紀錄 */
+function clarifyDeps(supabase: Sb, apiKey: JevKeyLike): ClarifyDeps {
+  return { ask: (state, questions) => askJev(apiKey, state, questions), record: (rows) => insertRecords(supabase, rows), now: () => new Date().toISOString() };
+}
+
+/** 新開的跟進任務當場釐清一次（一次 Jev 約 $0.0002）。失敗只記錄，cron 的 followup_clarify 會補 */
+async function clarifyNewTask(supabase: Sb, apiKey: JevKeyLike | undefined, row: Record<string, unknown>) {
+  if (!apiKey) return;
+  try {
+    await clarifyOne(supabase, clarifyDeps(supabase, apiKey), row as unknown as FollowupTaskRow, false);
+  } catch (e) {
+    console.error("clarify new followup:", e instanceof Error ? e.message : String(e));
+  }
+}
+
 /** 提交說明的範圍外問題：記錄判定，≥門檻且同一目標沒有 open 任務就開（跟投票備註同一套） */
 async function settleSubmissionFollowup(
-  supabase: Sb, c: SubmissionForFollowup, ans: { choice?: string; probabilities?: Record<string, number>; confidence?: number | null } | undefined, model: string,
+  supabase: Sb, c: SubmissionForFollowup, ans: { choice?: string; probabilities?: Record<string, number>; confidence?: number | null } | undefined, model: string, apiKey?: JevKeyLike,
 ) {
   const choice = (ans?.choice ?? "none") as FollowupChoice;
   const prob = ans?.probabilities?.[choice] ?? 0;
@@ -163,7 +179,8 @@ async function settleSubmissionFollowup(
   const task = submissionFollowupTask(c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
   const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
   if (existing) return;
-  await createTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup" });
+  const created = await createTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup" });
+  await clarifyNewTask(supabase, apiKey, created);
 }
 
 type VoteBudgetRow = { id: string; contribution_type: string; payload: Record<string, unknown> | null; source_urls: string[] | null };
@@ -209,7 +226,7 @@ async function voteBudgetFor(supabase: Sb, apiKey: JevKeyLike, c: VoteBudgetRow,
     model: res.model, state: { ...state, budget }, cost_usd: Number(res.usage.cost.toFixed(8)), requester_ip_hash: requester,
   }]);
   if (askFollowup) {
-    try { await settleSubmissionFollowup(supabase, sub, res.answers.followup, res.model); } catch (e) { console.error("submission followup:", e instanceof Error ? e.message : String(e)); }
+    try { await settleSubmissionFollowup(supabase, sub, res.answers.followup, res.model, apiKey); } catch (e) { console.error("submission followup:", e instanceof Error ? e.message : String(e)); }
   }
   return { budget, cecConfirmed, cecNote, page, cost: Number(res.usage.cost.toFixed(8)) };
 }
@@ -235,7 +252,7 @@ async function cecConfirmedFor(contributionType: string, payload: Record<string,
 async function settleFollowup(
   supabase: Sb, v: FollowupVote, c: FollowupContribution,
   ans: { choice: string; probabilities?: Record<string, number>; confidence?: number } | undefined,
-  model: string, state: Record<string, unknown>, costUsd: number, dry: boolean,
+  model: string, state: Record<string, unknown>, costUsd: number, dry: boolean, apiKey?: JevKeyLike,
 ): Promise<Record<string, unknown> | null> {
   const choice = (ans?.choice ?? "none") as FollowupChoice;
   const prob = ans?.probabilities?.[choice] ?? 0;
@@ -255,6 +272,7 @@ async function settleFollowup(
     else {
       const t = await createTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup" });
       entry.task_id = t.id;
+      await clarifyNewTask(supabase, apiKey, t);
     }
   }
   return entry;
@@ -1071,7 +1089,7 @@ Deno.serve(async (req) => {
           const choice = String(ans?.choice ?? "none");
           const prob = ans?.probabilities?.[choice] ?? 0;
           if (choice !== "none") found.push({ id: c.id, type: c.contribution_type, choice, probability: Number(prob.toFixed(2)), text: submissionText(c).slice(0, 200) });
-          if (!dry) await settleSubmissionFollowup(supabase, c, ans, res.model);
+          if (!dry) await settleSubmissionFollowup(supabase, c, ans, res.model, apiKey);
         }));
         asked += results.filter((r) => r.status === "fulfilled").length;
         for (const r of results) if (r.status === "rejected") console.error("submission_followups:", r.reason);
@@ -1126,7 +1144,7 @@ Deno.serve(async (req) => {
         asked++; cost += res.usage.cost;
         const ans = res.answers.followup;
         seen.push({ vote_id: v.id, choice: ans?.choice, p: Number((ans?.probabilities?.[ans?.choice ?? ""] ?? 0).toFixed(2)) });
-        const entry = await settleFollowup(supabase, v, c, ans, res.model, state, Number(res.usage.cost.toFixed(8)), dry);
+        const entry = await settleFollowup(supabase, v, c, ans, res.model, state, Number(res.usage.cost.toFixed(8)), dry, apiKey);
         if (entry) { found.push(entry); if (entry.task_id) created++; }
       };
       let cursor = 0;
@@ -1137,6 +1155,49 @@ Deno.serve(async (req) => {
         if (failures.length >= 5) break;
       }
       return json({ success: true, dry, since, scanned: withNote.length, asked, remaining: list.length - cursor, created, cost_usd: Number(cost.toFixed(6)), found, ...(url.searchParams.get("all") === "1" ? { seen } : {}), failures });
+    }
+
+    // ---- followup_clarify：Jev 把模糊的跟進任務釐清成具體指令，或關掉（2026-11-08 維護者核准）----
+    // 流程與取捨見 _shared/followup-clarify.ts 檔頭與 migration 20261108010000。一張任務問一次 Jev（三題），蓋章 target.clarify 後不重問。
+    // 先關掉「同一筆貢獻同一類問題」的精確重複（不花 Jev），問完再做「同人物＋同動作」的重複檢查。
+    // limit 預設 30（上限 100）；dry=1 只回判定，不寫判決紀錄、不動任務；ids=逗號分隔的任務 id 指定幾張（dry 時也可試）。
+    if (action === "followup_clarify") {
+      const apiKey = jevKeyFromEnv((k) => Deno.env.get(k));
+      if (!apiKey) return json({ success: false, error: JEV_KEY_MISSING }, 500);
+      const dry = url.searchParams.get("dry") === "1";
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || CLARIFY_DEFAULT_LIMIT, 1), CLARIFY_MAX_LIMIT);
+      const onlyIds = (url.searchParams.get("ids") ?? "").split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 100);
+      const startedAt = Date.now();
+      const dupBefore = await closeDuplicates(supabase, dry); // 精確重複先關：省下不必要的 Jev
+      // query-bounds: ok — limit ≤ 100，有 order
+      let q = supabase.from("contribution_tasks").select("id, title, description, target, created_at")
+        .eq("status", "open").eq("created_by", "jev-followup");
+      q = onlyIds.length > 0 ? q.in("id", onlyIds) : q.is("target->clarify", null);
+      const { data: rows, error: tErr } = await q.order("created_at", { ascending: true }).limit(limit);
+      if (tErr) throw new Error(`followup_clarify tasks: ${tErr.message}`);
+      const list = (rows ?? []) as FollowupTaskRow[];
+      const deps = clarifyDeps(supabase, apiKey);
+      const outcomes: ClarifyOutcome[] = [];
+      const failures: Array<{ task_id: string; error: string }> = [];
+      let cursor = 0, cost = 0;
+      while (cursor < list.length && Date.now() - startedAt < 40_000) {
+        const chunk = list.slice(cursor, cursor + 6); cursor += chunk.length;
+        const results = await Promise.allSettled(chunk.map((t) => clarifyOne(supabase, deps, t, dry)));
+        results.forEach((r, i) => {
+          if (r.status === "fulfilled") { outcomes.push(r.value); cost += r.value.cost_usd ?? 0; }
+          else failures.push({ task_id: chunk[i].id, error: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+        });
+        if (failures.length >= 5) break;
+      }
+      // 這一輪改寫的任務也要做重複檢查（dry 時任務沒被改寫，計畫只涵蓋之前已改寫的）
+      const dupAfter = outcomes.some((o) => o.status === "rewritten") && !dry ? await closeDuplicates(supabase, dry) : { exact: 0, vs_existing: 0, samples: [] };
+      const tally: Record<string, number> = {};
+      for (const o of outcomes) tally[o.status + (o.reason ? `:${o.reason}` : "")] = (tally[o.status + (o.reason ? `:${o.reason}` : "")] ?? 0) + 1;
+      return json({
+        success: true, dry, asked: outcomes.filter((o) => o.cost_usd !== undefined).length, tally, remaining: Math.max(0, list.length - cursor),
+        duplicates: { exact: dupBefore.exact, vs_existing: dupBefore.vs_existing + dupAfter.vs_existing, samples: dupBefore.samples },
+        cost_usd: Number(cost.toFixed(6)), outcomes: dry ? outcomes : outcomes.filter((o) => o.status !== "kept").slice(0, 20), failures, elapsed_ms: Date.now() - startedAt,
+      });
     }
 
     // ---- evidence：代理投票附的 evidence_url，系統自己核（2026-09-23 維護者：代理不該把判斷外包給 Jev）----
@@ -1192,7 +1253,7 @@ Deno.serve(async (req) => {
         const fu = worthAsking(v) ? buildFollowupAsk(v, c as FollowupContribution) : null;
         const res = await askJev(apiKey, fu ? { ...state, ...fu.state } : state, fu ? { ...questions, ...fu.questions } : questions);
         cost += res.usage.cost; asked++;
-        if (fu) await settleFollowup(supabase, v, c as FollowupContribution, res.answers.followup, res.model, fu.state, 0, false);
+        if (fu) await settleFollowup(supabase, v, c as FollowupContribution, res.answers.followup, res.model, fu.state, 0, false, apiKey);
         const agg = aggregateFieldVerdicts(c.contribution_type, claim, res.answers);
         const strong = agg.probability >= MIN_PROBABILITY;
         // agree 要「支持」；disagree 要「核心欄位矛盾」（非核心欄對不上不算反證，跟 judge 的規則一樣）
