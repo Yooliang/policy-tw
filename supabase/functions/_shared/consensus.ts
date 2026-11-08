@@ -216,10 +216,11 @@ export function isRubberStampAgree(note: string | null | undefined, evidenceUrl:
 // 所以它明確有一票。票的形狀：supported 佔一席（門檻 −1，最少仍要 1 張代理票，Jev 不能單獨通過）；
 // not_supported 讓門檻 +1（只擋自動上線，**不觸發裁決**——同日晚上改：它判錯過一次就把 4 張人票推進裁決）；
 // 棄權則門檻照舊。SQL 版在 contribution_apply_consensus，thresholds.test 盯兩邊一致。
-// merge_politician 不拿系統票：Jev 的 same_person 看的是我們自己的欄位，跟代理看的是同一批資料，不構成獨立證據（2026-09-20）
+// merge_politician（2026-11-08 小良核准 Jev 做身份核對，部分更正 09-20「不拿系統票」）：只拿「擋」的一邊——Jev 與宣稱相反且 ≥0.95 才投 not_supported（目標 +1），
+// 同意宣稱一律棄權、不給 −1（Jev 讀的仍是我們自己的欄位，不是獨立證據）。做法見 _shared/jev-identity.ts、docs/decisions/2026-11-08-Jev身份檢查只擋不放.md
 // election_results（2026-10-06）：系統票由中選會名單逐位核對（SQL election_results_system_check），不是 Jev 讀網頁——見 CEC_CHECK_ONLY_TYPES
 // reassign_candidacy（2026-10-06）：中選會名冊唯一對上那一列的出生年核新舊兩人（SQL reassign_candidacy_system_check），照現有 ±1 規則
-export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "election_results", "reassign_candidacy"] as const;
+export const SYSTEM_VOTE_ELIGIBLE_TYPES = ["policy", "candidacy", "politician", "correction", "policy_progress", "election_results", "reassign_candidacy", "merge_politician"] as const;
 /**
  * 系統票只由中選會名單核對來投的型別（SQL 鏡像 system_vote_cec_only）：一般預判（system-one?action=precheck，
  * 抓提交者的網頁問 Jev）不撿這些，免得讀網頁的判定蓋掉名單核對（contribution_system_vote 取最新一張）。

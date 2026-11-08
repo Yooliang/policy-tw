@@ -438,6 +438,14 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           if (typeof sv.model === "string" && sv.model.startsWith(CAND_NO_DUP_MODEL_PREFIX)) {
             (verifyCurrent as Record<string, unknown>).cand_no_check = candNoCheckForVerify((sv.state ?? {}) as Record<string, unknown>, (verifyPayload as Record<string, unknown>).cand_no);
           }
+          // 身份檢查（2026-11-08）：疑似已是既有人物／等票中的另一筆交件。系統只多要一張人票，指認請照 identity_candidates 自己判斷
+          const idHold = ((sv.state ?? {}) as Record<string, unknown>).identity_hold as Record<string, unknown> | undefined;
+          if (idHold && typeof idHold === "object") {
+            (verifyCurrent as Record<string, unknown>).identity_check = {
+              conflict: `系統比對同場同單位的人物：${String(idHold.reason ?? "疑似重複")}。`,
+              question: "請自己查證：這一筆的人和上面說的是不是同一個人？是同一個人 → 這筆不該建新人物（agree 時請在 resolved_politician_id 指認既有那位）；確定是不同人 → agree 並用 resolved_politician_id=\"new\"，note 寫憑什麼分辨（號次、出生年、單位）。這一票不是系統反對：系統只是多要一張人票（目標 +1），不會退件。",
+            };
+          }
           (verifyCurrent as Record<string, unknown>).system_vote = {
             verdict: counts ? sv.choice : "abstain", raw: sv.choice, probability: Number(sv.probability), checked_at: sv.asked_at,
             // 每一欄的判定（confirmed／contradicted／absent＋機率）：告訴代理哪一欄沒被證明，去補那一欄的來源

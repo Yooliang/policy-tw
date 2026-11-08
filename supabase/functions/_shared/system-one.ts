@@ -70,7 +70,7 @@ export const MIN_PROBABILITY = 0.95;
 
 // news_item／news_relevance：新聞初篩（2026-09-29，system-one?action=news_screen）
 export const SUBJECT_TYPES = ["policy", "identity_review", "politician_pair", "contribution", "politician_election", "vote", "news_item", "politician", "citizen_question", "task"] as const;
-export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract", "vote_budget", "followup", "news_relevance", "bio_education", "bio_experience", "ask_screen", "task_difficulty", "task_time", "task_model", "task_hardness"] as const;
+export const QUESTIONS = ["is_policy", "duplicate_of", "election", "identity", "same_person", "source_support", "second_source", "extract", "vote_budget", "followup", "news_relevance", "bio_education", "bio_experience", "ask_screen", "task_difficulty", "task_time", "task_model", "task_hardness", "new_person"] as const;
 export type SubjectType = (typeof SUBJECT_TYPES)[number] | "vote";
 export type Question = (typeof QUESTIONS)[number];
 

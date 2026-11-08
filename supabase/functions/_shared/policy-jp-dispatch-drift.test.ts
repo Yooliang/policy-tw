@@ -291,7 +291,7 @@ const PAIRS: Pair[] = [
     note: "投票不看 IP 之後恆為 FALSE，日本站與正見逐字相同（原本拿掉的 lineage_handover／correction 退選／號次三段都隨規則消失）",
   },
   { name: "system_one_min_probability" },
-  { name: "system_vote_eligible" },
+  { name: "system_vote_eligible", before: "20261108020000_jev_identity_checks.sql", note: "取正見加 merge_politician（20261108010000，日本站沒有合併貢獻型別，暫不跟）之前的版本" },
   { name: "contribution_system_vote" },
   {
     name: "contribution_effective_agree",
