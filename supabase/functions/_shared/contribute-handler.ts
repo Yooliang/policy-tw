@@ -16,6 +16,7 @@ import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-
 import { checkNoOp, type NoOpCheck, normalizeCorrection } from "./correction.ts";
 import { withTaskPolitician } from "./task-politician.ts";
 import { groupPersonProblems } from "./group-person.ts";
+import { isMultiPersonTarget } from "./task-fulfilment.ts";
 import { CORRECTION_FIELDS } from "./contribution-schema.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
@@ -335,7 +336,7 @@ export async function handleContribute(
       // query-bounds: ok — 按 id 清單查（chunksOf），且只取 multi_person 的手動任務
       const lists = await Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, target").in("id", chunk).eq("target->>multi_person", "true").limit(100)));
       const targets = new Map<string, unknown>();
-      for (const r of lists) for (const t of ((r.data ?? []) as Array<{ id: string; target: unknown }>)) targets.set(t.id, t.target);
+      for (const r of lists) for (const t of ((r.data ?? []) as Array<{ id: string; target: unknown }>)) if (isMultiPersonTarget(t.target)) targets.set(t.id, t.target);
       if (targets.size > 0) {
         const problems = groupPersonProblems(validation.items, targets);
         if (problems.length > 0) {

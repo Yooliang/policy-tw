@@ -27,6 +27,7 @@ const nc = (extra: Record<string, unknown>) => ({ contribution_type: "no_change"
 Deno.test("G1 收件檢查：沒帶 person_key／不在名單／no_change 沒帶 politician_election_id 都擋；對的放行；非多人任務不管", () => {
   const targets = new Map<string, unknown>([[TASK, TARGET]]);
   assertEquals(groupPersonProblems([nc({})], targets)[0].code, "person_key_required");
+  assertEquals(groupPersonProblems([nc({ person_key: 5 })], targets)[0].code, "person_key_required", "不是字串視同沒帶");
   assertEquals(groupPersonProblems([nc({ person_key: "掛錯人:99999" })], targets)[0].code, "person_key_unknown");
   assertEquals(groupPersonProblems([nc({ person_key: "掛錯人:57044" })], targets)[0].code, "person_key_mismatch");
   assertEquals(groupPersonProblems([nc({ person_key: "掛錯人:57044", politician_election_id: 51400 })], targets)[0].code, "person_key_mismatch");
@@ -119,20 +120,17 @@ Deno.test("H3 落庫：非 confirmed、非掛錯人、對不到人 → 只記錄
   }
 });
 
-Deno.test("S1 schema：頂層 person_key 灌進 payload；不是字串被擋", () => {
-  const item = (extra: Record<string, unknown>, payloadExtra: Record<string, unknown> = {}) => ({
+Deno.test("S1 schema：頂層 person_key 灌進 payload", () => {
+  const ok = validateContributionRequest({
     agent_name: "tester",
     contributions: [{
-      contribution_type: "no_change", task_id: TASK,
-      payload: { task_id: TASK, outcome: "confirmed", finding: "比對過中選會名冊與歷屆資料，是同一人", checked_urls: ["https://db.cec.gov.tw/x"], ...payloadExtra },
-      source_urls: ["https://db.cec.gov.tw/x"], ...extra,
+      contribution_type: "no_change", task_id: TASK, person_key: "掛錯人:57044",
+      payload: { task_id: TASK, outcome: "confirmed", finding: "比對過中選會名冊與歷屆資料，是同一人", checked_urls: ["https://db.cec.gov.tw/x"] },
+      source_urls: ["https://db.cec.gov.tw/x"],
     }],
   });
-  const ok = validateContributionRequest(item({ person_key: "掛錯人:57044" }));
   assertEquals(ok.errors, []);
   assertEquals(ok.items[0].payload.person_key, "掛錯人:57044");
-  const bad = validateContributionRequest(item({}, { person_key: 5 }));
-  assert(bad.errors.some((e) => e.path.endsWith("payload.person_key")));
 });
 
 Deno.test("D1 文件：hint、skill-types、migration 都講 person_key", async () => {

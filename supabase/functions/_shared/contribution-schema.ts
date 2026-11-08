@@ -1038,7 +1038,6 @@ function validateContributionRequestInner(body: unknown, rosterCap: number): Val
     }
     // 多人任務的 person_key：頂層有、payload 沒有 → 灌進 payload（所有型別；是否必填由 contribute-handler 依任務判斷）
     if (isObj(raw.payload) && raw.payload.person_key === undefined && typeof raw.person_key === "string" && raw.person_key.trim()) raw.payload.person_key = raw.person_key.trim();
-    if (isObj(raw.payload) && raw.payload.person_key !== undefined && !isStr(raw.payload.person_key, 1, 200)) push("payload.person_key", "person_key 要是字串（照抄多人任務 target.people[].key）");
     resolveElectionKeys(raw.payload, push);
     validatePayload(raw.contribution_type, raw.payload, push);
     // 三要素的每個要素指的出處，要是這筆交件的 source_urls 之一：驗證者只會打開 source_urls，指到別處等於沒給人核對
