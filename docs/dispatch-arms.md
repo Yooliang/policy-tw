@@ -265,3 +265,10 @@ SELECT task_id, task_type, queue_at, boost_seconds, priority_seconds, dispatch_c
 - 停放：`20261028130000_park_village_policy_web_requests.sql`
 - `/next`：`supabase/functions/next/index.ts`、`supabase/functions/_shared/dispatch.ts`（`pickQueueHead`）
 - 規則與決策的來源：`CLAUDE.md`「派工佇列」條目、`docs/DECISIONS.md`、`docs/PIPELINE.md`（自動缺口任務一覽）、`docs/PLAN-tasks-as-rows.md`（歷史設計）
+
+## 7. 任務分類（Jev 估難度／時間／模型強度，2026-11-08，階段 1）
+
+- 派工列（不含 `verify:`）由 `system-one?action=task_estimate` 請 Jev 一次問四題：難度（簡單／中等／困難）、預估時間（≤10／10–30／30–60／>60 分）、需要的模型（便宜模型可／要強模型）、主要難點（OCR／跨來源比對身分／找新聞／只查一個官方頁／其他）。state 由 `task_type`、`target` 摘要（人數、項目數、前幾個名字）、`what_we_need` 組成（`_shared/task-estimate.ts`）。
+- 存：側表 `task_estimates`（每任務一列、現行答案）＋ `jev_decisions`（`subject_type=task`，題目 `task_difficulty`／`task_time`／`task_model`／`task_hardness`，成本照舊記在這）。重問條件由 `task_estimate_candidates()` 判：沒估過、`target_hash`（task_type＋target）變了、或題目版本 `TASK_ESTIMATE_VERSION` 不同。
+- 曝露：`/next` 的 `item.estimate`（沒估過是 `null`）。**階段 1 不影響派工順序、不排程（沒有 cron）。**
+- 守門 `task-estimate.test.ts`（Jev 與資料庫 stub）。
