@@ -15,6 +15,7 @@ import { PROTOCOL_URL } from "./protocol.ts";
 import { blockedSingleAnswerIndexes, IN_FLIGHT_STATUSES } from "./single-answer-guard.ts";
 import { checkNoOp, type NoOpCheck, normalizeCorrection } from "./correction.ts";
 import { withTaskPolitician } from "./task-politician.ts";
+import { groupPersonProblems } from "./group-person.ts";
 import { CORRECTION_FIELDS } from "./contribution-schema.ts";
 import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
@@ -324,6 +325,23 @@ export async function handleContribute(
     const qTasks = qTaskLists.flatMap((r) => (r.data ?? []) as unknown[]);
     if (qTasks.length > 0) {
       return { status: 400, body: { success: false, error: "question_needs_answer", message: "提問任務只收 question_answer：查不到、連結需登入打不開，也請用 question_answer 回一份說明（訪客看得到的是回答，不是 no_change）", task_ids: ((qTasks ?? []) as Array<{ id: string }>).map((t) => t.id) } };
+    }
+  }
+  // 多人任務（名冊分組任務）：每一筆都要帶 payload.person_key（照抄 target.people[].key），不從自由文字猜是哪一位（2026-11-09，小良核准）
+  {
+    const manualIds = [...new Set(validation.items.map((it) => (it.task_id ?? (it.payload as Record<string, unknown>)?.task_id) as unknown)
+      .filter((t): t is string => typeof t === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)))];
+    if (manualIds.length > 0) {
+      // query-bounds: ok — 按 id 清單查（chunksOf），且只取 multi_person 的手動任務
+      const lists = await Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, target").in("id", chunk).eq("target->>multi_person", "true").limit(100)));
+      const targets = new Map<string, unknown>();
+      for (const r of lists) for (const t of ((r.data ?? []) as Array<{ id: string; target: unknown }>)) targets.set(t.id, t.target);
+      if (targets.size > 0) {
+        const problems = groupPersonProblems(validation.items, targets);
+        if (problems.length > 0) {
+          return { status: 400, body: { success: false, error: problems[0].code, message: problems[0].message, errors: problems.map((p) => ({ index: p.index, path: p.path, message: p.message })) } };
+        }
+      }
     }
   }
   const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);

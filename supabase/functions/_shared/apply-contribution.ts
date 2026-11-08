@@ -25,6 +25,7 @@ import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
+import { personConfirmCheckTaskId, resolveGroupPerson } from "./group-person.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { findMergeCandidacyConflict } from "./merge-candidacy-conflict.ts";
@@ -2525,6 +2526,23 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   // 多人任務（target.multi_person，名冊分組任務）：一位的 no_change 不能關掉整張，也不進冷卻（冷卻會把同一張的其他人一起擋掉）；
   // 那一位留在清單裡，直到差異消失（roster_group_tasks_sweep）或維護者手動關。
   if (manualTask && isMultiPersonTarget(manualTask.target)) {
+    // 「確認沒問題」要逐人落地（2026-11-09）：掛錯人臂只在 task_checks 有 auto:candidacy_owner_mismatch:<pe_id>＋confirmed 時才不再派那一位，
+    // 沒寫的話對帳（roster_group_tasks_sweep）永遠不會把他移出清單，任務一直重派（d9042ce1／a2035078 派了 9 次）。
+    const person = resolveGroupPerson(manualTask.target, row.payload);
+    const checkTaskId = str(row.payload.outcome) === "confirmed" ? personConfirmCheckTaskId(person) : null;
+    if (checkTaskId) {
+      const check = {
+        task_id: checkTaskId,
+        agent_name: row.agent_name,
+        note: `多人任務 ${taskId}「${person?.key}」：${str(row.payload.finding) ?? str(row.payload.note) ?? row.note ?? ""}`.slice(0, 2000),
+        contribution_id: row.id,
+        outcome: "confirmed",
+      };
+      const { error: checkError } = await supabase.from("task_checks").insert(check);
+      throwIf(checkError, "task_checks insert (group confirmed)");
+      await recordInsert(supabase, ctxOf(row), "task_checks", checkTaskId, check);
+      return { status: "applied", message: `已記錄：「${person?.key}」確認掛對人，這一位下一輪對帳（每小時 :50）會從清單移除；這是多人任務，其他人照常可做`, task_id: taskId };
+    }
     return { status: "applied", message: "已記錄；這是多人任務，不因一位的 no_change 關閉也不進冷卻，其他人照常可做", task_id: taskId };
   }
   // 打不開不能關手動任務（2026-09-26）：「查不到來源」不是「這個任務做完了」，任務要留著換人再試，

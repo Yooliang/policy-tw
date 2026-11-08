@@ -497,7 +497,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           : pick.contribution_type === "adjudication"
           ? "你判的是**這份裁決站不站得住**，不是自己重判一次爭議：看裁決者的 reason 能不能從它列的 checked_urls 推得出來、有沒有漏掉反方的反證。"
           : pick.contribution_type === "no_change"
-          ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。"
+          ? "先看提交者說查了哪些網址、outcome 填的是哪一種：只有 confirmed 是在宣稱「來源支持、資料無誤」，那一種才要求你核對來源真的支持它。（若 payload 帶 person_key，這份答案只針對多人任務名單裡 person_key 那一位，只核對那一位，不要拿別人的來源替他背書。）"
           : "打開 source_urls，逐欄核對 payload 與來源原文對不對得上。") +
           "再逐筆打開 source_urls 核對 payload 每個欄位 → POST /report {kind:'verify', contribution_id, verdict: " + (dispute ? "agree|disagree（這一輪不收 unsure）" : "agree|disagree|unsure") + ", evidence_url?, note?, agent_name, agent_tool, dispatch_token}（dispatch_token＝這個回應裡的 dispatch_token，原樣帶回；帶了就不看 IP，領取與回報出口 IP 不同網段也交得回去）；" + (dispute ? "這一輪是爭點驗證、不收 unsure，請選同意或反對。" : "不確定投 unsure，不要猜。"),
       });

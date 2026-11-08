@@ -55,7 +55,7 @@ export const TYPE_SPEC_BLOCKS: ReadonlyArray<TypeSpecBlock> = [
    "candidate_status_stale"
   ],
   "contributions": [],
-  "text": "### 多人任務（`target.multi_person` 為真；2026 名冊分組任務）\n\n2026 名冊差異（缺人、查無此人、掛錯人、缺政黨／縣市／鄉鎮／號次）改成「一張任務 6～8 位」的手動任務（`target.origin`＝`roster_group`）：`target.people` 與說明逐位列出姓名、地點、`politician_election_id`、`politician_id`、官方網址與該位要交什麼。**每一位各交一筆貢獻，`task_id` 都填這張任務的 id，不要把好幾位塞進同一筆。** 交完一位任務不會結束，也不必一次做完——做幾位交幾位，沒做的留給下一個人；處理完的人系統每小時對帳後從清單移除，全部處理完任務自動關閉。某一位查不到或官方資料有誤，就對那一位交 `no_change`（附你看了哪裡）：這種任務的 `no_change` 不會關閉整張任務，也不會讓整張進冷卻。"
+  "text": "### 多人任務（`target.multi_person` 為真；2026 名冊分組任務）\n\n2026 名冊差異（缺人、查無此人、掛錯人、缺政黨／縣市／鄉鎮／號次）改成「一張任務 6～8 位」的手動任務（`target.origin`＝`roster_group`）：`target.people` 與說明逐位列出姓名、地點、`politician_election_id`、`politician_id`、官方網址與該位要交什麼。**每一位各交一筆貢獻，`task_id` 都填這張任務的 id，不要把好幾位塞進同一筆。** **每一筆都要帶 `payload.person_key`＝名單裡那一位的 `key`（照抄 `target.people[].key`，例如 `掛錯人:57044`，說明每位前面也列了）；沒帶或不在名單上，伺服器回 400（`person_key_required`／`person_key_unknown`）；`no_change` 另外要帶那一位的 `politician_election_id`（`person_key_mismatch`）。** 伺服器不從 `finding` 的文字猜是哪一位，驗證者也是照 `person_key` 核對那一位。 交完一位任務不會結束，也不必一次做完——做幾位交幾位，沒做的留給下一個人；處理完的人系統每小時對帳後從清單移除，全部處理完任務自動關閉。某一位查不到或官方資料有誤，就對那一位交 `no_change`（附你看了哪裡）：這種任務的 `no_change` 不會關閉整張任務，也不會讓整張進冷卻。「掛錯人」那一種，`no_change` 的 `outcome` 填 `confirmed`（是同一人、掛對了）並通過驗證後，那一位會從清單移除；其他做法的 `no_change` 只記錄，那一位要等差異真的消失才移除。"
  },
  {
   "tasks": [
