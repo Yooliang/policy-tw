@@ -7,8 +7,8 @@ import { onPaneShown } from '../composables/usePane'
 import Hero from '../components/Hero.vue'
 import { CalendarRange } from 'lucide-vue-next'
 import {
-  DAILY_GROUPS, STAGE_META, armGroup, armLabel, fromDay, makeScale, milestoneLabel, toDay,
-  type Passive, type RuleFlags, type Timeline, type TimelineArm, type TimelineElection, type TimelineWindow,
+  DAILY_GROUPS, STAGE_META, armGroup, armLabel, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
+  type OverrideRow, type Passive, type RuleFlags, type Timeline, type TimelineArm, type TimelineElection, type TimelineWindow,
 } from '../lib/dispatch-schedule'
 
 // 派工日程（2026-10-20，#703）：站務主控台「派工」頁的公開版。讀三支 anon 可執行的唯讀函式
@@ -22,6 +22,7 @@ const electionId = ref('')
 const timeline = ref<Timeline | null>(null)
 const passive = ref<Passive | null>(null)
 const ruleFlags = ref<Record<number, RuleFlags>>({})
+const overrides = ref<OverrideRow[]>([])
 const failed = ref(false)
 const loading = ref(false)
 const refreshedAt = ref<Date | null>(null)
@@ -60,6 +61,11 @@ async function load() {
       passive.value = (p ?? null) as Passive | null
     } catch { passive.value = null }
     try {
+      const { data: ov } = await withTimeoutAndRetry('active overrides', (signal) =>
+        supabasePublic.from('console_active_overrides').select('id,activity,election_id,election_type,force,open_from,open_until,reason,expires_at').order('created_at', { ascending: false }).limit(500).abortSignal(signal).throwOnError())
+      overrides.value = (ov ?? []) as OverrideRow[]
+    } catch { overrides.value = [] }
+    try {
       const { data: rules } = await withTimeoutAndRetry('activity rules flags', (signal) =>
         supabasePublic.from('activity_rules').select('id,except_election_types,requires_traffic').is('priority', null).order('id').limit(500).abortSignal(signal).throwOnError())
       const out: Record<number, RuleFlags> = {}
@@ -88,7 +94,7 @@ const fmt = (n: number) => n.toLocaleString('zh-TW')
 const hms = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 
 // 顏色一律 inline hex（不靠 Tailwind 動態 class）
-const C = { open: '#22c55e', openSoft: '#bbf7d0', closed: '#cbd5e1', today: '#ef4444', axis: '#e2e8f0', stale: '#b91c1c' }
+const C = { warm: '#f59e0b', open: '#22c55e', openSoft: '#bbf7d0', closed: '#cbd5e1', today: '#ef4444', axis: '#e2e8f0', stale: '#b91c1c' }
 
 // ---- 時間軸 ----
 const tl = computed(() => timeline.value)
@@ -156,6 +162,24 @@ function bars(a: TimelineArm) {
   })
 }
 const spansOf = (a: TimelineArm) => a.windows.map(spanText).join('、')
+const ovsOf = (a: TimelineArm, type?: string | null) => (tl.value ? armOverrides(overrides.value, a.arm, tl.value.election.id, type) : [])
+/** 任務名稱的滑過提示：開放期間（原本是名稱下方的小字）＋覆寫 */
+const nameTitle = (a: TimelineArm) => [spansOf(a), ...ovsOf(a).map(overrideText)].filter(Boolean).join('\n')
+const ringOf = (a: TimelineArm) => (a.overridden || ovsOf(a).length ? `0 0 0 2px ${C.warm}` : 'none')
+/** 長條上畫覆寫：一律開／關從今天畫到到期日（沒有到期日畫到最右）；限定期間畫它的起訖（同主控台 overrideBars） */
+function overrideBars(a: TimelineArm, type?: string | null) {
+  const t = tl.value
+  if (!t) return []
+  const today = toDay(t.today)
+  return ovsOf(a, type).map((o) => {
+    const from = o.force === 'window' && o.open_from ? toDay(o.open_from) : today
+    const until = o.force === 'window' ? (o.open_until ? toDay(o.open_until) : null) : (o.expires_at ? toDay(o.expires_at) : null)
+    const end = o.expires_at && until != null ? Math.min(until, toDay(o.expires_at)) : until
+    const left = x(from)
+    const right = end == null ? 100 : x(end)
+    return { key: `ov${o.id}`, left, width: Math.max(right - left, 0.8), closed: o.force === 'closed', title: `${armLabel(a.arm)}\n${overrideText(o)}` }
+  })
+}
 
 /** 展開某支任務看各職位：規則的起訖在後端照整場最早／最晚的里程碑算，這裡反推偏移再套到該職位自己的里程碑 */
 const expanded = ref(new Set<string>())
@@ -275,6 +299,7 @@ const FUNNEL: [string, string][] = [
             <span class="inline-flex items-center gap-1.5"><i class="inline-block h-3 w-6 rounded-sm" :style="{ background: C.openSoft }"></i>不分時期，全程開放</span>
             <span class="inline-flex items-center gap-1.5"><i class="inline-block h-3 w-6 rounded-sm border border-dashed border-slate-400"></i>這場選舉還沒有規則要的日期</span>
             <span class="inline-flex items-center gap-1.5"><i class="inline-block h-3 w-6 rounded-sm border border-dotted" :style="{ borderColor: C.open }"></i>頁面有流量才派</span>
+            <span class="inline-flex items-center gap-1.5"><i class="inline-block h-3 w-6 rounded-sm" :style="{ boxShadow: `0 0 0 2px ${C.warm}`, background: C.closed }"></i>被手動覆寫（暫停或強制開放），滑過看理由</span>
             <span class="inline-flex items-center gap-1.5"><i class="inline-block h-3.5 w-0.5" :style="{ background: C.today }"></i>今天（{{ tl.today }}）</span>
           </div>
           <p class="mt-2 text-xs text-slate-500">上方直線是這場選舉的各個日期（登記、公告、投票等）。把滑鼠移到長條上，看開始與結束日期、適用職位與件數；點任務名稱左邊的三角形，展開看各職位。橫軸的日期間距有壓縮，不是等比例。</p>
@@ -312,11 +337,11 @@ const FUNNEL: [string, string][] = [
                 <template v-for="a in g.arms" :key="a.arm">
                   <div class="flex items-center border-b border-slate-100">
                     <div class="w-56 shrink-0 px-4 py-2">
-                      <button v-if="a.by_type?.length" type="button" class="-ml-1 rounded px-1 text-left hover:bg-slate-100" :aria-expanded="expanded.has(a.arm)" :title="expanded.has(a.arm) ? '收起各職位' : '展開看各職位的件數與日程'" @click="toggle(a.arm)">
+                      <button v-if="a.by_type?.length" type="button" class="-ml-1 rounded px-1 text-left hover:bg-slate-100" :aria-expanded="expanded.has(a.arm)" :title="[expanded.has(a.arm) ? '收起各職位' : '展開看各職位的件數與日程', nameTitle(a)].filter(Boolean).join('\n')" @click="toggle(a.arm)">
                         <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span>{{ armLabel(a.arm) }}
                       </button>
-                      <span v-else>{{ armLabel(a.arm) }}</span>
-                      <div class="text-[11px] text-slate-400 tabular-nums">{{ spansOf(a) }}</div>
+                      <span v-else :title="nameTitle(a)">{{ armLabel(a.arm) }}</span>
+                      <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-1.5 inline-block rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                     </div>
                     <div class="relative h-7 flex-1">
                       <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
@@ -325,10 +350,12 @@ const FUNNEL: [string, string][] = [
                         :style="{
                           left: `${b.left}%`, width: `${b.width}%`,
                           background: b.missing || b.traffic ? 'transparent' : a.is_open ? (b.always ? C.openSoft : C.open) : C.closed,
-                          border: b.missing ? '1px dashed #94a3b8' : b.traffic ? `1px dotted ${C.open}` : 'none',
+                          boxShadow: ringOf(a),
+                        border: b.missing ? '1px dashed #94a3b8' : b.traffic ? `1px dotted ${C.open}` : 'none',
                         }"
                         :title="b.title"
                       ></div>
+                      <div v-for="o in overrideBars(a)" :key="o.key" class="absolute top-1.5 h-4 rounded-sm" :style="{ left: `${o.left}%`, width: `${o.width}%`, boxShadow: `0 0 0 2px ${C.warm}`, background: o.closed ? 'rgba(239,68,68,0.5)' : C.open }" :title="o.title"></div>
                     </div>
                     <div class="w-20 shrink-0 px-3 py-2 text-right text-xs tabular-nums" :style="{ color: a.stale ? C.stale : '#64748b', fontWeight: a.stale ? 700 : 400 }" :title="countTitle(a)">{{ fmt(a.election_count ?? 0) }}</div>
                   </div>
@@ -383,8 +410,8 @@ const FUNNEL: [string, string][] = [
                 </div>
                 <div v-for="a in g.arms" :key="a.arm" class="flex items-center border-b border-slate-100">
                   <div class="w-56 shrink-0 px-4 py-2">
-                    {{ armLabel(a.arm) }}
-                    <div class="text-[11px] text-slate-400 tabular-nums">{{ spansOf(a) }}</div>
+                    <span :title="nameTitle(a)">{{ armLabel(a.arm) }}</span>
+                    <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-1.5 inline-block rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                   </div>
                   <div class="relative h-7 flex-1">
                     <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
@@ -393,10 +420,12 @@ const FUNNEL: [string, string][] = [
                       :style="{
                         left: `${b.left}%`, width: `${b.width}%`,
                         background: b.missing || b.traffic ? 'transparent' : a.is_open ? (b.always ? C.openSoft : C.open) : C.closed,
-                        border: b.missing ? '1px dashed #94a3b8' : b.traffic ? `1px dotted ${C.open}` : 'none',
+                        boxShadow: ringOf(a),
+                      border: b.missing ? '1px dashed #94a3b8' : b.traffic ? `1px dotted ${C.open}` : 'none',
                       }"
                       :title="b.title"
                     ></div>
+                    <div v-for="o in overrideBars(a)" :key="o.key" class="absolute top-1.5 h-4 rounded-sm" :style="{ left: `${o.left}%`, width: `${o.width}%`, boxShadow: `0 0 0 2px ${C.warm}`, background: o.closed ? 'rgba(239,68,68,0.5)' : C.open }" :title="o.title"></div>
                   </div>
                   <div class="w-20 shrink-0 px-3 py-2 text-right text-xs tabular-nums text-slate-500" title="這類任務的全站件數">{{ fmt(dailyCount(a)) }}</div>
                 </div>
