@@ -27,6 +27,7 @@ import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { personCheckTaskId, resolveGroupPerson } from "./group-person.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
+import { applyPayloadCorrection, diffText, STRONG_REVIEWER } from "./strong-lane.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { findMergeCandidacyConflict } from "./merge-candidacy-conflict.ts";
 import { councilDistrictKey, isCouncilAboriginalDistrict, isRepElectionType, legislatorDistrictKey, officialCouncilDistricts, REP_ELECTION_TYPES, regionFitFor, repDistrictKey } from "./electoral-district.ts";
@@ -2623,6 +2624,11 @@ const ORIGINAL_COLUMNS = "id, contribution_type, payload, source_urls, note, age
 /**
  * adjudication（3 票同向後）：uphold → 把原貢獻落庫並標 applied；reject → 原貢獻標 rejected 記理由。
  * 兩種都關閉該貢獻的裁決任務、把同一筆的其他未定案裁決退掉。原貢獻已非 disputed 就只收尾。
+ *
+ * 強模型單一裁決（2026-11-09，協議 1.126.0）：裁決那筆貢獻的 reviewed_by＝strong-adjudication（contribute-handler 在驗過
+ * STRONG_LANE_KEY 與強模型任務之後才寫，代理的 payload 寫不進去）＝這一份就是定案，不等 3 票；原貢獻 pending／disputed／apply_failed 都收；
+ * verdict 多一個 uphold_with_correction：先把 payload.corrected_fields 套進原貢獻 payload 再落庫，每欄前後值記進 review_notes。
+ * 記錄：裁決者的 agent_name 與自報模型（agent_tool，僅供稽核）寫進原貢獻的 review_notes。
  */
 async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
@@ -2633,8 +2639,15 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
   throwIf(error, "original contribution lookup");
   if (!original) return { status: "failed", message: `找不到原貢獻 ${targetId}` };
 
+  const { data: self, error: selfErr } = await supabase.from("contributions").select("reviewed_by, agent_tool").eq("id", row.id).maybeSingle();
+  throwIf(selfErr, "adjudication row lookup");
+  const strong = (self as { reviewed_by?: string | null } | null)?.reviewed_by === STRONG_REVIEWER;
+  const tool = row.agent_tool ?? (self as { agent_tool?: string | null } | null)?.agent_tool ?? null;
+  const openStatuses = strong ? ["pending", "disputed", "apply_failed"] : ["disputed"];
+  if (verdict === "uphold_with_correction" && !strong) return { status: "failed", message: "uphold_with_correction 只有強模型待辦能用" };
+
   const now = new Date().toISOString();
-  const stamp = `[adjudication ${verdict}] ${str(p.reason) ?? ""}（裁決者 ${row.agent_name ?? "?"}，${row.id}）`;
+  const stamp = `[${strong ? "強模型裁決（單一裁決定案）" : "adjudication"} ${verdict}] ${str(p.reason) ?? ""}（裁決者 ${row.agent_name ?? "?"}${strong ? `，自報模型 ${tool ?? "?"}` : ""}，${row.id}）`;
   const finish = async () => {
     const closed = await closeAdjudicationTasks(supabase, targetId);
     const { error: e } = await supabase.from("contributions")
@@ -2644,15 +2657,15 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
     return closed;
   };
 
-  if (original.status !== "disputed") {
+  if (!openStatuses.includes(original.status)) {
     const closed = await finish();
     return { status: "applied", message: `原貢獻已是 ${original.status}，裁決不再需要（關閉 ${closed} 個任務）` };
   }
 
   if (verdict === "reject") {
     const { error: e } = await supabase.from("contributions").update({
-      status: "rejected", review_notes: [original.review_notes, stamp].filter(Boolean).join("；"), reviewed_by: "adjudication", reviewed_at: now,
-    }).eq("id", targetId).eq("status", "disputed");
+      status: "rejected", review_notes: [original.review_notes, stamp].filter(Boolean).join("；"), reviewed_by: strong ? STRONG_REVIEWER : "adjudication", reviewed_at: now,
+    }).eq("id", targetId).in("status", openStatuses);
     throwIf(e, "original reject");
     await finish();
     // 修正任務刻意不關：reject 代表「原貢獻有誤」，那筆「照反對意見修好它」的任務
@@ -2660,19 +2673,30 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
     return { status: "applied", message: `裁決 reject 定案：原貢獻 ${targetId} 已退件；修正任務保持 open，等人依反對意見重提` };
   }
 
-  // uphold：把原貢獻落庫（身份爭議由裁決者指認）
-  const outcome = await applyContribution(supabase, { ...(original as ContributionRow), resolved_politician_id: str(p.resolved_politician_id) });
+  // uphold／uphold_with_correction：把原貢獻落庫（身份爭議由裁決者指認）
+  let toApply = original as ContributionRow;
+  let correctionNote = "";
+  let correctedPayload: Obj | null = null;
+  if (verdict === "uphold_with_correction") {
+    const fields = (p.corrected_fields && typeof p.corrected_fields === "object" ? p.corrected_fields : {}) as Obj;
+    const { payload: next, diff } = applyPayloadCorrection((original.payload ?? {}) as Obj, fields);
+    correctedPayload = next;
+    correctionNote = `；已更正 ${diff.length} 欄：${diffText(diff) || "（與原內容相同）"}`;
+    toApply = { ...(original as ContributionRow), payload: next };
+  }
+  const outcome = await applyContribution(supabase, { ...toApply, resolved_politician_id: str(p.resolved_politician_id) });
   if (outcome.status === "failed") throw new Error(`原貢獻落庫失敗：${outcome.message}`);
   if (outcome.status === "disputed") {
     const { error: e } = await supabase.from("contributions").update({ review_notes: [original.review_notes, `${stamp}；但仍無法落庫：${outcome.message}`].filter(Boolean).join("；") }).eq("id", targetId);
     throwIf(e, "original note");
-    return { status: "applied", message: `裁決 uphold 通過，但原貢獻仍無法落庫（${outcome.message}）；任務保持 open，下一位裁決者請帶 resolved_politician_id` };
+    return { status: "applied", message: `裁決 ${verdict} 通過，但原貢獻仍無法落庫（${outcome.message}）；任務保持 open，下一位裁決者請帶 resolved_politician_id` };
   }
   const { error: e } = await supabase.from("contributions").update({
     status: "applied", applied_at: now, applied_politician_id: outcome.politician_id ?? null, applied_policy_id: outcome.policy_id ?? null,
-    review_notes: [original.review_notes, `${stamp}；${outcome.message}`].filter(Boolean).join("；"), reviewed_by: "adjudication", reviewed_at: now,
+    ...(correctedPayload ? { payload: correctedPayload } : {}),
+    review_notes: [original.review_notes, `${stamp}${correctionNote}；${outcome.message}`].filter(Boolean).join("；"), reviewed_by: strong ? STRONG_REVIEWER : "adjudication", reviewed_at: now,
     last_error: null, next_retry_at: null,
-  }).eq("id", targetId).eq("status", "disputed");
+  }).eq("id", targetId).in("status", openStatuses);
   throwIf(e, "original mark applied");
   await finish();
   // uphold 代表原貢獻其實是對的，那筆修正任務就沒有東西要修了
@@ -2681,7 +2705,7 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
     status: "applied",
     politician_id: outcome.politician_id,
     policy_id: outcome.policy_id,
-    message: `裁決 uphold 定案：原貢獻已落庫（${outcome.message}）${fixClosed > 0 ? `；一併關閉 ${fixClosed} 筆修正任務` : ""}`,
+    message: `裁決 ${verdict} 定案：原貢獻已落庫（${outcome.message}）${correctionNote}${fixClosed > 0 ? `；一併關閉 ${fixClosed} 筆修正任務` : ""}`,
   };
 }
 

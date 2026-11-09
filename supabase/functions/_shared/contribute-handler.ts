@@ -33,6 +33,7 @@ import { inOfficePolicyFutureElectionProblem } from "./policy-term-guard.ts";
 import { electionLabel, loadElections, loadRegistrationDeadlines, registrationDeadlineOf } from "./elections.ts";
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
+import { applyPayloadCorrection, correctionProblems, STRONG_REVIEWER } from "./strong-lane.ts";
 import { agentToolNoticeOnce } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
@@ -234,6 +235,8 @@ export async function handleContribute(
   legacyIpHash?: string,
   // 派工憑證的簽章鑰匙（#484）；沒給就驗不了憑證，帶憑證的請求回 403
   dispatchSecret?: string,
+  // 強模型待辦（1.126.0）：呼叫端（report／contribute 入口）驗過標頭 x-strong-lane-key ＝ STRONG_LANE_KEY 才傳 true。自報的模型名不參與授權
+  strongKeyVerified = false,
 ): Promise<HandlerResult> {
   // 派工憑證（#484）：帶了就驗憑證（簽章、期限、task 相符），無效回 403 invalid_dispatch_token，不默默當作沒帶。
   // 這個入口本來就沒有派工綁定檢查（交件不要求「這個任務是派給你的」），所以憑證在這裡不開啟任何新權限；
@@ -846,6 +849,46 @@ export async function handleContribute(
     }
   }
 
+  // 強模型單一裁決（1.126.0）：持 STRONG_LANE_KEY、對象有開著的強模型裁決任務、裁決者不是原貢獻提交者 → 這一份直接落庫定案（不進投票）。
+  // 沒帶鑰匙的 adjudication 照舊走 3 票；uphold_with_correction 沒帶鑰匙一律 400（這個裁決沒有 3 票版）。
+  for (let i = 0; i < validation.items.length; i++) {
+    const item = validation.items[i];
+    if (item.contribution_type !== "adjudication" || blocked.has(i) || mergedByIndex.has(i) || existingByHash.has(hashes[i]) || bypassNotes.has(i)) continue;
+    const ap = item.payload as Record<string, unknown>;
+    if (!strongKeyVerified) {
+      if (ap.verdict === "uphold_with_correction") {
+        return { status: 403, body: { success: false, error: "strong_lane_key_required", message: "uphold_with_correction 只有強模型待辦能用（要持有 STRONG_LANE_KEY，由維護者的 Opus 工作階段使用）；一般裁決只有 uphold／reject、3 票同向定案。這不算被拒" } };
+      }
+      continue;
+    }
+    const origId = typeof ap.contribution_id === "string" ? ap.contribution_id : "";
+    const { data: strongTask, error: stErr } = await supabase.from("contribution_tasks").select("id")
+      .eq("task_type", "adjudicate").eq("status", "open").eq("target->>requires_tier", "strong").eq("target->>contribution_id", origId).limit(1);
+    if (stErr) throw new Error(`strong task lookup: ${stErr.message}`);
+    if (!((strongTask ?? []) as unknown[]).length) {
+      return { status: 409, body: { success: false, error: "no_strong_task", message: `原貢獻 ${origId} 沒有開著的強模型裁決任務（已被裁決、或不在強模型待辦）；用 GET /next?lane=strong&list=1 看清單。這不算被拒` } };
+    }
+    const { data: orig, error: oErr } = await supabase.from("contributions")
+      .select("id, contribution_type, payload, source_urls, agent_name").eq("id", origId).maybeSingle();
+    if (oErr) throw new Error(`strong original lookup: ${oErr.message}`);
+    if (!orig) return { status: 400, body: { success: false, error: "target_not_found", message: `找不到原貢獻 ${origId}` } };
+    if (orig.agent_name && String(orig.agent_name).toLowerCase() === validation.contributor.agent_name.toLowerCase()) {
+      return { status: 403, body: { success: false, error: "self_adjudication", message: "不能裁決自己交的件；請換另一個代號認領別的任務。這不算被拒" } };
+    }
+    if (ap.verdict === "uphold_with_correction") {
+      const cp = correctionProblems(ap.corrected_fields);
+      if (cp) return { status: 400, body: { success: false, error: "invalid_correction", message: cp } };
+      // 更正後的 payload 要能過同一套交件驗證（欄位名、型別、必填），不然落庫才炸
+      const { payload: merged } = applyPayloadCorrection((orig.payload ?? {}) as Record<string, unknown>, ap.corrected_fields as Record<string, unknown>);
+      const recheck = validateContributionRequest({ agent_name: validation.contributor.agent_name, contribution_type: orig.contribution_type, payload: merged, source_urls: orig.source_urls ?? [] }, elections);
+      if (!recheck.ok) {
+        return { status: 400, body: { success: false, error: "correction_invalid", message: "更正後的 payload 通不過交件驗證，請修正 corrected_fields（這不算被拒）", errors: recheck.errors.map((e) => ({ path: e.path, message: e.message })) } };
+      }
+    }
+    console.log(JSON.stringify({ event: "strong_lane_verdict", agent_name: validation.contributor.agent_name, agent_tool: validation.contributor.agent_tool ?? null, contribution_id: origId, verdict: ap.verdict }));
+    bypassNotes.set(i, { note: `[強模型裁決] 單一裁決即定案：${validation.contributor.agent_name}（自報模型 ${validation.contributor.agent_tool ?? "?"}，持 STRONG_LANE_KEY）裁決 ${String(ap.verdict)}`, reviewedBy: STRONG_REVIEWER });
+  }
+
   // 同一批裡內容完全相同（雜湊相同）的只寫第一筆：不然 150 筆複製貼上會寫進 149 筆重複的貢獻，回應的編號還會被 Map 覆寫成同一個（#455 審查）
   const seenInBatch = new Set<string>();
   const dupInBatch = new Set<number>();
@@ -899,6 +942,8 @@ export async function handleContribute(
       actor_id: actor.actor_id,
       payload_hash: hashes[i],
       via,
+      // 強模型單一裁決：落庫（applyAdjudication）靠 reviewed_by 認得「這份就是定案」，所以要在 apply 之前就寫
+      ...(reviewedBy === STRONG_REVIEWER ? { reviewed_by: reviewedBy } : {}),
     };
     const { data: insertedRow, error: insertError } = await supabase.from("contributions").insert(insertRow).select("id").maybeSingle();
     if (insertError) throw new Error(`contributions insert (direct bypass): ${insertError.message}`);

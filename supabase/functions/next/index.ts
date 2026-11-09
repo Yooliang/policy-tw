@@ -15,6 +15,7 @@ import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFr
 import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts";
 import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
+import { serveStrongLane } from "../_shared/strong-lane-claim.ts";
 import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
 import { buildLookup, isBallotNumbersTask, fetchTaskContext, fetchVerifyContext, shapeTaskCurrent, shapeVerifyCurrent, type VerifyContextData } from "../_shared/task-context.ts";
 import { fetchVerificationSources, sourcesForTask, verifySourceQuery } from "../_shared/verification-sources.ts";
@@ -368,6 +369,12 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         return {};
       }
     };
+
+    // 強模型待辦（1.126.0）：GET /next?lane=strong[&list=1][&task_id=…]，標頭 x-strong-lane-key ＝ STRONG_LANE_KEY 才通；
+    // 一般派工絕對不會派這種任務（contribution_queue_tasks 排除）。邏輯在 _shared/strong-lane-claim.ts。
+    if (url.searchParams.get("lane") === "strong") {
+      return await serveStrongLane({ supabase, req, url, agentName, agentTool, ipHash, base, tokenFor, json, retryAfterMin: RETRY_AFTER_MIN });
+    }
 
     // 驗證只試一次認領（2026-10-14）：隊頭是驗證但全被同網段的並行請求認領走了，就改派任務；最後的「任務給不出來退回驗證」不再重試
     let verifyTried = false;

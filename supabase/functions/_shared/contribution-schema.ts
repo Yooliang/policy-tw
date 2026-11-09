@@ -3,6 +3,7 @@
  * public/skill.md 描述的就是這份 schema，改欄位要兩處一起改。
  */
 
+import { correctionProblems } from "./strong-lane.ts";
 import { inOfficePolicyFutureElectionProblem } from "./policy-term-guard.ts";
 import { checkSourceSet, isHttpUrl } from "./source-priority.ts";
 import { isValidAgentName, isValidAgentTool, type Verdict } from "./consensus.ts";
@@ -74,7 +75,8 @@ export const isRegionalStatAdminCode = (v: unknown): v is string => typeof v ===
 /** citizen_questions.answer／question_answers.answer 的長度界線（跟 migration 20260912000014 的 CHECK 一致） */
 export const QUESTION_ANSWER_MIN = 30;
 export const QUESTION_ANSWER_MAX = 4000;
-export const ADJUDICATION_VERDICTS = ["uphold", "reject"] as const;
+/** uphold_with_correction 只有強模型待辦（持 STRONG_LANE_KEY）能交，見 strong-lane.ts */
+export const ADJUDICATION_VERDICTS = ["uphold", "reject", "uphold_with_correction"] as const;
 /**
  * no_change 在主張哪一件事（2026-09-21）。原本一種型別承載四種主張，其中兩種是
  * 「我沒能確認」被記成「我確認了」——legacy_audit 還會照著蓋「已核對來源」的章，
@@ -816,7 +818,11 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
     case "adjudication": {
       // 裁決一筆 disputed 的貢獻：uphold＝原貢獻正確、reject＝原貢獻有誤；3 票同向定案
       if (!isUuid(p.contribution_id)) push("payload.contribution_id", "contribution_id 必填（被裁決的貢獻 uuid，在任務的 target.contribution_id）");
-      if (!oneOf(ADJUDICATION_VERDICTS, p.verdict)) push("payload.verdict", "verdict 要是 uphold（原貢獻正確）或 reject（原貢獻有誤）");
+      if (!oneOf(ADJUDICATION_VERDICTS, p.verdict)) push("payload.verdict", "verdict 要是 uphold（原貢獻正確）或 reject（原貢獻有誤）；強模型待辦另有 uphold_with_correction（附 corrected_fields）");
+      if (p.verdict === "uphold_with_correction") {
+        const cp = correctionProblems(p.corrected_fields);
+        if (cp) push("payload.corrected_fields", cp);
+      } else if (p.corrected_fields !== undefined) push("payload.corrected_fields", "只有 verdict=uphold_with_correction 才能帶 corrected_fields");
       if (!isStr(p.reason, 20, 2000)) push("payload.reason", "reason 必填（≥20 字：看了哪些來源、為什麼站這一邊）");
       if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
       if (p.resolved_politician_id !== undefined && !isIdentityPick(p.resolved_politician_id)) push("payload.resolved_politician_id", "要是 uuid 或 \"new\"");

@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
+import { strongKeyFromRequest } from "../_shared/strong-lane.ts";
 import { handleContribute, ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 import { dispatchTokenSecretFrom } from "../_shared/dispatch-token.ts";
 
@@ -35,7 +36,7 @@ Deno.serve(async (req) => {
     } catch {
       return json({ success: false, error: "body 不是合法 JSON" }, 400);
     }
-    const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "contribute", undefined, undefined, await legacyIpHashOf(req, ipSalt), dispatchTokenSecretFrom((k) => Deno.env.get(k)));
+    const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "contribute", undefined, undefined, await legacyIpHashOf(req, ipSalt), dispatchTokenSecretFrom((k) => Deno.env.get(k)), strongKeyFromRequest(req, (k) => Deno.env.get(k)));
     return json(result.body, result.status);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

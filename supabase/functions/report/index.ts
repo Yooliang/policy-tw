@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { PROTOCOL_URL } from "../_shared/protocol.ts";
+import { strongKeyFromRequest } from "../_shared/strong-lane.ts";
 import { handleContribute, ipHashOf, legacyIpHashOf } from "../_shared/contribute-handler.ts";
 import { handleVerify } from "../_shared/verify-handler.ts";
 import { handleWithdraw } from "../_shared/withdraw-handler.ts";
@@ -45,7 +46,7 @@ Deno.serve(async (req) => {
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "contribute") {
-      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report", undefined, undefined, legacyIpHash, dispatchTokenSecretFrom((k) => Deno.env.get(k)));
+      const result = await handleContribute(supabase, supabaseUrl, body, ipHash, undefined, "report", undefined, undefined, legacyIpHash, dispatchTokenSecretFrom((k) => Deno.env.get(k)), strongKeyFromRequest(req, (k) => Deno.env.get(k)));
       return json({ kind, ...result.body }, result.status);
     }
     if (kind === "withdraw") {

@@ -117,7 +117,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 | `question`（`task_type='question'`） | 公民提問：訪客的提問；`manual_task_is_visitor` 視同 visitor | 現無列 | 同 visitor | 一題最多收 3 份答案（`question_answer_cap()`）；同鍵時支持度高的先 |
 | `suggested` | AI 提議：代理交 `task_suggestion` 或系統（`system-one?action=followups`，每小時）從投票備註產生的跟進；多數 `task_type='other'` | 2,273／533 | 0 | 佇列中最大的手動來源；出生來源屬推測（見下） |
 | `manual` | 維護者建的 | 168／462 | `manual_front_seconds`（5 年） | 例：`news_sweep`、`candidate_status_stale` |
-| `auto_dispute` | 裁決：貢獻被爭議後自動開（`adjudicate`、`avatar_choice` 二選一） | 7／233 | `manual_front_seconds`（5 年） | `created_by='auto-overvoted'` 的不插隊（0） |
+| `auto_dispute` | 裁決：貢獻被爭議後自動開（`adjudicate`、`avatar_choice` 二選一） | 7／233 | `manual_front_seconds`（5 年） | `created_by='auto-overvoted'` 的不插隊（0） | **`target.requires_tier='strong'`（強模型待辦，`20261109230000`）的不進一般派工**：`contribution_queue_tasks` 排除，只能持 `STRONG_LANE_KEY` 用 `/next?lane=strong` 認領，見 `docs/decisions/2026-11-09-難題只給持鑰匙的強模型認領單一裁決即定案.md` |
 
 （`manual_front_seconds(task_id)` 定義：`auto-overvoted` 0；visitor 10 年；`manual`／`auto_dispute` 5 年；其餘 0。）
 
