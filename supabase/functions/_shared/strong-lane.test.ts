@@ -64,6 +64,16 @@ Deno.test("B uphold_with_correction：要帶 corrected_fields；其他 verdict �
 });
 
 // ---------------- C. SQL ----------------
+/** migration 對線上定義做的機械式替換，在檔案裡的最後一版文字上重做一遍（跟 DO 區塊的 v_old／v_new 同一組字串） */
+async function patchedQueueFn(): Promise<string> {
+  const sql = await readMig(MIG);
+  const m = /v_old CONSTANT TEXT := \$s\$(.*?)\$s\$;\s*v_new CONSTANT TEXT := \$s\$(.*?)\$s\$;/s.exec(sql);
+  assert(m, "找不到 DO 區塊的 v_old／v_new");
+  const fn = await latestFn("contribution_queue_tasks");
+  assertEquals(fn.split(m[1]).length - 1, 1, "現行定義裡 v_old 要剛好一次");
+  return fn.replace(m[1], m[2]);
+}
+
 async function queueDb(): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`
@@ -75,7 +85,7 @@ async function queueDb(): Promise<PGlite> {
     CREATE TABLE question_answers (question_id uuid, agent_name text);
     CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);`);
   for (const fn of ["task_target_key", "uuid_or_null", "question_answer_cap"]) await db.exec(await latestFn(fn));
-  await db.exec(await latestFn("contribution_queue_tasks"));
+  await db.exec(await patchedQueueFn());
   return db;
 }
 
@@ -90,9 +100,40 @@ Deno.test("C1 一般派工排除強模型任務（不分誰來領、有無 ip）
   }
 });
 
-Deno.test("C2 現行 contribution_queue_tasks 有排除條件、並保留其他 >>> 合格 標記", async () => {
-  const fn = await latestFn("contribution_queue_tasks");
-  assertStringIncludes(fn, "d.target->>'requires_tier' IS DISTINCT FROM 'strong'");
+Deno.test("C1b migration 的 DO 區塊真的對線上定義動手：替換後排除；重跑不再動（冪等）", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
+      queue_at timestamptz NOT NULL, blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false, opened_at timestamptz NOT NULL DEFAULT now(), last_dispatched_at timestamptz);
+    CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_id text, contribution_type text, status text, payload jsonb NOT NULL DEFAULT '{}'::jsonb, contributor_ip_hash text, agent_name text);
+    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+    CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
+    CREATE TABLE question_answers (question_id uuid, agent_name text);
+    CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);`);
+  for (const fn of ["task_target_key", "uuid_or_null", "question_answer_cap"]) await db.exec(await latestFn(fn));
+  await db.exec(await latestFn("contribution_queue_tasks"));
+  const sql = await readMig(MIG);
+  const i = sql.indexOf("DO $do$");
+  const j = sql.indexOf("$do$;", i + 5) + 5;
+  const block = sql.slice(i, j);
+  await db.exec(block);
+  await db.exec(block); // 重跑
+  await db.exec(`INSERT INTO task_dispatches (task_id, task_type, target, queue_at) VALUES
+    ('00000000-0000-4000-8000-000000000b01', 'adjudicate', '{"contribution_id":"00000000-0000-4000-8000-0000000000c1","requires_tier":"strong"}', now()),
+    ('00000000-0000-4000-8000-000000000b02', 'adjudicate', '{"contribution_id":"00000000-0000-4000-8000-0000000000c2"}', now())`);
+  const r = await db.query<{ task_id: string }>(`SELECT task_id FROM contribution_queue_tasks(NULL, NULL, 100, '', NULL, NULL)`);
+  assertEquals(r.rows.map((x) => x.task_id), ["00000000-0000-4000-8000-000000000b02"]);
+  const def = (await db.query<{ d: string }>(`SELECT pg_get_functiondef('contribution_queue_tasks(text,text,integer,text,text,text)'::regprocedure) AS d`)).rows[0].d;
+  assertEquals(def.split("requires_tier").length - 1, 2, "註解一次＋條件一次，重跑沒有重複替換");
+});
+
+Deno.test("C2 migration 的替換：剛好一處、冪等保險、保留其他 >>> 合格 標記；之後的 migration 不得拿舊文字重建這支函式", async () => {
+  const sql = await readMig(MIG);
+  assertStringIncludes(sql, "pg_get_functiondef('contribution_queue_tasks(text,text,integer,text,text,text)'::REGPROCEDURE)");
+  assertStringIncludes(sql, "strpos(v_def, 'requires_tier') > 0 THEN RETURN");
+  assertStringIncludes(sql, "IS DISTINCT FROM 'strong'");
+  assert(!sql.includes("CREATE OR REPLACE FUNCTION contribution_queue_tasks("), "不重建：線上定義已被 20261107030000 改過");
+  const fn = await patchedQueueFn();
   for (const m of ["合格：認領中", "合格：同機器交過", "合格：裁決任務", "合格：任務停放"]) assertStringIncludes(fn, `>>> ${m}`);
 });
 
