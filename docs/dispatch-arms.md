@@ -41,7 +41,7 @@
 
 ### 1.3 `/next` 怎麼挑（`supabase/functions/next/index.ts`、`supabase/functions/_shared/dispatch.ts`）
 
-1. 驗證池 `contribution_verify_pool`（排除自己交的、已投過、分數已達目標；在 SQL 的 LIMIT 之前）出一個最前的候選。
+1. 驗證池 `contribution_verify_pool`（排除自己交的、已投過、分數已達目標；在 SQL 的 LIMIT 之前）出一個最前的候選。2026-11-09 起（協議 1.124.0）多一條「沒人在做的先派」：被別的代理握著（30 分鐘內派到、未投票）的人數 >= 還缺票數（目標 − 分數）的票先不出（`p_skip_held`），零人握著的排前面；沒有別的可派時 `/next` 用 `p_skip_held=false` 再取一次，維持原行為。任務列本來就跳過別人認領中的。
 2. 任務佇列 `contribution_queue_tasks` 一次取一個窗口（`QUEUE_WINDOW`），程式再過濾一輪（`filterLeasedTasks` 等，應與 SQL 重複；若全被剔光會 `console.error`，代表有過濾器沒搬進 SQL）。
 3. 任務窗口依 id 分手動（uuid，`isManualTaskId`）與自動（`auto:`）各取最前一個。
 4. `pickQueueHead`：三個候選（verify／manual／auto）比 `queue_at`，**最早的先**；同時刻 `verify` ＞ `manual` ＞ `auto`。時間用 `Date.parse` 比，不用字串比。

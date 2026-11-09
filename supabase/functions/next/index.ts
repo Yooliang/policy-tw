@@ -8,7 +8,7 @@ import { fetchMyVotedRows } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
-import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
+import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, orderVerifyByHold, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { requiredAgree } from "../_shared/consensus.ts";
 import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
@@ -136,7 +136,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 原本先取最早 30 筆再在這裡排，機器投完那 30 筆就整池是死的，第 31 筆之後永遠看不到（2026-09-19）。
     // 投票人是誰（維護者 2026-11-04：投票不看 IP）：DiTrust 帳號按 actor_id、匿名按代號；網段雜湊只留著記錄與額度。
     const poolActorId = actor.level === "ditrust" ? actor.actor_id : null;
-    const pendingQuery = supabase.rpc("contribution_verify_pool", { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, p_agent_name: agentName, ...(poolActorId ? { p_actor_id: poolActorId } : {}) });
+    // 沒人在做的先派（2026-11-09）：p_skip_held=TRUE 把「握著的人數 >= 還缺票數」的票先擋掉；整池都擋光時下面 refillHeld 用 FALSE 再要一次（不餓死）
+    const poolArgs = { p_ip_hash: ipHash, p_region: region, p_limit: CANDIDATE_POOL, p_agent_name: agentName, ...(poolActorId ? { p_actor_id: poolActorId } : {}) };
+    const pendingQuery = supabase.rpc("contribution_verify_pool", { ...poolArgs, p_skip_held: true });
 
     // 驗證／任務的比例以前按 agent_name 當天累計——那是全站唯一還在用代號當身份的地方，
     // 而代號是自報的：換一個新代號就把欠的驗證洗掉，老實沿用舊代號的反而動不了
@@ -212,31 +214,52 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       status: string; created_at: string;
       /** 單一佇列的排序鍵（contribution_verify_pool 回；沒有列時＝created_at） */
       queue_at?: string | null;
+      /** 別的代理握著的人數（contribution_verify_pool 回；2026-11-09） */
+      held_count?: number | null;
     };
     // deno-lint-ignore no-explicit-any
     const me = { agent_name: agentName, ip_hash: ipHash, voted_ids: myVotedOriginalIds };
-    const rawCandidates = filterVerifyCandidates((pendingRes.data ?? []) as PendingRow[], me);
-    // 裁決的驗證不派給原貢獻的提交者。
-    // 2026-09-21 起這一段主要在 SQL（contribution_verify_pool，LIMIT 之前）：放在這裡篩，
-    // 會讓窗口先被不合格的裁決塞滿再全部丟掉，/next 就看不到任何候選（#119 的回歸）。
-    // 這裡留著當第二道，它多比對一個 agent_name。
-    const adjOriginalIds = rawCandidates.filter((c) => c.contribution_type === "adjudication")
-      .map((c) => (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null))
-      .filter((v): v is string => typeof v === "string");
-    let candidates = rawCandidates;
-    if (adjOriginalIds.length > 0) {
-      const { data: originals, error: oErr } = await supabase.from("contributions").select("id, agent_name, contributor_ip_hash").in("id", adjOriginalIds);
-      if (oErr) throw new Error(`originals lookup: ${oErr.message}`);
-      candidates = excludeOwnAdjudications(rawCandidates, (originals ?? []) as Array<{ id: string; agent_name: string; contributor_ip_hash: string }>, me, myVotedOriginalIds);
-    }
-    // 派工當下再比一次空操作（2026-09-23 W-Policy：前一筆更正剛套用、10 分鐘一次的掃地機還沒跑到，這筆就派出去了）。
-    // 只看排頭、最多退 3 筆：退池是寫入，不在這裡掃整個窗口；重比失敗就照常派，不擋派工。
-    for (let i = 0; i < 3 && candidates.length > 0 && candidates[0]!.contribution_type === "correction"; i++) {
-      let retired = false;
-      try { retired = await retireIfNoOp(supabase, candidates[0]!.id); } catch (e) { console.error("retireIfNoOp:", e instanceof Error ? e.message : String(e)); }
-      if (!retired) break;
-      candidates = candidates.slice(1);
-    }
+    // 候選整理（驗證池的原始列 → 可派清單）：排自己的、裁決不給原提交者、零人握著的排前面、退空操作的更正。
+    // 抽成函式是因為「整池都被握滿」時要用同一套再整理一次（refillHeld）。
+    const prepareCandidates = async (rows: PendingRow[]): Promise<PendingRow[]> => {
+      const rawCandidates = filterVerifyCandidates(rows, me);
+      // 裁決的驗證不派給原貢獻的提交者。
+      // 2026-09-21 起這一段主要在 SQL（contribution_verify_pool，LIMIT 之前）：放在這裡篩，
+      // 會讓窗口先被不合格的裁決塞滿再全部丟掉，/next 就看不到任何候選（#119 的回歸）。
+      // 這裡留著當第二道，它多比對一個 agent_name。
+      const adjOriginalIds = rawCandidates.filter((c) => c.contribution_type === "adjudication")
+        .map((c) => (c.payload && typeof c.payload === "object" ? (c.payload as Record<string, unknown>).contribution_id : null))
+        .filter((v): v is string => typeof v === "string");
+      let out = rawCandidates;
+      if (adjOriginalIds.length > 0) {
+        const { data: originals, error: oErr } = await supabase.from("contributions").select("id, agent_name, contributor_ip_hash").in("id", adjOriginalIds);
+        if (oErr) throw new Error(`originals lookup: ${oErr.message}`);
+        out = excludeOwnAdjudications(rawCandidates, (originals ?? []) as Array<{ id: string; agent_name: string; contributor_ip_hash: string }>, me, myVotedOriginalIds);
+      }
+      // 沒人在做的先派（2026-11-09）：零人握著的排在只有部分人握著的前面（各組內維持 queue_at 順序）
+      out = orderVerifyByHold(out);
+      // 派工當下再比一次空操作（2026-09-23 W-Policy：前一筆更正剛套用、10 分鐘一次的掃地機還沒跑到，這筆就派出去了）。
+      // 只看排頭、最多退 3 筆：退池是寫入，不在這裡掃整個窗口；重比失敗就照常派，不擋派工。
+      for (let i = 0; i < 3 && out.length > 0 && out[0]!.contribution_type === "correction"; i++) {
+        let retired = false;
+        try { retired = await retireIfNoOp(supabase, out[0]!.id); } catch (e) { console.error("retireIfNoOp:", e instanceof Error ? e.message : String(e)); }
+        if (!retired) break;
+        out = out.slice(1);
+      }
+      return out;
+    };
+    let candidates = await prepareCandidates((pendingRes.data ?? []) as PendingRow[]);
+    // 退路（不餓死）：沒有「沒握滿」的驗證票、任務也給不出來時，用 p_skip_held=FALSE 再要一次＝維持原行為，把握滿的也派出去
+    let heldRefilled = false;
+    const refillHeld = async (): Promise<boolean> => {
+      if (heldRefilled || verifyFull) return false;
+      heldRefilled = true;
+      const { data, error } = await supabase.rpc("contribution_verify_pool", { ...poolArgs, p_skip_held: false });
+      if (error) { console.error("verify pool refill:", error.message); return false; }
+      candidates = await prepareCandidates((data ?? []) as PendingRow[]);
+      verifyTried = false;
+      return candidates.length > 0;
+    };
     const totalPending = candidates.length;
     // deno-lint-ignore no-explicit-any
     // 佇列上各型別的任務總數（contribution_queue_task_counts，含手動任務；不是 30 筆切片）
@@ -566,6 +589,10 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       const servedVerify = await serveVerify();
       if (servedVerify) return servedVerify;
       // 驗證票沒派成（沒有合格的、驗證額度也用完、或被同網段並行認領走）就是沒事可做，不派任務
+      if (await refillHeld()) {
+        const servedHeld = await serveVerify();
+        if (servedHeld) return servedHeld;
+      }
       const retryMin = verifyFull ? Math.max(RETRY_AFTER_MIN, minutesUntilReset()) : RETRY_AFTER_MIN;
       const resetClock = taipeiClock(quotaWindowEnd());
       const reason = verifyFull
@@ -624,6 +651,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     if (!t) {
       // 任務給不出來就退回驗證（2026-09-20：配額算完是 task、task 空手，以前直接回 none 叫代理等 30 分鐘，
       // 驗證池明明有一千多筆——W-Policy 的代理整晚拿到 none）
+      if (candidates.length === 0) await refillHeld();
       if (candidates.length > 0) {
         const served = await serveVerify();
         if (served) return served;
