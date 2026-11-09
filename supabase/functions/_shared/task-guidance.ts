@@ -401,7 +401,7 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   merge_politician:
     "payload：same_person（true／false）、keep_id、remove_id、reason（≥20 字）。",
   adjudication:
-    "payload：contribution_id、verdict（uphold／reject）、reason（≥20 字）、checked_urls[]；身份爭議可帶 resolved_politician_id。",
+    "payload：contribution_id、verdict（uphold／reject；強模型待辦另有 uphold_with_correction，附 corrected_fields）、reason（≥20 字）、checked_urls[]；身份爭議可帶 resolved_politician_id。",
   question_answer:
     "payload：question_id、answer。",
   roster_check:

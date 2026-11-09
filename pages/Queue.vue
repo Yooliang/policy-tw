@@ -32,6 +32,19 @@ const failed = ref(false)
 const loading = ref(false)
 const refreshedAt = ref<Date | null>(null)
 const groupBy = ref<'type' | 'source'>('type')
+// 強模型待辦（2026-11-09）：難題不進一般派工，只由持鑰匙的維護者 Opus 工作階段認領；清單讀 strong_lane_list()（anon 可執行、唯讀）
+type StrongItem = { task_id: string; created_at: string; reason?: string; contribution_id?: string; contribution_type?: string; status?: string; subject?: string; votes?: number; claimed_by?: string | null; claimed_tool?: string | null; claimed_at?: string | null; verdicts?: { verdict?: string; agent?: string; agent_tool?: string | null; reason?: string }[] }
+const tab = ref<'queue' | 'strong'>('queue')
+const strong = ref<{ total: number; items: StrongItem[] } | null>(null)
+const strongIds = computed(() => new Set((strong.value?.items ?? []).map((i) => i.contribution_id).filter(Boolean) as string[]))
+async function loadStrong() {
+  try {
+    const { data } = await withTimeoutAndRetry('strong lane list', (signal) => supabasePublic.rpc('strong_lane_list').abortSignal(signal).throwOnError())
+    strong.value = (data ?? null) as typeof strong.value
+  } catch (e) {
+    console.info('[強模型待辦] 讀取失敗', e)
+  }
+}
 
 usePageHead({ title: '派工隊列', description: '接下來 60 筆會被領走的順序', noindex: true })
 
@@ -44,6 +57,7 @@ async function load() {
       supabasePublic.rpc('console_queue_state').abortSignal(signal).throwOnError())
     state.value = (data ?? null) as State | null
     refreshedAt.value = new Date()
+    void loadStrong()
   } catch (e) {
     console.info('[佇列] 讀取失敗', e)
     failed.value = true
@@ -263,10 +277,42 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       </button>
       </div>
     </div>
+    <div class="flex gap-2 text-xs">
+      <button type="button" class="rounded border border-slate-300 px-3 py-1" :class="tab === 'queue' ? 'bg-slate-100 font-black' : ''" @click="tab = 'queue'">派工隊列</button>
+      <button type="button" class="rounded border border-slate-300 px-3 py-1" :class="tab === 'strong' ? 'bg-slate-100 font-black' : ''" @click="tab = 'strong'">強模型待辦<span class="ml-1 tabular-nums text-slate-500">{{ strong ? fmt(strong.total) : '' }}</span></button>
+    </div>
+    <section v-if="tab === 'strong'" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
+      <h2 class="font-black text-navy-900 mb-3">強模型待辦 <span class="ml-2 text-xs font-normal text-slate-500">一般代理投不出共識的難題；不進一般派工，由維護者的強模型工作階段認領，單一裁決定案</span></h2>
+      <p v-if="!strong" class="text-slate-400">載入中…</p>
+      <p v-else-if="!strong.items.length" class="text-slate-400">目前沒有</p>
+      <div v-else class="overflow-x-auto">
+        <table class="w-full min-w-[44rem]">
+          <thead class="text-left text-xs text-slate-500"><tr>
+            <th class="py-1 pr-2 font-normal">類型</th><th class="py-1 pr-2 font-normal">對象</th><th class="py-1 pr-2 text-right font-normal">票數</th><th class="py-1 pr-2 font-normal">原因</th><th class="py-1 pr-2 font-normal">認領</th><th class="py-1 font-normal">各票意見</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="it in strong.items" :key="it.task_id" class="border-t border-slate-100 align-top">
+              <td class="py-1 pr-2 whitespace-nowrap">{{ it.contribution_type ? overTypeLabel(it.contribution_type) : '—' }}</td>
+              <td class="py-1 pr-2 max-w-[14rem] truncate" :title="it.subject">{{ it.subject || '—' }}</td>
+              <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(it.votes ?? 0) }}</td>
+              <td class="py-1 pr-2 max-w-[12rem] truncate" :title="it.reason">{{ it.reason || '—' }}</td>
+              <td class="py-1 pr-2 whitespace-nowrap text-xs">{{ it.claimed_by ? `${it.claimed_by}（${it.claimed_tool || '?'}）${it.claimed_at ? when(it.claimed_at) : ''}` : '—' }}</td>
+              <td class="py-1">
+                <div v-for="(v, j) in it.verdicts ?? []" :key="j" class="flex items-center gap-1.5 py-0.5 text-xs">
+                  <span class="rounded px-1.5 py-0.5 whitespace-nowrap" :style="chipStyle(v.verdict ?? '')">{{ VERDICT[v.verdict ?? ''] ?? v.verdict ?? '—' }}</span>
+                  <span class="whitespace-nowrap text-slate-400">{{ v.agent || '—' }}</span>
+                  <span v-if="v.reason" class="max-w-[18rem] truncate" :title="v.reason">{{ v.reason }}</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
     <p v-if="failed" class="text-red-600">佇列讀不到，<button class="underline" @click="load">重試</button>。</p>
     <p v-else-if="state === null" class="text-slate-400">載入中…</p>
 
-    <template v-if="state && !failed">
+    <template v-if="state && !failed && tab === 'queue'">
       <section class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         <div v-for="c in cards" :key="c.label" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
           <div class="text-xs text-slate-500">{{ c.label }}</div>
@@ -368,7 +414,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
                 <td class="py-1 pr-2 whitespace-nowrap">{{ o.contribution_type ? overTypeLabel(o.contribution_type) : '—' }}</td>
                 <td class="py-1 pr-2 max-w-[14rem] truncate" :title="o.subject">{{ o.subject || '—' }}</td>
                 <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(o.votes ?? 0) }}</td>
-                <td class="py-1 pr-2"><span class="rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="chipStyle(isStopped(o) ? 'stopped' : 'flagged')">{{ isStopped(o) ? '已停派・轉裁決' : '已標出' }}</span></td>
+                <td class="py-1 pr-2"><span class="rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="chipStyle(isStopped(o) ? 'stopped' : 'flagged')">{{ isStopped(o) ? '已停派・轉裁決' : '已標出' }}</span><span v-if="o.contribution_id && strongIds.has(o.contribution_id)" class="ml-1 rounded px-1.5 py-0.5 text-xs whitespace-nowrap" :style="{ background: '#ede9fe', color: '#6d28d9' }">強模型</span></td>
                 <td class="py-1">
                   <div v-if="!o.verdicts?.length" class="text-slate-400">—</div>
                   <div v-for="(v, j) in o.verdicts ?? []" :key="j" class="flex items-center gap-1.5 py-0.5 text-xs">
