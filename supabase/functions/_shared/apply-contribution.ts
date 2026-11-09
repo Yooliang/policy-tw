@@ -2380,12 +2380,12 @@ export const NOT_FOUND_DIRECT_REVIEWER = "system:not-found-direct";
  * 跟 SQL 設定表 task_check_ladder_settings（20261109150000）的初值同一份，confirmed-direct.test.ts 盯著；改數字走 migration 的 UPDATE、這裡要一起改。
  */
 export const CHECK_LADDER_DAYS: Readonly<Record<"not_found" | "confirmed", readonly number[]>> = { not_found: [5, 10, 20], confirmed: [5, 10] };
-/** 不套階梯的任務型別（週期性重查、等官方公告；SQL task_check_ladder_exempt 同一份）：照原本的冷卻（not_found 2 天、進度類第二次起 30 天、confirmed 14 天），不自動結案 */
+/** 不套階梯的任務型別（週期性重查、等官方公告；SQL task_check_ladder_exempt 同一份；號次缺口 cand_no* 2026-11-09 起走階梯，20261109190000）：照原本的冷卻（not_found 2 天、進度類第二次起 30 天、confirmed 14 天），不自動結案 */
 export const LADDER_EXEMPT_TASK_TYPES = ["progress_stale", "deadline_due", "not_running_recheck", "roster_check", "candidate_status_stale", "election_result_missing"] as const;
 export function isLadderExempt(taskId: string): boolean {
   if (!taskId.startsWith("auto:")) return false;
   const parts = taskId.split(":");
-  return (LADDER_EXEMPT_TASK_TYPES as readonly string[]).includes(parts[1]) || (parts[1] === "candidacy_source_missing" && (parts[2] ?? "").startsWith("cand_no"));
+  return (LADDER_EXEMPT_TASK_TYPES as readonly string[]).includes(parts[1]);
 }
 /** 回給代理的一句階梯說明 */
 export function ladderMessage(outcome: "not_found" | "confirmed"): string {

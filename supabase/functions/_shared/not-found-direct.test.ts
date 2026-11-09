@@ -59,13 +59,15 @@ async function days(taskId: string, outcome: string, priorNotFound = 0): Promise
 
 Deno.test("A1 not_found：例外型別（號次缺口等）仍 2 天；其餘任務走查核階梯第 1 次（confirmed-direct.test.ts 細測階梯）；unreachable 2 天不變", async () => {
   const P = "auto:candidacy_source_missing";
-  for (const id of [`${P}:cand_no:abc`, `${P}:cand_no_recheck:abc`, "auto:roster_check:abc", "auto:not_running_recheck:1"]) {
+  for (const id of ["auto:roster_check:abc", "auto:not_running_recheck:1"]) {
     assertEquals(await days(id, "not_found"), NOT_FOUND_COOLDOWN_DAYS, id);
   }
-  for (const id of [`${P}:other:abc`, `auto:profile_gap:x:abc`, `auto:policy_missing:abc`, "0c9c1a5e-1111-4222-8333-444444444444"]) {
+  // 號次缺口 2026-11-09（20261109190000）起走階梯，不再是例外
+  for (const id of [`${P}:cand_no:abc`, `${P}:cand_no_recheck:abc`, `${P}:other:abc`, `auto:profile_gap:x:abc`, `auto:policy_missing:abc`, "0c9c1a5e-1111-4222-8333-444444444444"]) {
     assertEquals(await days(id, "not_found"), CHECK_LADDER_DAYS.not_found[0], id);
   }
-  assertEquals(await days(`${P}:cand_no:abc`, "confirmed"), TASK_CHECK_COOLDOWN_DAYS);
+  assertEquals(await days(`${P}:cand_no:abc`, "confirmed"), CHECK_LADDER_DAYS.confirmed[0]);
+  assertEquals(await days("auto:roster_check:abc", "confirmed"), TASK_CHECK_COOLDOWN_DAYS);
   assertEquals(await days(`auto:profile_gap:x:abc`, "confirmed"), CHECK_LADDER_DAYS.confirmed[0]);
   assertEquals(await days(`${P}:cand_no:abc`, "unreachable"), 2);
 });
@@ -148,10 +150,10 @@ Deno.test("C1 contribute-handler：not_found 的 no_change 直接落庫，review
   assert(src.indexOf("const precheckSkip") < src.indexOf("const confirmed = (validation.items[i]"));
 });
 
-Deno.test("C2 cand_no_front_pull 最新版：冷卻中的缺口不拉（cool_until 與 task_checks 兩道）", async () => {
+Deno.test("C2 cand_no_front_pull 最新版：冷卻中的缺口不拉（cool_until 與查核階梯 task_in_check_cooldown 兩道，20261109190000）", async () => {
   const fn = await latestFn("cand_no_front_pull(");
   assert(fn.includes("d.cool_until IS NULL OR d.cool_until <= now()"));
-  assert(/task_checks tc[\s\S]*tc\.outcome = 'not_found'[\s\S]*task_not_found_cooldown_days\(\)/.test(fn));
+  assert(fn.includes("AND NOT task_in_check_cooldown(d.task_id)"));
 });
 
 Deno.test("C3 舊資料清理區塊：只動 pending 的 no_change not_found，寫 task_checks 與共用 reviewed_by，收掉驗證票", async () => {
