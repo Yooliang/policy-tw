@@ -22,7 +22,7 @@ import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
 import { fetchSource, hasUsableText } from "./system-one.ts";
-import { applyContribution, contributionStatusFor, followMergedInto, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
+import { applyContribution, contributionStatusFor, followMergedInto, CHECK_LADDER_DAYS, CONFIRMED_DIRECT_REVIEWER, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
 import { identityNameProblems, NAME_MISMATCH_HINT, renameCollision, renameCollisionMessage, renameOf } from "./person-identity-guard.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
@@ -797,7 +797,7 @@ export async function handleContribute(
     .map((item, i) => ({ item, i }))
     .filter(({ item, i }) =>
       item.contribution_type === "no_change" && !blocked.has(i) && !mergedByIndex.has(i) && !existingByHash.has(hashes[i]) && !bypassNotes.has(i) &&
-      (item.payload as Record<string, unknown>).outcome === "not_found"
+      ((item.payload as Record<string, unknown>).outcome === "not_found" || (item.payload as Record<string, unknown>).outcome === "confirmed")
     )
     .map(({ i }) => i);
   const precheckSkip = new Set<number>([...blocked, ...mergedByIndex.keys(), ...bypassNotes.keys(), ...validation.items.map((_, i) => i).filter((i) => existingByHash.has(hashes[i]))]);
@@ -820,16 +820,22 @@ export async function handleContribute(
   }
 
   // 任何任務的 no_change＋not_found（「查無」）不進投票：直接落庫為 applied，任務冷卻 NOT_FOUND_COOLDOWN_DAYS 天後再派（2026-11-07，小良）。
-  // 投票原本是為了擋「錯報查無就鎖 14 天」；冷卻只剩 2 天，錯報的代價很小，票是浪費。confirmed 的 no_change 不變，仍要票。
+  // 投票原本是為了擋「錯報查無就鎖 14 天」；冷卻只剩 2 天，錯報的代價很小，票是浪費。confirmed 的 no_change 2026-11-09 起也直接落庫（reviewed_by＝system:confirmed-direct，冷卻 7 天）。
   {
     const seenNotFound = new Set<string>();
     for (const i of notFoundDirect) {
       if (seenNotFound.has(hashes[i])) continue; // 同批完全相同的只直接落庫第一筆，其餘走下面既有的同批去重
       seenNotFound.add(hashes[i]);
-      bypassNotes.set(i, {
-        note: `[系統] 已記錄「查無」，不需要別人驗證；這個任務 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派，之後會重新派出（公告還沒出來時別回查無，略過就好）`,
-        reviewedBy: NOT_FOUND_DIRECT_REVIEWER,
-      });
+      const confirmed = (validation.items[i].payload as Record<string, unknown>).outcome === "confirmed";
+      bypassNotes.set(i, confirmed
+        ? {
+          note: `[系統] 已記錄「確認無誤」，不需要別人驗證；這個任務 ${CHECK_LADDER_DAYS.confirmed[0]} 天起進階梯冷卻（累計查核超過 ${CHECK_LADDER_DAYS.confirmed.length} 次就結案不再派）`,
+          reviewedBy: CONFIRMED_DIRECT_REVIEWER,
+        }
+        : {
+          note: `[系統] 已記錄「查無」，不需要別人驗證；這個任務 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派，之後會重新派出（公告還沒出來時別回查無，略過就好）`,
+          reviewedBy: NOT_FOUND_DIRECT_REVIEWER,
+        });
     }
   }
 

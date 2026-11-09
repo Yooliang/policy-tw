@@ -143,8 +143,8 @@ Deno.test("confirmed／not_found 不會觸發伺服器試抓", async () => {
     const urls = outcome === "not_found" ? [URL_A, ...[1, 2, 3, 4].map((i) => `https://news${i}.example.tw/story/x${i}`)] : [URL_A];
     const res = await handleContribute(client, "https://x", noChangeBody(AUTO_TASK, outcome, urls), "ip-1", undefined, "contribute", unreachableImpl, spyPrecheck);
     assertEquals(res.status, 201);
-    // 2026-11-07 起 not_found 不進投票、直接落庫；confirmed 照常等票
-    assertEquals((res.body as Record<string, unknown>).status, outcome === "not_found" ? "applied" : "pending", `outcome=${outcome} 的交件狀態不對`);
+    // 2026-11-07 起 not_found、2026-11-09 起 confirmed 都不進投票、直接落庫
+    assertEquals((res.body as Record<string, unknown>).status ?? ((res.body as { results?: Array<{ status: string }> }).results?.[0]?.status), "applied", `outcome=${outcome} 的交件狀態不對`);
   }
   assertEquals(calls, 0, "只有 outcome=unreachable 才需要伺服器試抓");
 });
