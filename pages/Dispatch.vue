@@ -7,7 +7,7 @@ import { onPaneShown } from '../composables/usePane'
 import Hero from '../components/Hero.vue'
 import { CalendarRange } from 'lucide-vue-next'
 import {
-  DAILY_GROUPS, STAGE_META, armGroup, armLabel, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
+  DAILY_GROUPS, STAGE_META, armGroup, armLabel, ARM_TAG_TITLE, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
   type OverrideRow, type Passive, type RuleFlags, type Timeline, type TimelineArm, type TimelineElection, type TimelineWindow,
 } from '../lib/dispatch-schedule'
 
@@ -337,9 +337,9 @@ const FUNNEL: [string, string][] = [
                   <div class="flex items-center border-b border-slate-100">
                     <div class="flex w-56 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap px-4 py-2">
                       <button v-if="a.by_type?.length" type="button" class="-ml-1 min-w-0 truncate rounded px-1 text-left hover:bg-slate-100" :aria-expanded="expanded.has(a.arm)" :title="[expanded.has(a.arm) ? '收起各職位' : '展開看各職位的件數與日程', nameTitle(a)].filter(Boolean).join('\n')" @click="toggle(a.arm)">
-                        <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span>{{ armLabelParts(a.arm).name }}
+                        <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500" :title="ARM_TAG_TITLE[armLabelParts(a.arm).tag]">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}
                       </button>
-                      <span v-else :title="nameTitle(a)" class="min-w-0 truncate">{{ armLabelParts(a.arm).name }}</span>
+                      <span v-else :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500" :title="ARM_TAG_TITLE[armLabelParts(a.arm).tag]">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
                       <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-0.5 inline-block shrink-0 rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                     </div>
                     <div class="relative h-7 flex-1">
@@ -406,7 +406,7 @@ const FUNNEL: [string, string][] = [
                 </div>
                 <div v-for="a in g.arms" :key="a.arm" class="flex items-center border-b border-slate-100">
                   <div class="flex w-56 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap px-4 py-2">
-                    <span :title="nameTitle(a)" class="min-w-0 truncate">{{ armLabelParts(a.arm).name }}</span>
+                    <span :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500" :title="ARM_TAG_TITLE[armLabelParts(a.arm).tag]">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
                     <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-0.5 inline-block shrink-0 rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                   </div>
                   <div class="relative h-7 flex-1">

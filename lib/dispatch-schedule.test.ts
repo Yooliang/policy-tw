@@ -49,6 +49,6 @@ Deno.test("覆寫：依任務、選舉、職位篩選，徽章與提示帶理由
 });
 
 Deno.test("列名拆小標籤：有「XXX：」前綴的拆開，沒有的原樣", () => {
-  assertEquals(armLabelParts("traffic:deadline_due"), { tag: "有人看", name: "期限到了查進度" });
+  assertEquals(armLabelParts("traffic:deadline_due"), { tag: "關注", name: "期限到了查進度" });
   assertEquals(armLabelParts("ballot_numbers"), { tag: "", name: armLabel("ballot_numbers") });
 });
