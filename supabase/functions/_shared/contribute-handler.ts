@@ -22,7 +22,7 @@ import { policyLikenessNotice } from "./policy-likeness.ts";
 import { claimKey, claimTarget, type ExistingClaim, findMergeTarget, findSameMachineClaim } from "./duplicate-claim.ts";
 import { handleVerify } from "./verify-handler.ts";
 import { fetchSource, hasUsableText } from "./system-one.ts";
-import { applyContribution, contributionStatusFor, followMergedInto, CHECK_LADDER_DAYS, CONFIRMED_DIRECT_REVIEWER, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
+import { applyContribution, contributionStatusFor, followMergedInto, CHECK_LADDER_DAYS, CONFIRMED_DIRECT_REVIEWER, isLadderExempt, ladderMessage, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, nameMismatchMessage, type ApplyOutcome } from "./apply-contribution.ts";
 import { identityNameProblems, NAME_MISMATCH_HINT, renameCollision, renameCollisionMessage, renameOf } from "./person-identity-guard.ts";
 import { precheckApplyTargets } from "./apply-precheck.ts";
 import { normalizeCandidacyDistrictField } from "./electoral-district.ts";
@@ -819,6 +819,10 @@ export async function handleContribute(
     };
   }
 
+  const ncLadderExempt = (item: { task_id?: string | null; payload: unknown }) => {
+    const tid = item.task_id ?? (item.payload as Record<string, unknown>).task_id;
+    return typeof tid === "string" && isLadderExempt(tid);
+  };
   // 任何任務的 no_change＋not_found（「查無」）不進投票：直接落庫為 applied，任務冷卻 NOT_FOUND_COOLDOWN_DAYS 天後再派（2026-11-07，小良）。
   // 投票原本是為了擋「錯報查無就鎖 14 天」；冷卻只剩 2 天，錯報的代價很小，票是浪費。confirmed 的 no_change 2026-11-09 起也直接落庫（reviewed_by＝system:confirmed-direct，冷卻 7 天）。
   {
@@ -833,7 +837,10 @@ export async function handleContribute(
           reviewedBy: CONFIRMED_DIRECT_REVIEWER,
         }
         : {
-          note: `[系統] 已記錄「查無」，不需要別人驗證；這個任務 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派，之後會重新派出（公告還沒出來時別回查無，略過就好）`,
+          note: ncLadderExempt(validation.items[i])
+            ? `[系統] 已記錄「查無」，不需要別人驗證；這個任務 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派，之後會重新派出（公告還沒出來時別回查無，略過就好）`
+            // 查核階梯（1.123.0）：同一個任務（多人任務是同一位）累計第 n 次冷卻 5／10／20 天，第 4 次起結案
+            : `[系統] 已記錄「查無」，不需要別人驗證；${ladderMessage("not_found")}（多人任務是每一位各自累計；公告還沒出來時別回查無，略過就好）`,
           reviewedBy: NOT_FOUND_DIRECT_REVIEWER,
         });
     }

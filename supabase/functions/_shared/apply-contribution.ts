@@ -25,7 +25,7 @@ import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
 import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
 import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
-import { personConfirmCheckTaskId, resolveGroupPerson } from "./group-person.ts";
+import { personCheckTaskId, resolveGroupPerson } from "./group-person.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { findMergeCandidacyConflict } from "./merge-candidacy-conflict.ts";
@@ -2392,6 +2392,11 @@ export function ladderMessage(outcome: "not_found" | "confirmed"): string {
   const d = CHECK_LADDER_DAYS[outcome];
   return `這筆缺口 ${d[0]} 天內不會再派給任何人（同一個任務累計查核：${d.map((x, i) => `第 ${i + 1} 次冷卻 ${x} 天`).join("、")}，第 ${d.length + 1} 次起結案不再派）`;
 }
+/** 多人任務逐人查核的一句階梯說明（階梯逐人累計；主要給 not_found／confirmed 的回應與直接落庫的備註） */
+export function groupLadderMessage(outcome: "not_found" | "confirmed"): string {
+  const d = CHECK_LADDER_DAYS[outcome];
+  return `${d[0]} 天內不會再派給任何人（這一位累計查核：${d.map((x, i) => `第 ${i + 1} 次冷卻 ${x} 天`).join("、")}，第 ${d.length + 1} 次起結案從清單移除）`;
+}
 /** 「確認無誤」直接落庫時 contributions.reviewed_by 的值（contribute-handler 與 20261109150000 的舊資料清理共用） */
 export const CONFIRMED_DIRECT_REVIEWER = "system:confirmed-direct";
 /**
@@ -2548,24 +2553,37 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
   // 多人任務（target.multi_person，名冊分組任務）：一位的 no_change 不能關掉整張，也不進冷卻（冷卻會把同一張的其他人一起擋掉）；
   // 那一位留在清單裡，直到差異消失（roster_group_tasks_sweep）或維護者手動關。
   if (manualTask && isMultiPersonTarget(manualTask.target)) {
-    // 「確認沒問題」要逐人落地（2026-11-09）：掛錯人臂只在 task_checks 有 auto:candidacy_owner_mismatch:<pe_id>＋confirmed 時才不再派那一位，
-    // 沒寫的話對帳（roster_group_tasks_sweep）永遠不會把他移出清單，任務一直重派（d9042ce1／a2035078 派了 9 次）。
+    // 逐人查核（2026-11-09）：每一位的 no_change（not_found／confirmed／unreachable）都寫一筆 task_checks 在他自己的鍵上
+    // （personCheckTaskId），冷卻與查核階梯逐人累計、冷卻中與結案的人不再出現在派出的說明裡；
+    // 剩下的人全部冷卻時，分組任務自己才冷卻（refresh_dispatch_blocked）、全部結案時對帳關任務。
+    // 先前只對掛錯人 confirmed 寫（1.122.0），not_found 什麼都不寫：d9042ce1 派了 15 次、三位代理回「查無」都沒冷卻。
     const person = resolveGroupPerson(manualTask.target, row.payload);
-    const checkTaskId = str(row.payload.outcome) === "confirmed" ? personConfirmCheckTaskId(person) : null;
-    if (checkTaskId) {
+    const checkTaskId = personCheckTaskId(person);
+    const personOutcome = str(row.payload.outcome);
+    if (checkTaskId && (personOutcome === "confirmed" || personOutcome === "not_found" || personOutcome === "unreachable")) {
       const check = {
         task_id: checkTaskId,
         agent_name: row.agent_name,
         note: `多人任務 ${taskId}「${person?.key}」：${str(row.payload.finding) ?? str(row.payload.note) ?? row.note ?? ""}`.slice(0, 2000),
         contribution_id: row.id,
-        outcome: "confirmed",
+        outcome: personOutcome,
       };
       const { error: checkError } = await supabase.from("task_checks").insert(check);
-      throwIf(checkError, "task_checks insert (group confirmed)");
+      throwIf(checkError, "task_checks insert (group person)");
       await recordInsert(supabase, ctxOf(row), "task_checks", checkTaskId, check);
-      return { status: "applied", message: `已記錄：「${person?.key}」確認掛對人，這一位下一輪對帳（每小時 :50）會從清單移除；這是多人任務，其他人照常可做`, task_id: taskId };
+      const key = person?.key;
+      if (personOutcome === "unreachable") {
+        return { status: "applied", message: `已記錄「拿不到來源、未能確認」：「${key}」${TASK_UNREACHABLE_COOLDOWN_DAYS} 天後會換人再試；這是多人任務，其他人照常可做`, task_id: taskId };
+      }
+      if (personOutcome === "not_found") {
+        return { status: "applied", message: `已記錄「查無」，不需要別人驗證：「${key}」${groupLadderMessage("not_found")}；這是多人任務，其他人照常可做（公告還沒出來時別回查無，略過就好）`, task_id: taskId };
+      }
+      if (person?.action === "wrong_owner") {
+        return { status: "applied", message: `已記錄：「${key}」確認掛對人，這一位下一輪對帳（每小時 :50）會從清單移除；這是多人任務，其他人照常可做`, task_id: taskId };
+      }
+      return { status: "applied", message: `已記錄「確認無誤」，不需要別人驗證：「${key}」${groupLadderMessage("confirmed")}；這是多人任務，其他人照常可做`, task_id: taskId };
     }
-    return { status: "applied", message: "已記錄；這是多人任務，不因一位的 no_change 關閉也不進冷卻，其他人照常可做", task_id: taskId };
+    return { status: "applied", message: "已記錄；這是多人任務，但這筆沒對到名單上的人（person_key 對不上），沒有記進逐人冷卻，其他人照常可做", task_id: taskId };
   }
   // 打不開不能關手動任務（2026-09-26）：「查不到來源」不是「這個任務做完了」，任務要留著換人再試，
   // 不然這條死路就永遠沒人再碰（跟 auto: 任務的 task_unreachable_cooldown 是同一個道理，只是手動任務沒有冷卻機制、

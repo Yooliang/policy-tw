@@ -39,11 +39,20 @@ export function resolveGroupPerson(target: unknown, payload: unknown): GroupPers
 }
 
 /**
- * 這位「確認沒問題」之後，要寫哪一個 task_checks.task_id 才會讓派工臂不再把他算成缺口。
- * 目前只有「掛錯人」臂有逐人的 confirmed 排除（contribution_auto_tasks_owner_mismatch／roster_diff_findings 讀
- * task_checks.task_id＝'auto:candidacy_owner_mismatch:<pe_id>' 且 outcome＝confirmed）；
- * 其他做法（缺人、查無此人、政黨、縣市、鄉鎮、號次、重複）的臂沒有這種排除，no_change 只記錄、人留在清單直到差異真的消失。
+ * 這位的逐人查核鍵（task_checks.task_id；2026-11-09 起所有做法、所有 no_change outcome 都寫，冷卻與階梯逐人累計）。
+ * 掛錯人＝auto:candidacy_owner_mismatch:<pe_id>（跟掛錯人臂共用：confirmed 時臂不再把他算成缺口，1.122.0）；
+ * 其餘做法＝auto:roster_group_person:<person_key>。SQL roster_group_check_task_id() 同一份，roster-group-cooldown.test.ts 盯著。
  */
+export function personCheckTaskId(person: GroupPerson | null): string | null {
+  if (!person) return null;
+  if (person.action === "wrong_owner") {
+    const pe = person.politician_election_id;
+    if (pe !== null && pe !== undefined && /^[1-9]\d{0,9}$/.test(String(pe))) return `auto:candidacy_owner_mismatch:${pe}`;
+  }
+  return `auto:roster_group_person:${person.key}`;
+}
+
+/** 舊名：只有掛錯人 confirmed 有逐人排除（1.122.0）。保留給舊測試；新程式用 personCheckTaskId */
 export function personConfirmCheckTaskId(person: GroupPerson | null): string | null {
   if (!person || person.action !== "wrong_owner") return null;
   const pe = person.politician_election_id;
