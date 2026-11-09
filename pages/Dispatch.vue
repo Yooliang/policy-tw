@@ -5,6 +5,7 @@ import { withTimeoutAndRetry } from '../lib/retry'
 import { usePageHead } from '../composables/usePageHead'
 import { onPaneShown } from '../composables/usePane'
 import Hero from '../components/Hero.vue'
+import DispatchBars from '../components/DispatchBars.vue'
 import { CalendarRange } from 'lucide-vue-next'
 import {
   DAILY_GROUPS, STAGE_META, armGroup, armLabel, ARM_TAG_TITLE, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
@@ -262,6 +263,26 @@ const FUNNEL: [string, string][] = [
   ['received', '收進'], ['no_name', '沒有人名'], ['unrelated', '判無關'], ['low_confidence', '把握不夠'],
   ['new_pledge', '新承諾'], ['progress', '政見進度'], ['opened', '開了任務'], ['appended', '併進已開的任務'], ['deferred', '超過每日上限延後'],
 ]
+
+// ---- 底部直立長條圖的資料 ----
+type BarItem = { key: string; label: string; value: number | null; title?: string; color?: string }
+const newsBars = computed<BarItem[]>(() => {
+  const out: BarItem[] = []
+  for (const t of newsTasks.value) {
+    out.push({ key: `${t.key}-open`, label: `${t.label}・開著`, value: t.open, title: `新聞初篩開出的「${t.label}」任務：開著 ${fmt(t.open)} 件`, color: C.open })
+    out.push({ key: `${t.key}-done`, label: `${t.label}・近 7 天完成`, value: t.closed_7d, title: `新聞初篩開出的「${t.label}」任務：近 7 天完成 ${fmt(t.closed_7d)} 件`, color: '#3b82f6' })
+  }
+  return out
+})
+// 網站請求／公民提問：後端只給目前佇列件數，沒有「近 7 天完成」，所以只畫開著的
+const visitorBars = computed<BarItem[]>(() => visitorCount.value == null ? [] : [
+  { key: 'visitor-open', label: '開著', value: visitorCount.value, title: `網站請求／公民提問：開著 ${fmt(visitorCount.value)} 件`, color: C.open },
+])
+const funnelBars = computed<BarItem[]>(() => FUNNEL.map(([k, label]) => {
+  const n = passive.value?.news_7d?.[k] ?? 0
+  return { key: k, label, value: n, title: `近 7 天新聞收錄・${label}：${fmt(n)}` }
+}))
+const pendingBars = computed<BarItem[]>(() => pending.value.map((r) => ({ key: r.key, label: r.label, value: r.n, title: `驗證佇列・${r.label}：${fmt(r.n)} 筆` })))
 </script>
 
 <template>
@@ -429,44 +450,32 @@ const FUNNEL: [string, string][] = [
           </div>
         </div>
 
-        <!-- 被動：外面進來的，有東西進來就處理 -->
-        <section v-if="passive && (newsTasks.length || visitorCount != null || passive.news_7d)" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
-          <h3 class="font-black text-navy-900 mb-1">被動</h3>
-          <div class="grid gap-4 md:grid-cols-2">
-            <div>
-              <div class="mb-1.5 text-xs text-slate-500">新聞初篩開出的任務</div>
-              <div v-for="t in newsTasks" :key="t.key" class="flex items-center justify-between border-b border-slate-100 py-1 last:border-0">
-                <span>{{ t.label }}</span>
-                <span class="tabular-nums text-slate-500">開著 {{ fmt(t.open) }}・近 7 天完成 {{ fmt(t.closed_7d) }}</span>
+        <!-- 底部：上排＝被動卡（內含兩個並排區塊）＋近 7 天新聞收錄卡，下排＝驗證佇列整列；手機全部直排 -->
+        <div v-if="passive" class="space-y-6">
+          <div class="grid gap-6 md:grid-cols-[2fr_3fr]">
+            <section v-if="newsBars.length || visitorBars.length" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
+              <h3 class="font-black text-navy-900 mb-4">被動</h3>
+              <div class="grid gap-6 sm:grid-cols-2">
+                <div v-if="newsBars.length" class="min-w-0" data-testid="dispatch-passive-news">
+                  <div class="mb-2 text-sm font-medium text-slate-700">新聞初篩開出的任務</div>
+                  <DispatchBars :items="newsBars" />
+                </div>
+                <div v-if="visitorBars.length" class="min-w-0" data-testid="dispatch-passive-visitor">
+                  <div class="mb-2 text-sm font-medium text-slate-700">網站請求／公民提問</div>
+                  <DispatchBars :items="visitorBars" />
+                </div>
               </div>
-              <div v-if="!newsTasks.length" class="py-1 text-slate-400">目前沒有</div>
-            </div>
-            <div>
-              <div class="mb-1.5 text-xs text-slate-500">網站請求</div>
-              <div class="flex items-center justify-between py-1">
-                <span>網站請求／公民提問</span>
-                <span class="tabular-nums text-slate-500">{{ visitorCount == null ? '—' : fmt(visitorCount) }}</span>
-              </div>
-            </div>
+            </section>
+            <section v-if="passive.news_7d" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-news7d">
+              <h3 class="font-black text-navy-900 mb-4">近 7 天新聞收錄</h3>
+              <DispatchBars :items="funnelBars" />
+            </section>
           </div>
-          <div v-if="passive.news_7d" class="mt-3 border-t border-slate-100 pt-3">
-            <div class="mb-1.5 text-xs text-slate-500">近 7 天新聞收錄</div>
-            <div class="flex flex-wrap gap-x-4 gap-y-1">
-              <span v-for="[k, label] in FUNNEL" :key="k">{{ label }} <span class="tabular-nums text-slate-500">{{ fmt(passive.news_7d[k] ?? 0) }}</span></span>
-            </div>
-          </div>
-        </section>
-
-        <section v-if="passive && pendingTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-verify-queue">
-          <h3 class="font-black text-navy-900 mb-1">驗證佇列</h3>
-          <p class="mb-3 text-xs text-slate-500">交件後等投票的，共 <span class="tabular-nums">{{ fmt(pendingTotal) }}</span> 筆。</p>
-          <div class="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
-            <div v-for="r in pending" :key="r.key" class="flex items-center justify-between border-b border-slate-100 py-1">
-              <span>{{ r.label }}</span>
-              <span class="tabular-nums text-slate-500">{{ fmt(r.n) }}</span>
-            </div>
-          </div>
-        </section>
+          <section v-if="pendingTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-verify-queue">
+            <h3 class="font-black text-navy-900 mb-3">驗證佇列</h3>
+            <DispatchBars :items="pendingBars" />
+          </section>
+        </div>
       </template>
     </main>
   </div>
