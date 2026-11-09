@@ -188,7 +188,7 @@ Deno.test("隊頭 agent 欄（20261109010000）：只顯示未過期的認領者
   await d.close();
 });
 
-Deno.test("隊頭 agent 欄補驗證票（20261109020000）：30 分鐘內派到、還沒投票的代理，新的在前用「、」連；投過票、過期、其他票都不算；任務列不變", async () => {
+Deno.test("隊頭 agent 欄補驗證票（20261109130000）：30 分鐘內派到、還沒投票的代理，新的在前用「、」連；投過票、過期、其他票都不算；任務列不變", async () => {
   const d = await db();
   await d.exec(`
     CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz);
@@ -202,7 +202,7 @@ Deno.test("隊頭 agent 欄補驗證票（20261109020000）：30 分鐘內派到
     INSERT INTO contribution_votes VALUES (1, 'agent-voted');
   `);
   await d.exec(await readMig("20261109010000_queue_head_agent.sql"));
-  const mig = await readMig("20261109020000_queue_head_agent_verify.sql");
+  const mig = await readMig("20261109130000_queue_head_agent_verify.sql");
   await d.exec(mig);
   await d.exec(mig); // 冪等
   const j = await run(d);
