@@ -7,7 +7,7 @@ import { onPaneShown } from '../composables/usePane'
 import Hero from '../components/Hero.vue'
 import { CalendarRange } from 'lucide-vue-next'
 import {
-  DAILY_GROUPS, STAGE_META, armGroup, armLabel, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
+  DAILY_GROUPS, STAGE_META, armGroup, armLabel, ARM_TAG_TITLE, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
   type OverrideRow, type Passive, type RuleFlags, type Timeline, type TimelineArm, type TimelineElection, type TimelineWindow,
 } from '../lib/dispatch-schedule'
 
@@ -326,22 +326,20 @@ const FUNNEL: [string, string][] = [
               </div>
               <div class="flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 bg-slate-50 px-4 py-2">
                 <span class="font-black text-navy-900">當屆選舉</span>
-                <span class="text-xs text-slate-500">只算這一屆：<span class="tabular-nums">{{ fmt(tl.election_total ?? 0) }}</span> 件</span>
                 <span v-if="staleCount" class="text-xs" :style="{ color: C.stale }">其中 <span class="tabular-nums">{{ fmt(staleCount) }}</span> 件落在已經結束的段</span>
               </div>
               <template v-for="g in stageGroups" :key="g.stage">
                 <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-1.5 text-xs">
                   <span class="font-medium text-slate-800">{{ g.label }}</span>
                   <span class="ml-1 text-slate-400">（{{ g.arms.length }}）</span>
-                  <span class="ml-2 text-slate-500">{{ g.hint }}</span>
                 </div>
                 <template v-for="a in g.arms" :key="a.arm">
                   <div class="flex items-center border-b border-slate-100">
                     <div class="flex w-56 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap px-4 py-2">
                       <button v-if="a.by_type?.length" type="button" class="-ml-1 min-w-0 truncate rounded px-1 text-left hover:bg-slate-100" :aria-expanded="expanded.has(a.arm)" :title="[expanded.has(a.arm) ? '收起各職位' : '展開看各職位的件數與日程', nameTitle(a)].filter(Boolean).join('\n')" @click="toggle(a.arm)">
-                        <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}
+                        <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500" :title="ARM_TAG_TITLE[armLabelParts(a.arm).tag]">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}
                       </button>
-                      <span v-else :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
+                      <span v-else :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500" :title="ARM_TAG_TITLE[armLabelParts(a.arm).tag]">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
                       <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-0.5 inline-block shrink-0 rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                     </div>
                     <div class="relative h-7 flex-1">
@@ -400,17 +398,15 @@ const FUNNEL: [string, string][] = [
               </div>
               <div class="flex flex-wrap items-baseline gap-x-3 border-b border-slate-200 bg-slate-50 px-4 py-2">
                 <span class="font-black text-navy-900">日常</span>
-                <span class="text-xs text-slate-500">不跟選舉日曆走，不隨上面選的選舉變：<span class="tabular-nums">{{ fmt(dailyTotal) }}</span> 件<template v-if="newsQueued">（新聞任務 <span class="tabular-nums">{{ fmt(newsQueued) }}</span> 件列在下面的被動）</template></span>
               </div>
               <template v-for="g in dailyGroups" :key="g.key">
                 <div class="border-b border-slate-200 bg-slate-50/60 px-4 py-1.5 text-xs">
                   <span class="font-medium text-slate-800">{{ g.label }}</span>
                   <span class="ml-1 text-slate-400">（{{ g.arms.length }}）</span>
-                  <span class="ml-2 text-slate-500">{{ g.hint }}</span>
                 </div>
                 <div v-for="a in g.arms" :key="a.arm" class="flex items-center border-b border-slate-100">
                   <div class="flex w-56 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap px-4 py-2">
-                    <span :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
+                    <span :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500" :title="ARM_TAG_TITLE[armLabelParts(a.arm).tag]">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
                     <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-0.5 inline-block shrink-0 rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                   </div>
                   <div class="relative h-7 flex-1">
@@ -436,7 +432,6 @@ const FUNNEL: [string, string][] = [
         <!-- 被動：外面進來的，有東西進來就處理 -->
         <section v-if="passive && (newsTasks.length || visitorCount != null || passive.news_7d)" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
           <h3 class="font-black text-navy-900 mb-1">被動</h3>
-          <p class="mb-3 text-xs text-slate-500">外面進來的（新聞、網站訪客），有東西進來就處理，只列件數。</p>
           <div class="grid gap-4 md:grid-cols-2">
             <div>
               <div class="mb-1.5 text-xs text-slate-500">新聞初篩開出的任務</div>
