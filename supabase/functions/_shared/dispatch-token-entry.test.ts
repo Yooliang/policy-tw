@@ -408,7 +408,7 @@ Deno.test("/next 對驗證池：不再傳 p_legacy_ip_hash（投票不看 IP）�
     const pools = report.calls.filter((c) => c.target === "rpc/contribution_verify_pool");
     assertEquals(pools.length, 2);
     for (const p of pools) {
-      assertEquals(Object.keys(p.body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region"], "不帶 p_legacy_ip_hash；匿名沒有 p_actor_id");
+      assertEquals(Object.keys(p.body as Row).sort(), ["p_agent_name", "p_ip_hash", "p_limit", "p_region", "p_skip_held"], "不帶 p_legacy_ip_hash；匿名沒有 p_actor_id；p_skip_held 是 2026-11-09 沒人在做的先派");
     }
     assertEquals((pools[1].body as Row).p_ip_hash, await netHash(N1));
     assertEquals((pools[1].body as Row).p_agent_name, "dave");

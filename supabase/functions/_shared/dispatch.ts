@@ -60,6 +60,37 @@ export interface Requester {
   legacy_ip_hash?: string;
 }
 
+/**
+ * 驗證票「沒人在做的先派」（2026-11-09，協議 1.124.0，migration 20261109170000）。
+ *
+ * 起因：同一張驗證票（需 3 票）在 7 分鐘內被派給 4 個代理——它排在佇列第 1，每個 /next 都拿隊頭，前面的人還在查證。
+ * 「握著」＝LEASE_MINUTES 內派到、還沒對它投票的別的代號（SQL 的 held_count，不含正在要的這位）。
+ * 還缺的票數＝目標分數 − 目前分數（每票以 1 分算，跟結算 score >= target 同一把尺）；握著的人數 >= 還缺票數＝再派只會多出白做的一份。
+ * 任務列沒有這個問題：lease（contribution_task_leases）本來就把別人認領中的擋在 SQL 與 filterLeasedTasks。
+ */
+export interface VerifyHoldInfo { score?: number | null; target_score?: number | null; effective_required?: number | null; held_count?: number | null }
+
+/** 還缺幾票才結算（至少 1；沒有目標分數時退回 effective_required，兩個都沒有就當 1） */
+export function verifyVotesNeeded(c: VerifyHoldInfo): number {
+  const target = typeof c.target_score === "number" ? c.target_score : (typeof c.effective_required === "number" ? c.effective_required : null);
+  if (target === null) return 1;
+  return Math.max(1, target - (typeof c.score === "number" ? c.score : 0));
+}
+
+/** 握著的人數已經 >= 還缺的票數：先不派（除非沒有別的可派） */
+export function isVerifyFullyHeld(c: VerifyHoldInfo): boolean {
+  return (c.held_count ?? 0) >= verifyVotesNeeded(c);
+}
+
+/**
+ * 候選排序：零人握著的排在只有部分人握著的前面，各組內維持原順序（SQL 的 queue_at）。
+ * 已經握滿的不在這裡丟——SQL（p_skip_held）先擋；整池握滿時的退路是 /next 用 p_skip_held=FALSE 再要一次，這裡照舊排後面。
+ */
+export function orderVerifyByHold<T extends VerifyHoldInfo>(candidates: readonly T[]): T[] {
+  const tier = (c: T) => (isVerifyFullyHeld(c) ? 2 : (c.held_count ?? 0) > 0 ? 1 : 0);
+  return candidates.map((c, i) => ({ c, i })).sort((a, b) => tier(a.c) - tier(b.c) || a.i - b.i).map(({ c }) => c);
+}
+
 export function filterVerifyCandidates<T extends VerifyCandidate>(rows: readonly T[], me: Requester): T[] {
   const mine = me.agent_name.toLowerCase();
   return rows.filter((r) => {
