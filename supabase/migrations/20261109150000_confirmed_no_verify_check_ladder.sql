@@ -197,12 +197,14 @@ SELECT 'auto:candidacy_owner_mismatch:' || (p.e->>'politician_election_id'), n.a
    AND NOT EXISTS (SELECT 1 FROM task_checks x WHERE x.contribution_id = n.id);
 
 -- 政見重複清查結論（人物不在了的下面標 superseded）
+-- 同一個人在同一批有多筆（不同指紋）時，一個人只能一列：DISTINCT ON 取 id 最大的那筆（同一條 INSERT 不能兩次碰同一列）
 INSERT INTO policy_dupe_reviews (politician_id, fingerprint, agent_name, contribution_id, note)
-SELECT m[1]::uuid, lower(m[2]), n.agent_name, n.id, n.note
+SELECT DISTINCT ON (m[1]::uuid) m[1]::uuid, lower(m[2]), n.agent_name, n.id, n.note
   FROM _cf_old n
   CROSS JOIN LATERAL regexp_match(n.task_id, '^auto:duplicate_policy:([0-9a-f-]{36}):([0-9a-f]{8})$', 'i') AS m
  WHERE n.kind = 'auto' AND m IS NOT NULL
    AND EXISTS (SELECT 1 FROM politicians p WHERE p.id = m[1]::uuid)
+ ORDER BY m[1]::uuid, n.id DESC
 ON CONFLICT (politician_id) DO UPDATE
   SET fingerprint = EXCLUDED.fingerprint, agent_name = EXCLUDED.agent_name, contribution_id = EXCLUDED.contribution_id, note = EXCLUDED.note, reviewed_at = now();
 
@@ -218,7 +220,7 @@ SELECT DISTINCT ON (k.review_key) k.review_key, k.fingerprint, n.agent_name, n.i
       FROM regexp_match(n.task_id, '^auto:lineage_link_candidate:([0-9a-f-]{36}):([0-9a-f]{8})$', 'i') AS l WHERE l IS NOT NULL
   ) k
  WHERE n.kind = 'auto'
- ORDER BY k.review_key, n.id
+ ORDER BY k.review_key, n.id DESC
 ON CONFLICT (review_key) DO UPDATE
   SET fingerprint = EXCLUDED.fingerprint, agent_name = EXCLUDED.agent_name, contribution_id = EXCLUDED.contribution_id, note = EXCLUDED.note, reviewed_at = now();
 
