@@ -266,15 +266,18 @@ const FUNNEL: [string, string][] = [
 
 // ---- 底部直立長條圖的資料 ----
 type BarItem = { key: string; label: string; value: number | null; title?: string; color?: string }
-const passiveBars = computed<BarItem[]>(() => {
+const newsBars = computed<BarItem[]>(() => {
   const out: BarItem[] = []
   for (const t of newsTasks.value) {
     out.push({ key: `${t.key}-open`, label: `${t.label}・開著`, value: t.open, title: `新聞初篩開出的「${t.label}」任務：開著 ${fmt(t.open)} 件`, color: C.open })
     out.push({ key: `${t.key}-done`, label: `${t.label}・近 7 天完成`, value: t.closed_7d, title: `新聞初篩開出的「${t.label}」任務：近 7 天完成 ${fmt(t.closed_7d)} 件`, color: '#3b82f6' })
   }
-  if (visitorCount.value != null) out.push({ key: 'visitor', label: '網站請求／公民提問', value: visitorCount.value, title: `網站請求／公民提問：${fmt(visitorCount.value)} 件`, color: C.warm })
   return out
 })
+// 網站請求／公民提問：後端只給目前佇列件數，沒有「近 7 天完成」，所以只畫開著的
+const visitorBars = computed<BarItem[]>(() => visitorCount.value == null ? [] : [
+  { key: 'visitor-open', label: '開著', value: visitorCount.value, title: `網站請求／公民提問：開著 ${fmt(visitorCount.value)} 件`, color: C.open },
+])
 const funnelBars = computed<BarItem[]>(() => FUNNEL.map(([k, label]) => {
   const n = passive.value?.news_7d?.[k] ?? 0
   return { key: k, label, value: n, title: `近 7 天新聞收錄・${label}：${fmt(n)}` }
@@ -447,17 +450,26 @@ const pendingBars = computed<BarItem[]>(() => pending.value.map((r) => ({ key: r
           </div>
         </div>
 
-        <!-- 底部三塊：被動、近 7 天新聞收錄並排，驗證佇列整列；手機三塊直排 -->
-        <div v-if="passive" class="grid gap-6 md:grid-cols-2">
-          <section v-if="passiveBars.length" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
-            <h3 class="font-black text-navy-900 mb-3">被動</h3>
-            <DispatchBars :items="passiveBars" />
+        <!-- 底部：被動一張卡、裡面三個並排區塊（新聞初篩任務、網站請求／公民提問、近 7 天新聞收錄），驗證佇列整列在下；手機直排 -->
+        <div v-if="passive" class="space-y-6">
+          <section v-if="newsBars.length || visitorBars.length || passive.news_7d" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-passive">
+            <h3 class="font-black text-navy-900 mb-4">被動</h3>
+            <div class="grid gap-6 md:grid-cols-4">
+              <div v-if="newsBars.length" class="min-w-0" data-testid="dispatch-passive-news">
+                <div class="mb-2 text-sm font-medium text-slate-700">新聞初篩開出的任務</div>
+                <DispatchBars :items="newsBars" />
+              </div>
+              <div v-if="visitorBars.length" class="min-w-0" data-testid="dispatch-passive-visitor">
+                <div class="mb-2 text-sm font-medium text-slate-700">網站請求／公民提問</div>
+                <DispatchBars :items="visitorBars" />
+              </div>
+              <div v-if="passive.news_7d" class="min-w-0 md:col-span-2" data-testid="dispatch-news7d">
+                <div class="mb-2 text-sm font-medium text-slate-700">近 7 天新聞收錄</div>
+                <DispatchBars :items="funnelBars" />
+              </div>
+            </div>
           </section>
-          <section v-if="passive.news_7d" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-news7d">
-            <h3 class="font-black text-navy-900 mb-3">近 7 天新聞收錄</h3>
-            <DispatchBars :items="funnelBars" />
-          </section>
-          <section v-if="pendingTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5 md:col-span-2" data-testid="dispatch-verify-queue">
+          <section v-if="pendingTotal > 0" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5" data-testid="dispatch-verify-queue">
             <h3 class="font-black text-navy-900 mb-3">驗證佇列</h3>
             <DispatchBars :items="pendingBars" />
           </section>
