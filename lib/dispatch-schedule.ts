@@ -168,6 +168,15 @@ const ARM_LABEL: Readonly<Record<string, string>> = {
   'traffic:term_policies': '有人看才追：補舊屆政見',
 }
 export const armLabel = (arm: string) => ARM_LABEL[arm] ?? arm
+const TAG_SHORT: Record<string, string> = { '有人看才追': '有人看' }
+/** 「XXX：名稱」拆成小標籤與短名稱，列名才排得進一行；滑過提示仍用完整名稱 */
+export function armLabelParts(arm: string): { tag: string; name: string } {
+  const full = armLabel(arm)
+  const i = full.indexOf('：')
+  if (i <= 0) return { tag: '', name: full }
+  const tag = full.slice(0, i)
+  return { tag: TAG_SHORT[tag] ?? tag, name: full.slice(i + 1) }
+}
 
 export type ArmGroup = 'passive' | 'cleanup' | 'backlog' | 'election' | 'unclassified'
 const GROUP: Record<string, ArmGroup> = {
