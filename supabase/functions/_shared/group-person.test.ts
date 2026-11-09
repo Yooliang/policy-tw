@@ -8,7 +8,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { applyContribution, type ContributionRow } from "./apply-contribution.ts";
 import { claimKey, findSuperseded } from "./duplicate-claim.ts";
-import { groupPersonProblems, personConfirmCheckTaskId, resolveGroupPerson } from "./group-person.ts";
+import { groupPersonProblems, personCheckTaskId, personConfirmCheckTaskId, resolveGroupPerson } from "./group-person.ts";
 import { MULTI_PERSON_HINT } from "./task-guidance.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 
@@ -69,6 +69,9 @@ Deno.test("G3 resolveGroupPerson／personConfirmCheckTaskId：照 person_key 找
   assertEquals(personConfirmCheckTaskId(resolveGroupPerson(TARGET, { person_key: "party:2026|某縣|某人" })), null);
   assertEquals(personConfirmCheckTaskId(resolveGroupPerson(TARGET, { person_key: "missing:abc" })), null);
   assertEquals(personConfirmCheckTaskId(null), null);
+  assertEquals(personCheckTaskId(resolveGroupPerson(TARGET, { person_key: "party:2026|某縣|某人" })), "auto:roster_group_person:party:2026|某縣|某人");
+  assertEquals(personCheckTaskId(resolveGroupPerson(TARGET, { person_key: "掛錯人:57044" })), "auto:candidacy_owner_mismatch:57044");
+  assertEquals(personCheckTaskId(null), null);
 });
 
 function fakeDb(target: unknown) {
@@ -105,19 +108,36 @@ Deno.test("H2 落庫：舊交件（沒有 person_key，只有 politician_electio
   assertEquals(inserts.filter((i) => i.table === "task_checks").map((i) => i.row.task_id), ["auto:candidacy_owner_mismatch:51400"]);
 });
 
-Deno.test("H3 落庫：非 confirmed、非掛錯人、對不到人 → 只記錄，不寫 task_checks", async () => {
-  for (const payload of [
-    { outcome: "not_found", person_key: "掛錯人:57044", politician_election_id: 57044 },
-    { outcome: "unreachable", person_key: "掛錯人:57044", politician_election_id: 57044 },
-    { outcome: "confirmed", person_key: "party:2026|某縣|某人" },
-    { outcome: "confirmed", person_key: "missing:abc" },
-    { outcome: "confirmed" },
-  ]) {
+Deno.test("H3 落庫（2026-11-09 逐人階梯）：not_found／confirmed／unreachable 都寫那一位自己的 task_checks；對不到人才不寫", async () => {
+  const cases: Array<[Record<string, unknown>, string | null, string]> = [
+    [{ outcome: "not_found", person_key: "掛錯人:57044", politician_election_id: 57044 }, "auto:candidacy_owner_mismatch:57044", "not_found"],
+    [{ outcome: "unreachable", person_key: "掛錯人:57044", politician_election_id: 57044 }, "auto:candidacy_owner_mismatch:57044", "unreachable"],
+    [{ outcome: "confirmed", person_key: "party:2026|某縣|某人" }, "auto:roster_group_person:party:2026|某縣|某人", "confirmed"],
+    [{ outcome: "not_found", person_key: "missing:abc" }, "auto:roster_group_person:missing:abc", "not_found"],
+    [{ outcome: "confirmed" }, null, "confirmed"],
+    [{ outcome: "confirmed", person_key: "不存在" }, null, "confirmed"],
+  ];
+  for (const [payload, taskId, outcome] of cases) {
     const { db, inserts } = fakeDb(TARGET);
     const out = await applyContribution(db as never, rowOf(payload));
     assertEquals(out.status, "applied", JSON.stringify(payload));
-    assertEquals(inserts.filter((i) => i.table === "task_checks").length, 0, JSON.stringify(payload));
+    const checks = inserts.filter((i) => i.table === "task_checks");
+    if (taskId === null) { assertEquals(checks.length, 0, JSON.stringify(payload)); continue; }
+    assertEquals(checks.length, 1, JSON.stringify(payload));
+    assertEquals(checks[0].row.task_id, taskId);
+    assertEquals(checks[0].row.outcome, outcome);
+    assertEquals(checks[0].row.contribution_id, "c-1");
   }
+});
+
+Deno.test("H4 not_found 的回應講真正的階梯天數（5／10／20、第 4 次起結案），不是舊的「2 天內不會再派」", async () => {
+  const { db } = fakeDb(TARGET);
+  const out = await applyContribution(db as never, rowOf({ outcome: "not_found", person_key: "掛錯人:57044", politician_election_id: 57044 }));
+  const m = String(out.message);
+  assert(m.includes("5 天") && m.includes("10 天") && m.includes("20 天") && m.includes("第 4 次起結案"), m);
+  assert(!m.includes("2 天內"), m);
+  const c = String((await applyContribution(fakeDb(TARGET).db as never, rowOf({ outcome: "confirmed", person_key: "party:2026|某縣|某人" }))).message);
+  assert(c.includes("5 天") && c.includes("10 天") && c.includes("第 3 次起結案"), c);
 });
 
 Deno.test("S1 schema：頂層 person_key 灌進 payload", () => {

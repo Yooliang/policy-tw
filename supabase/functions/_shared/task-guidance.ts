@@ -58,7 +58,7 @@ export const MULTI_PERSON_HINT =
   "**這張任務有好幾個人（target.people，說明裡逐位列出做法）：每一位各交一筆貢獻，task_id 都填本任務的 id，不要把多位塞進同一筆。**" +
   "交完一位任務不會結束，也不必一次做完——做幾位交幾位，沒做的留給下一個人；處理完的人系統每小時對帳後會從清單移除，全部處理完任務自動關閉。" +
   "**每一筆交件都要帶 payload.person_key＝名單裡那一位的 key（照抄 target.people[].key，說明每位前面的「person_key：…」），沒帶或不在名單上伺服器回 400（person_key_required／person_key_unknown）；no_change 另外要帶那一位的 politician_election_id。**" +
-  "某一位查不到或官方資料有誤就對那一位交 no_change（附你看了哪裡），不影響其他人；掛錯人那種確認是同一人（no_change、outcome＝confirmed）通過驗證後，那一位會從清單移除。每位的 politician_election_id、politician_id、官方網址都在那一位的 line 裡。";
+  "某一位查不到或官方資料有誤就對那一位交 no_change（附你看了哪裡），不影響其他人；查無（not_found）與確認無誤（confirmed）逐位累計冷卻（查無 5／10／20 天、第 4 次起結案；確認 5／10 天、第 3 次起結案），冷卻中與結案的人不會出現在說明裡；掛錯人那種確認是同一人（confirmed）會讓那一位直接從清單移除。每位的 politician_election_id、politician_id、官方網址都在那一位的 line 裡。";
 
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
