@@ -33,9 +33,15 @@ function fakeSupabase(tables: Record<string, TableConfig>) {
           const arr = Array.isArray(rows) ? rows : [rows];
           for (const r of arr) inserted.push({ table, row: r });
           return {
-            select: () => ({ data: arr.map((r, i) => ({ id: `new-${i}`, payload_hash: (r as { payload_hash?: string }).payload_hash })), error: null }),
+            error: null,
+            select: () => ({
+              data: arr.map((r, i) => ({ id: `new-${i}`, payload_hash: (r as { payload_hash?: string }).payload_hash })),
+              error: null,
+              maybeSingle: () => Promise.resolve({ data: { id: "new-0" }, error: null }), // no_change 直接落庫路徑（1.119.0／1.123.0）要用
+            }),
           };
         },
+        update: () => ({ eq: () => ({ error: null, select: () => ({ maybeSingle: () => Promise.resolve({ data: { id: "x" }, error: null }) }) }) }),
         delete: () => ({ in: () => ({ error: null }) }),
         then: (res: (v: typeof result) => unknown) => res(result),
       };
