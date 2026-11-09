@@ -447,14 +447,17 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   // /next 與 jp-next 的每台機器 2:1 已在 2026-10-13 拿掉（派工排序改秒數；日本站 20261011360000），兩邊的派工入口都不再讀 verify_dispatches
   assertEquals(find(ts.readers, "public", "verify_dispatches", "next/index.ts"), undefined, "/next 不再讀 verify_dispatches");
   assertEquals(find(ts.readers, "public", "verify_dispatches", "verify-handler.ts")?.hours, consts.VERIFY_BINDING_DAYS * 24, "派工綁定");
-  assertEquals(find(sql.readers, "public", "verify_dispatches", "contribution_verify_pool")?.hours, 15 / 60, "驗證池：剛派的 15 分鐘");
+  assertEquals(of(sql.readers, "public", "verify_dispatches").some((r) => r.where.includes("contribution_verify_pool") && r.hours === 15 / 60), true, "驗證池：剛派的 15 分鐘");
   assertEquals(find(sql.readers, "public", "verify_dispatches", "dispatch_recent")?.hours, 240 / 60, "/queue：上限 240 分鐘");
   assertEquals(consts.VERIFY_BINDING_DAYS, 7);
   // 寫入端不算讀者；skips 沒有任何讀者（正式庫 2026-10-08 查：沒有函式、視圖引用它）
   assertEquals(of(ts.readers, "public", "contribution_task_skips").length, 0, "skips 在程式裡只有 upsert");
   assertEquals(of(sql.readers, "public", "contribution_task_skips").length, 0, "skips 最後一版的函式／視圖／排程都不讀它");
   assertEquals(of(ts.readers, "public", "verify_dispatches").length, 1, "程式端 verify_dispatches 的讀者只有派工綁定");
-  assertEquals(of(sql.readers, "public", "verify_dispatches").length, 2, "SQL 端只有驗證池與 dispatch_recent");
+  // 2026-11-09 驗證池多一個讀者：握著人數（30 分鐘內派到、未投票；20261109170000）
+  assertEquals(find(sql.readers, "public", "verify_dispatches", "contribution_verify_pool")?.hours !== undefined, true);
+  assertEquals(of(sql.readers, "public", "verify_dispatches").filter((r) => r.hours === 30 / 60).length, 1, "驗證池：握著人數的 30 分鐘");
+  assertEquals(of(sql.readers, "public", "verify_dispatches").length, 3, "SQL 端有驗證池（15 分鐘、30 分鐘兩處）與 dispatch_recent");
   // public 的讀者不含日本站的檔案（jp-next 的路徑含 next/index.ts，沒分 schema 就會被當成 /next）
   assert(!ts.readers.some((r) => r.schema === "public" && /jp-next|_shared\/jp\//.test(r.where)), "日本站的檔案不能算進 public");
 
