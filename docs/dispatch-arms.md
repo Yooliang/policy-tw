@@ -128,7 +128,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 | 機制 | 做什麼 | 注意 |
 |---|---|---|
 | 維護者 `/boost`（Edge Function `boost`，RPC `task_boost`） | 對命中的列加一份 `queue_settings.boost_seconds`（5 年），`cooling=false`；**已存在的驗證票不隨母任務移位**（`20261104120000` 起票的基準凍結在 `dispatch_base_at`），要插某張票用 `/boost` 的 `task_ids` 指定票本身；母任務在派出前被插隊，派出後新產生的票基準會繼承那個位置 | 2026-11-04 起 POST 要維護者憑證（`20261104110000`，`boost-auth`）；不再先跑 seed（`20261019050000`，否則逾時）；只對已在佇列的列生效。**明確的 `/boost` 照舊可蓋過冷卻** |
-| `cand_no_front_pull()` | 每小時 :03（pg_cron `cand-no-front-pull-hourly`）把補號次的任務、`cand_numbers`／含號次的 `candidacy` 驗證票、補號次的 `no_change` 驗證票，以及擋住號次缺口的同名人物合併任務（`target.cand_no_gap`，3×）往前拉：一般 2×`visitor_front_seconds`、縣市長／縣市議員 3×、當前提前職位（鄉鎮市長→原住民區長→鄉鎮市民代表→原住民區民代表→村里長，第一個還有缺口的）2.5× | **2026-11-28 之後直接回 0**；2026-11-07（`20261107000000`）起，`cool_until` 未過或 2 天內有 `not_found` 查核的不拉 |
+| `cand_no_front_pull()` | 每小時 :03（pg_cron `cand-no-front-pull-hourly`）把補號次的任務、`cand_numbers`／含號次的 `candidacy` 驗證票、補號次的 `no_change` 驗證票，以及擋住號次缺口的同名人物合併任務（`target.cand_no_gap`，3×）往前拉：一般 2×`visitor_front_seconds`、縣市長／縣市議員 3×、當前提前職位（鄉鎮市長→原住民區長→鄉鎮市民代表→原住民區民代表→村里長，第一個還有缺口的）2.5× | **2026-11-28 之後直接回 0**；2026-11-07（`20261107000000`）起，`cool_until` 未過或 `task_in_check_cooldown`（查核階梯，2026-11-09 起）的不拉；補號次臂也不派不在中選會名冊上的人（`20261109190000`） |
 | `manual_front_pull()` | seed 內叫；台北時間每小時前 20 分鐘（`visitor_front_slot_start()`，`visitor_front_slot_hours()`=1、`visitor_front_window_minutes()`=20（`20261008165000`），即每小時 :00、:10 兩輪 seed）把 visitor 臂 open 的列（從沒派過、或最後派出早於本時段）設成 `visitor_front_seconds` | 2026-11-07（`20261107010000`）起，2 天內有 `not_found` 查核的不拉 |
 | 出生插隊 | 新手動任務的 `boost_seconds ＝ manual_front_seconds(task_id)`（上表） | BEFORE INSERT 觸發器 `trg_task_dispatches_nf_cooling_no_boost`（`20261107010000`）：uuid 任務出生時若 2 天內有 `not_found`，插隊歸零 |
 | 一次性 migration | `20261029010000`（補號次 5 年）、`20261029040000`（號次驗證票）、`20261101050000` 與 `20261107020000`（`auto:roster_check:2026*` 沒插隊的各加一份；後者略過查無冷卻中與 blocked 的） | 只動當時已在佇列的列；派出歸零所以是一次性；7 天重開的新列不會自動插隊 |
@@ -144,7 +144,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
   | 例外任務的 `confirmed` 與其他 | 14（`task_check_cooldown_days()`） |
   | `unreachable`（連不上） | 2（`task_unreachable_cooldown_days()`），不進階梯 |
 
-  例外（週期性重查、等官方公告）：`task_cooldown_settings.task_types`（`progress_stale`、`deadline_due`）、`not_running_recheck`、`roster_check`、`candidate_status_stale`、`election_result_missing`、`candidacy_source_missing` 的 `cand_no*`（號次）。TS 同一份 `LADDER_EXEMPT_TASK_TYPES`／`CHECK_LADDER_DAYS`（`apply-contribution.ts`），守門 `confirmed-direct.test.ts`。改階梯數字＝一行 `UPDATE task_check_ladder_settings`（TS 初值一起改）。
+  例外（週期性重查、等官方公告）：`task_cooldown_settings.task_types`（`progress_stale`、`deadline_due`）、`not_running_recheck`、`roster_check`、`candidate_status_stale`、`election_result_missing`（`candidacy_source_missing` 的 `cand_no*` 號次缺口 2026-11-09 起不再是例外、走階梯，`20261109190000`）。TS 同一份 `LADDER_EXEMPT_TASK_TYPES`／`CHECK_LADDER_DAYS`（`apply-contribution.ts`），守門 `confirmed-direct.test.ts`。改階梯數字＝一行 `UPDATE task_check_ladder_settings`（TS 初值一起改）。
 
 - 2026-11-07 起 `not_found` 的 `no_change` **不進投票**：交件當下直接 `applied`（`reviewed_by='system:not-found-direct'`），任務冷卻 2 天後回來；手動任務也只記一筆 `task_checks`、不關任務。2026-11-09 起 `confirmed` 的 `no_change` 也不進投票（`reviewed_by='system:confirmed-direct'`，協議 1.123.0），走同一條階梯；舊的等票中 confirmed 在 `20261109150000` 一次清掉。
 - 設定表的 `not_found_first_days`（14）已不被函式讀（進度類第一次也是 2 天），僅 `task_cooldown_max_days()` 取最大值時還看得到。

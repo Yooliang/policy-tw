@@ -21,6 +21,12 @@ function fnBody(sql: string, sig: string): string {
   return body.slice(0, body.indexOf("$$;", body.indexOf("$$") + 2) + 3);
 }
 
+/** task_check_ladder_exempt 的現行版本（20261109190000 拿掉號次缺口的例外） */
+async function exemptMig(): Promise<string> {
+  for await (const e of Deno.readDir(MIGRATIONS)) if (e.name.startsWith("20261109190000")) return (await Deno.readTextFile(new URL(e.name, MIGRATIONS))).replace(/\r\n/g, "\n");
+  throw new Error("migration not found");
+}
+
 async function ladderDb(notFound: readonly number[] = CHECK_LADDER_DAYS.not_found, confirmed: readonly number[] = CHECK_LADDER_DAYS.confirmed) {
   const sql = await mig();
   const db = new PGlite();
@@ -34,7 +40,7 @@ async function ladderDb(notFound: readonly number[] = CHECK_LADDER_DAYS.not_foun
     CREATE FUNCTION task_check_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT 14 $$;
     CREATE FUNCTION task_not_found_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT 2 $$;
     ${fnBody(sql, "task_check_ladder_days(")}
-    ${fnBody(sql, "task_check_ladder_exempt(")}
+    ${fnBody(await exemptMig(), "task_check_ladder_exempt(")}
     ${fnBody(sql, "task_check_cooldown_days_for(")}`);
   const v = sql.slice(sql.indexOf("CREATE OR REPLACE VIEW task_ladder_closed"));
   await db.exec(v.slice(0, v.indexOf(";\n") + 1));
@@ -66,7 +72,8 @@ Deno.test("A1 SQL 設定表初值＝TS CHECK_LADDER_DAYS（not_found 5/10/20、c
 
 Deno.test("A2 例外清單 SQL 與 TS 一致", async () => {
   const sql = await mig();
-  const fn = fnBody(sql, "task_check_ladder_exempt(");
+  const fn = fnBody(await exemptMig(), "task_check_ladder_exempt(");
+  assert(!fn.includes("cand_no"), "號次缺口 2026-11-09 起走階梯，不在例外裡");
   for (const t of LADDER_EXEMPT_TASK_TYPES) {
     if (t === "progress_stale" || t === "deadline_due") continue; // 這兩個來自 task_cooldown_settings.task_types
     assert(fn.includes(`'${t}'`), t);
@@ -101,10 +108,10 @@ Deno.test("B2 各 outcome 獨立設定：confirmed 只有 1 格，第 2 次查�
   assertEquals((await db.query(`SELECT 1 FROM task_ladder_closed`)).rows.length, 1);
 });
 
-Deno.test("B3 例外型別不結案：進度類 2→30、號次缺口 2、confirmed 14；unreachable 2 不進階梯", async () => {
+Deno.test("B3 例外型別不結案：進度類 2→30、名單清查 confirmed 14；unreachable 2 不進階梯", async () => {
   const db = await ladderDb();
   assertEquals(await walk(db, "auto:progress_stale:a", ["not_found", "not_found", "not_found", "not_found", "not_found"]), [2, 30, 30, 30, 30]);
-  assertEquals(await walk(db, "auto:candidacy_source_missing:cand_no:a", ["not_found", "not_found", "not_found", "not_found", "confirmed"]), [2, 2, 2, 2, 14]);
+  assertEquals(await walk(db, "auto:roster_check:a", ["not_found", "not_found", "not_found", "not_found", "confirmed"]), [2, 2, 2, 2, 14]);
   assertEquals(await walk(db, "auto:policy_missing:u", ["unreachable", "unreachable", "unreachable", "unreachable", "unreachable"]), [2, 2, 2, 2, 2]);
   assertEquals((await db.query(`SELECT 1 FROM task_ladder_closed`)).rows.length, 0);
 });
@@ -150,4 +157,17 @@ Deno.test("D confirmed 落庫後 applyNoChange 的訊息講階梯（一般任務
   const r = await applyContribution(fake as never, row as never);
   assertEquals(r.status, "applied");
   assert(r.message.includes("不需要別人驗證") && r.message.includes(String(CHECK_LADDER_DAYS.confirmed[0])), r.message);
+});
+
+Deno.test("B4 號次缺口（cand_no、cand_no_recheck）走階梯：not_found 5/10/20 第 4 次結案、confirmed 5/10 第 3 次結案（20261109190000；原本是例外、一個任務被確認 2～6 次還在派）", async () => {
+  const db = await ladderDb();
+  const P = "auto:candidacy_source_missing";
+  assertEquals(await walk(db, `${P}:cand_no:2026:村里長:苗栗縣:頭份市:p2`, ["not_found", "not_found", "not_found"]), [5, 10, 20]);
+  assertEquals((await db.query(`SELECT 1 FROM task_ladder_closed`)).rows.length, 0);
+  await walk(db, `${P}:cand_no:2026:村里長:苗栗縣:頭份市:p2`, ["not_found"]);
+  assertEquals((await db.query(`SELECT 1 FROM task_ladder_closed`)).rows.length, 1);
+  const db2 = await ladderDb();
+  assertEquals(await walk(db2, `${P}:cand_no_recheck:2026:縣市議員:新北市`, ["confirmed", "confirmed", "confirmed"]), [5, 10, 10]);
+  assertEquals((await db2.query<{ task_id: string }>(`SELECT task_id FROM task_ladder_closed`)).rows.map((r) => r.task_id), [`${P}:cand_no_recheck:2026:縣市議員:新北市`]);
+  for (const id of [`${P}:cand_no:a`, `${P}:cand_no_recheck:a`]) assertEquals(isLadderExempt(id), false, id);
 });
