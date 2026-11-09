@@ -64,7 +64,7 @@
   - `task_dispatches.priority_seconds`：新東西型為 0，其餘＝母任務的非負優先秒數（`verify_ticket_priority_seconds`）。`verify_follows_task` 欄位保留但排序鍵已不看它。
 - **冷卻／停放**：驗證票沒有 `cooling`／`blocked`（`refresh_dispatch_blocked` 排除 `verify:%`）。能不能領由驗證池的 SQL 決定。
 - **插隊**：`/boost`、`cand_no_front_pull`（第 2.4 節）會加 `boost_seconds`；驗證列的插隊不因派出歸零（`20261104120000` 註解；與任務列相反）。
-- 2026-11-07 起：`no_change` 的 `not_found` 不再進驗證（第 2.5 節），所以票只剩 `confirmed` 的 `no_change` 與其他型別。
+- 2026-11-07 起：`no_change` 的 `not_found` 不再進驗證（第 2.5 節），所以票只剩其他型別（`confirmed` 的 `no_change` 2026-11-09 起也不進驗證）。
 
 ### 2.2 優先秒數（自動缺口的 `priority_seconds`）
 
@@ -139,12 +139,14 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
   | outcome | 天數 |
   |---|---|
-  | `not_found`（查無） | 2（`task_not_found_cooldown_days()`；所有任務，2026-11-07 起，協議 1.119.0） |
-  | `unreachable`（連不上） | 2（`task_unreachable_cooldown_days()`） |
-  | 其他（`confirmed` 等） | 14（`task_check_cooldown_days()`） |
-  | `progress_stale`／`deadline_due` 且同任務第 2 次起的 `not_found` | 30（`task_cooldown_settings.not_found_repeat_days`；`enabled=true`、`task_types` 列這兩型） |
+  | `not_found`／`confirmed`（非例外任務，2026-11-09 起，協議 1.123.0） | **查核階梯**：同一任務兩種合計的第 n 次，天數取該筆 outcome 在 `task_check_ladder_settings.days` 的第 n 格（初值 `not_found`＝5／10／20、`confirmed`＝5／10），超過格數＝**結案**（`task_check_ladder_days()` 回 NULL；視圖 `task_ladder_closed` 列出；`auto:` 任務由 `refresh_dispatch_blocked` 永久 `blocked`、手動任務關閉） |
+  | 例外任務（`task_check_ladder_exempt()`）的 `not_found` | 2（`task_not_found_cooldown_days()`）；進度類同任務第 2 次起 30（`not_found_repeat_days`）；**不結案** |
+  | 例外任務的 `confirmed` 與其他 | 14（`task_check_cooldown_days()`） |
+  | `unreachable`（連不上） | 2（`task_unreachable_cooldown_days()`），不進階梯 |
 
-- 2026-11-07 起 `not_found` 的 `no_change` **不進投票**：交件當下直接 `applied`（`reviewed_by='system:not-found-direct'`），任務冷卻 2 天後回來；手動任務也只記一筆 `task_checks`、不關任務。`confirmed` 的 `no_change` 照舊要票。
+  例外（週期性重查、等官方公告）：`task_cooldown_settings.task_types`（`progress_stale`、`deadline_due`）、`not_running_recheck`、`roster_check`、`candidate_status_stale`、`election_result_missing`、`candidacy_source_missing` 的 `cand_no*`（號次）。TS 同一份 `LADDER_EXEMPT_TASK_TYPES`／`CHECK_LADDER_DAYS`（`apply-contribution.ts`），守門 `confirmed-direct.test.ts`。改階梯數字＝一行 `UPDATE task_check_ladder_settings`（TS 初值一起改）。
+
+- 2026-11-07 起 `not_found` 的 `no_change` **不進投票**：交件當下直接 `applied`（`reviewed_by='system:not-found-direct'`），任務冷卻 2 天後回來；手動任務也只記一筆 `task_checks`、不關任務。2026-11-09 起 `confirmed` 的 `no_change` 也不進投票（`reviewed_by='system:confirmed-direct'`，協議 1.123.0），走同一條階梯；舊的等票中 confirmed 在 `20261109150000` 一次清掉。
 - 設定表的 `not_found_first_days`（14）已不被函式讀（進度類第一次也是 2 天），僅 `task_cooldown_max_days()` 取最大值時還看得到。
 - 「有人回報查無、在等票」的任務（`no_change` pending／verified）：`blocked`（auto）且 `contribution_queue_tasks` 也排除（手動任務），不派給任何人。
 

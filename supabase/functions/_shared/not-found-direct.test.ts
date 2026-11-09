@@ -7,7 +7,7 @@
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
-import { applyContribution, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
+import { applyContribution, CHECK_LADDER_DAYS, NOT_FOUND_COOLDOWN_DAYS, NOT_FOUND_DIRECT_REVIEWER, TASK_CHECK_COOLDOWN_DAYS } from "./apply-contribution.ts";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 
@@ -42,6 +42,10 @@ async function days(taskId: string, outcome: string, priorNotFound = 0): Promise
     CREATE TABLE task_checks (id bigint PRIMARY KEY, task_id text, outcome text, checked_at timestamptz);
     CREATE FUNCTION task_unreachable_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT 2 $$;
     CREATE FUNCTION task_check_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT ${TASK_CHECK_COOLDOWN_DAYS} $$;
+    CREATE TABLE task_check_ladder_settings (outcome text PRIMARY KEY, days integer[] NOT NULL);
+    INSERT INTO task_check_ladder_settings VALUES ('not_found', ARRAY[5,10,20]), ('confirmed', ARRAY[5,10]);
+    ${await latestFn("task_check_ladder_days(")}
+    ${await latestFn("task_check_ladder_exempt(")}
     ${await latestFn("task_not_found_cooldown_days(")}
     ${await latestFn("task_check_cooldown_days_for(")}`);
   // 前面已有 priorNotFound 筆 not_found，這一筆是第 priorNotFound+1 次（id 最大、時間最晚）
@@ -53,21 +57,24 @@ async function days(taskId: string, outcome: string, priorNotFound = 0): Promise
   return r.rows[0].d;
 }
 
-Deno.test("A1 not_found 對所有任務都是 2 天；confirmed 14 天、unreachable 2 天不變", async () => {
+Deno.test("A1 not_found：例外型別（號次缺口等）仍 2 天；其餘任務走查核階梯第 1 次（confirmed-direct.test.ts 細測階梯）；unreachable 2 天不變", async () => {
   const P = "auto:candidacy_source_missing";
-  for (const id of [`${P}:cand_no:abc`, `${P}:cand_no_recheck:abc`, `${P}:other:abc`, `auto:profile_gap:x:abc`, `auto:policy_missing:abc`, "0c9c1a5e-1111-4222-8333-444444444444"]) {
+  for (const id of [`${P}:cand_no:abc`, `${P}:cand_no_recheck:abc`, "auto:roster_check:abc", "auto:not_running_recheck:1"]) {
     assertEquals(await days(id, "not_found"), NOT_FOUND_COOLDOWN_DAYS, id);
   }
+  for (const id of [`${P}:other:abc`, `auto:profile_gap:x:abc`, `auto:policy_missing:abc`, "0c9c1a5e-1111-4222-8333-444444444444"]) {
+    assertEquals(await days(id, "not_found"), CHECK_LADDER_DAYS.not_found[0], id);
+  }
   assertEquals(await days(`${P}:cand_no:abc`, "confirmed"), TASK_CHECK_COOLDOWN_DAYS);
-  assertEquals(await days(`auto:profile_gap:x:abc`, "confirmed"), TASK_CHECK_COOLDOWN_DAYS);
+  assertEquals(await days(`auto:profile_gap:x:abc`, "confirmed"), CHECK_LADDER_DAYS.confirmed[0]);
   assertEquals(await days(`${P}:cand_no:abc`, "unreachable"), 2);
 });
 
-Deno.test("A2 進度追蹤類：第一次 2 天、第二次起照設定表 30 天（保留）；其他型別第二次仍 2 天", async () => {
+Deno.test("A2 進度追蹤類（例外）：第一次 2 天、第二次起照設定表 30 天（保留）；一般型別第二次是階梯第 2 格", async () => {
   assertEquals(await days("auto:progress_stale:xyz", "not_found"), 2);
   assertEquals(await days("auto:progress_stale:xyz", "not_found", 1), 30);
   assertEquals(await days("auto:deadline_due:xyz", "not_found", 1), 30);
-  assertEquals(await days("auto:policy_missing:xyz", "not_found", 3), 2);
+  assertEquals(await days("auto:policy_missing:xyz", "not_found", 3), CHECK_LADDER_DAYS.not_found[2]);
 });
 
 Deno.test("A3 SQL 與 TS 的查無冷卻天數一致", async () => {
@@ -101,7 +108,7 @@ Deno.test("B1 auto: 任務 not_found（含號次、一般）記 task_checks，�
     const { fake, inserted } = fakeSupabase(null);
     const r = await applyContribution(fake as never, nc(id, "not_found") as never);
     assertEquals(r.status, "applied", id);
-    assert(r.message.includes(String(NOT_FOUND_COOLDOWN_DAYS)) && r.message.includes("不需要別人驗證"), r.message);
+    assert(r.message.includes("不需要別人驗證") && /天/.test(r.message), r.message);
     assert(inserted.some((i) => i.table === "task_checks" && i.row.task_id === id && i.row.outcome === "not_found"), id);
   }
 });
@@ -114,7 +121,7 @@ Deno.test("B2 手動任務 not_found：記 task_checks 進冷卻、不關任務�
     assertEquals(r.status, "applied");
     assert(inserted.some((i) => i.table === "task_checks" && i.row.task_id === TASK && i.row.outcome === "not_found" && i.row.contribution_id === "c-1"));
     assert(!closed.includes("contribution_tasks"), "不能關手動任務");
-    assert(r.message.includes("不會關閉") && r.message.includes("重新派出"), r.message);
+    assert(r.message.includes("不會馬上關閉"), r.message);
   }
   {
     const { fake, inserted } = fakeSupabase(null);
@@ -138,7 +145,7 @@ Deno.test("C1 contribute-handler：not_found 的 no_change 直接落庫，review
   assert(src.includes("reviewed_by: reviewedBy"), "寫庫的 reviewed_by 不能寫死 unreachable-precheck");
   // precheckSkip 在 notFoundDirect 併進 bypassNotes 之前建好：not_found 要經過落庫前置檢查
   assert(src.indexOf("const notFoundDirect") < src.indexOf("const precheckSkip"));
-  assert(src.indexOf("const precheckSkip") < src.indexOf("bypassNotes.set(i, {\n        note: `[系統] 已記錄「查無」"));
+  assert(src.indexOf("const precheckSkip") < src.indexOf("const confirmed = (validation.items[i]"));
 });
 
 Deno.test("C2 cand_no_front_pull 最新版：冷卻中的缺口不拉（cool_until 與 task_checks 兩道）", async () => {

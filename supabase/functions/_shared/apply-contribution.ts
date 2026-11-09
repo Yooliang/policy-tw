@@ -2375,6 +2375,26 @@ export const NOT_FOUND_COOLDOWN_DAYS = 2;
 /** 「查無」直接落庫時 contributions.reviewed_by 的值（contribute-handler 與 20261107000000 的舊資料清理共用） */
 export const NOT_FOUND_DIRECT_REVIEWER = "system:not-found-direct";
 /**
+ * 查核階梯（2026-11-09，協議 1.123.0，維護者定案：not_found 5/10/20 第 4 次結案、confirmed 5/10 第 3 次結案）：同一個任務（task_id）的 no_change not_found／confirmed 查核累計次數（兩種合計，進度追蹤等例外型別不適用），
+ * 第 n 次的冷卻天數看「這一筆自己的 outcome」那一列的第 n 格，超過格數＝結案、不再派。
+ * 跟 SQL 設定表 task_check_ladder_settings（20261109150000）的初值同一份，confirmed-direct.test.ts 盯著；改數字走 migration 的 UPDATE、這裡要一起改。
+ */
+export const CHECK_LADDER_DAYS: Readonly<Record<"not_found" | "confirmed", readonly number[]>> = { not_found: [5, 10, 20], confirmed: [5, 10] };
+/** 不套階梯的任務型別（週期性重查、等官方公告；SQL task_check_ladder_exempt 同一份）：照原本的冷卻（not_found 2 天、進度類第二次起 30 天、confirmed 14 天），不自動結案 */
+export const LADDER_EXEMPT_TASK_TYPES = ["progress_stale", "deadline_due", "not_running_recheck", "roster_check", "candidate_status_stale", "election_result_missing"] as const;
+export function isLadderExempt(taskId: string): boolean {
+  if (!taskId.startsWith("auto:")) return false;
+  const parts = taskId.split(":");
+  return (LADDER_EXEMPT_TASK_TYPES as readonly string[]).includes(parts[1]) || (parts[1] === "candidacy_source_missing" && (parts[2] ?? "").startsWith("cand_no"));
+}
+/** 回給代理的一句階梯說明 */
+export function ladderMessage(outcome: "not_found" | "confirmed"): string {
+  const d = CHECK_LADDER_DAYS[outcome];
+  return `這筆缺口 ${d[0]} 天內不會再派給任何人（同一個任務累計查核：${d.map((x, i) => `第 ${i + 1} 次冷卻 ${x} 天`).join("、")}，第 ${d.length + 1} 次起結案不再派）`;
+}
+/** 「確認無誤」直接落庫時 contributions.reviewed_by 的值（contribute-handler 與 20261109150000 的舊資料清理共用） */
+export const CONFIRMED_DIRECT_REVIEWER = "system:confirmed-direct";
+/**
  * 進度追蹤類（progress_stale、deadline_due）同一個任務第二次起回報查無（not_found）的冷卻天數：跟 SQL 設定表 task_cooldown_settings.not_found_repeat_days 的初值同一個數字。
  * 設定表可調（一行 UPDATE），這裡只用在回給代理的那句話；village-progress-cooling.test.ts 盯著兩邊的初值一致。第一次查無一律 NOT_FOUND_COOLDOWN_DAYS（2026-11-07 起不再讀設定表的 not_found_first_days）。
  */
@@ -2507,9 +2527,11 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
       return { status: "applied", message: `已記錄「查無公開進度」，不需要別人驗證：這筆缺口 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出（同一個任務第二次起回報查無，冷卻改 ${PROGRESS_REPEAT_COOLDOWN_DAYS} 天）；期間資料若補齊也會自行消失`, task_id: taskId };
     }
     if (outcome === "not_found") {
-      return { status: "applied", message: `已記錄「查無」，不需要別人驗證：這筆缺口 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出（公告還沒出來時別回查無，略過就好）`, task_id: taskId };
+      return { status: "applied", message: `已記錄「查無」，不需要別人驗證：${isLadderExempt(taskId) ? `這筆缺口 ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出` : ladderMessage("not_found")}（公告還沒出來時別回查無，略過就好）`, task_id: taskId };
     }
-    return { status: "applied", message: `已記錄「查過、無異動」，這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
+    return { status: "applied", message: outcome === "confirmed" && !isLadderExempt(taskId)
+        ? `已記錄「確認無誤」，不需要別人驗證：${ladderMessage("confirmed")}；期間資料若補齊也會自行消失`
+        : `已記錄「查過、無異動」，不需要別人驗證：這筆缺口 ${TASK_CHECK_COOLDOWN_DAYS} 天內不會再派給任何人；期間資料若補齊也會自行消失`, task_id: taskId };
   }
   // 提問任務不因 no_change 關閉（2026-09-20）：關了就沒人再答，訪客永遠看到「正在查證」。新的 no_change 在 contribute 就會被擋，這裡守舊資料。
   // 這次查詢順便拿來判斷任務存不存在（unreachable 分支要用，不能只靠 closeTask 的回傳值判斷）。
@@ -2568,7 +2590,7 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     const { error: checkError } = await supabase.from("task_checks").insert(check);
     throwIf(checkError, "task_checks insert (manual not_found)");
     await recordInsert(supabase, ctxOf(row), "task_checks", taskId, check);
-    return { status: "applied", message: `已記錄「查無」，不需要別人驗證：任務 ${taskId} ${NOT_FOUND_COOLDOWN_DAYS} 天內不會再派給任何人，之後會重新派出（不會關閉；公告還沒出來時別回查無，略過就好）`, task_id: taskId };
+    return { status: "applied", message: `已記錄「查無」，不需要別人驗證：任務 ${taskId} ${CHECK_LADDER_DAYS.not_found[0]} 天內不會再派給任何人（同一個任務累計查核：${CHECK_LADDER_DAYS.not_found.map((x, i) => `第 ${i + 1} 次冷卻 ${x} 天`).join("、")}，第 ${CHECK_LADDER_DAYS.not_found.length + 1} 次起結案；不會馬上關閉；公告還沒出來時別回查無，略過就好）`, task_id: taskId };
   }
   const task = await closeTask(supabase, taskId, row.agent_name);
   // 任務已經不存在（被刪了）：沒有東西可關，重試也不會變（2026-09-25 第一次出現 apply_failed，重試三次後會被當落庫失敗退件）

@@ -233,7 +233,8 @@ const PAIRS: Pair[] = [
   { name: "contribution_queue_at" },
   {
     name: "refresh_dispatch_blocked",
-    note: "冷卻天數換回日本站的兩個設定（task_cooldown_settings 與 task_check_cooldown_days_for 是台灣村里長進度專用）；roster_check 的 not_found 在告示日打斷冷卻（20261010120000 的偏離，秒數化時照帶）",
+    before: "20261109150000_confirmed_no_verify_check_ladder.sql",
+    note: "取台灣加查核階梯結案（20261109150000，task_ladder_closed 永久 blocked／關手動任務，日本站暫不跟）之前的版本；冷卻天數換回日本站的兩個設定（task_cooldown_settings 與 task_check_cooldown_days_for 是台灣村里長進度專用）；roster_check 的 not_found 在告示日打斷冷卻（20261010120000 的偏離，秒數化時照帶）",
     edits: [["max(tc.checked_at + (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL) AS until", "max(tc.checked_at + (CASE WHEN tc.outcome = 'unreachable' THEN task_unreachable_cooldown_days() ELSE task_check_cooldown_days() END || ' days')::INTERVAL) AS until"], ["    WHERE tc.checked_at > now() - (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL\n    -- 比任何一種冷卻都長的歷史紀錄不用逐筆問天數（task_checks 只會越積越多；agy 審查 #480）：上限是一個 InitPlan，只算一次\n      AND tc.checked_at > now() - make_interval(days => (SELECT task_cooldown_max_days()))\n", "    WHERE tc.checked_at > now() - (CASE WHEN tc.outcome = 'unreachable' THEN task_unreachable_cooldown_days() ELSE task_check_cooldown_days() END || ' days')::INTERVAL\n      AND NOT roster_not_found_released(tc.task_id, tc.outcome, tc.checked_at)  -- 日本版：roster_check の not_found だけ告示日で冷卻を打ち切る\n"]],
   },
   { name: "refresh_verify_targets" },
