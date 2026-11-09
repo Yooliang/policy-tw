@@ -7,7 +7,7 @@ import { onPaneShown } from '../composables/usePane'
 import Hero from '../components/Hero.vue'
 import { CalendarRange } from 'lucide-vue-next'
 import {
-  DAILY_GROUPS, STAGE_META, armGroup, armLabel, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
+  DAILY_GROUPS, STAGE_META, armGroup, armLabel, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay,
   type OverrideRow, type Passive, type RuleFlags, type Timeline, type TimelineArm, type TimelineElection, type TimelineWindow,
 } from '../lib/dispatch-schedule'
 
@@ -164,7 +164,7 @@ function bars(a: TimelineArm) {
 const spansOf = (a: TimelineArm) => a.windows.map(spanText).join('、')
 const ovsOf = (a: TimelineArm, type?: string | null) => (tl.value ? armOverrides(overrides.value, a.arm, tl.value.election.id, type) : [])
 /** 任務名稱的滑過提示：開放期間（原本是名稱下方的小字）＋覆寫 */
-const nameTitle = (a: TimelineArm) => [spansOf(a), ...ovsOf(a).map(overrideText)].filter(Boolean).join('\n')
+const nameTitle = (a: TimelineArm) => [armLabel(a.arm), spansOf(a), ...ovsOf(a).map(overrideText)].filter(Boolean).join('\n')
 const ringOf = (a: TimelineArm) => (a.overridden || ovsOf(a).length ? `0 0 0 2px ${C.warm}` : 'none')
 /** 長條上畫覆寫：一律開／關從今天畫到到期日（沒有到期日畫到最右）；限定期間畫它的起訖（同主控台 overrideBars） */
 function overrideBars(a: TimelineArm, type?: string | null) {
@@ -308,7 +308,8 @@ const FUNNEL: [string, string][] = [
         <!-- 當屆選舉 -->
         <div class="overflow-x-auto">
           <div class="min-w-[760px] space-y-6">
-            <section class="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-election-section">
+            <section class="relative bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-election-section">
+              <div class="pointer-events-none absolute inset-y-0 left-56 right-20 z-20" aria-hidden="true" data-testid="dispatch-today-line"><div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today }"></div></div>
               <div class="flex border-b border-slate-200">
                 <div class="w-56 shrink-0 px-4 py-2 text-xs text-slate-500 self-end">任務</div>
                 <div class="relative h-28 flex-1">
@@ -336,15 +337,14 @@ const FUNNEL: [string, string][] = [
                 </div>
                 <template v-for="a in g.arms" :key="a.arm">
                   <div class="flex items-center border-b border-slate-100">
-                    <div class="w-56 shrink-0 px-4 py-2">
-                      <button v-if="a.by_type?.length" type="button" class="-ml-1 rounded px-1 text-left hover:bg-slate-100" :aria-expanded="expanded.has(a.arm)" :title="[expanded.has(a.arm) ? '收起各職位' : '展開看各職位的件數與日程', nameTitle(a)].filter(Boolean).join('\n')" @click="toggle(a.arm)">
-                        <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span>{{ armLabel(a.arm) }}
+                    <div class="flex w-56 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap px-4 py-2">
+                      <button v-if="a.by_type?.length" type="button" class="-ml-1 min-w-0 truncate rounded px-1 text-left hover:bg-slate-100" :aria-expanded="expanded.has(a.arm)" :title="[expanded.has(a.arm) ? '收起各職位' : '展開看各職位的件數與日程', nameTitle(a)].filter(Boolean).join('\n')" @click="toggle(a.arm)">
+                        <span class="mr-0.5 inline-block w-3 text-[10px] text-slate-400">{{ expanded.has(a.arm) ? '▾' : '▸' }}</span><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}
                       </button>
-                      <span v-else :title="nameTitle(a)">{{ armLabel(a.arm) }}</span>
-                      <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-1.5 inline-block rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
+                      <span v-else :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
+                      <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-0.5 inline-block shrink-0 rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                     </div>
                     <div class="relative h-7 flex-1">
-                      <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
                       <div
                         v-for="b in bars(a)" :key="b.key" class="absolute top-1.5 h-4 rounded-sm"
                         :style="{
@@ -363,7 +363,6 @@ const FUNNEL: [string, string][] = [
                     <div v-for="b in a.by_type" :key="b.election_type ?? ''" class="flex items-center">
                       <div class="w-56 shrink-0 py-1 pl-10 pr-4 text-xs">{{ b.election_type ?? '不分職位' }}</div>
                       <div class="relative h-5 flex-1">
-                        <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
                         <div
                           v-for="t in typeBars(a, b.election_type)" :key="t.key" class="absolute top-1 h-3 rounded-sm"
                           :style="{
@@ -382,7 +381,8 @@ const FUNNEL: [string, string][] = [
             </section>
 
             <!-- 日常：不跟選舉日曆走，沿用同一條軸好對照今天 -->
-            <section v-if="dailyGroups.length" class="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-daily-section">
+            <section v-if="dailyGroups.length" class="relative bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-daily-section">
+              <div class="pointer-events-none absolute inset-y-0 left-56 right-20 z-20" aria-hidden="true" data-testid="dispatch-today-line"><div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today }"></div></div>
               <!-- 這一區自己的刻度列：日期刻度＋今天，不用往上對照 -->
               <div class="flex border-b border-slate-200" data-testid="dispatch-daily-axis">
                 <div class="w-56 shrink-0 px-4 py-2 text-xs text-slate-500 self-end">任務</div>
@@ -409,12 +409,11 @@ const FUNNEL: [string, string][] = [
                   <span class="ml-2 text-slate-500">{{ g.hint }}</span>
                 </div>
                 <div v-for="a in g.arms" :key="a.arm" class="flex items-center border-b border-slate-100">
-                  <div class="w-56 shrink-0 px-4 py-2">
-                    <span :title="nameTitle(a)">{{ armLabel(a.arm) }}</span>
-                    <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-1.5 inline-block rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
+                  <div class="flex w-56 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap px-4 py-2">
+                    <span :title="nameTitle(a)" class="min-w-0 truncate"><span v-if="armLabelParts(a.arm).tag" class="mr-1 rounded bg-slate-100 px-1 align-middle text-[10px] text-slate-500">{{ armLabelParts(a.arm).tag }}</span>{{ armLabelParts(a.arm).name }}</span>
+                    <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-0.5 inline-block shrink-0 rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                   </div>
                   <div class="relative h-7 flex-1">
-                    <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
                     <div
                       v-for="b in bars(a)" :key="b.key" class="absolute top-1.5 h-4 rounded-sm"
                       :style="{

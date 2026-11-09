@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { DAILY_GROUPS, STAGE_META, armGroup, armLabel, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay, type OverrideRow } from "./dispatch-schedule.ts";
+import { DAILY_GROUPS, STAGE_META, armGroup, armLabel, armLabelParts, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay, type OverrideRow } from "./dispatch-schedule.ts";
 
 Deno.test("日期與天數互轉", () => {
   assertEquals(fromDay(toDay("2026-11-28")), "2026-11-28");
@@ -46,4 +46,9 @@ Deno.test("覆寫：依任務、選舉、職位篩選，徽章與提示帶理由
   assertEquals(overrideBadge(o({ force: "window" })), "覆寫");
   assert(overrideText(o({ force: "window", open_from: "2026-11-01" })).includes("不限止"));
   assert(overrideText(o({})).includes("理由：暫停補號次"));
+});
+
+Deno.test("列名拆小標籤：有「XXX：」前綴的拆開，沒有的原樣", () => {
+  assertEquals(armLabelParts("traffic:deadline_due"), { tag: "有人看", name: "期限到了查進度" });
+  assertEquals(armLabelParts("ballot_numbers"), { tag: "", name: armLabel("ballot_numbers") });
 });
