@@ -28,13 +28,15 @@ export interface TimelineArm {
   /** 1 常時、2 參選期、3 登記後到投票、4 開票、5 就任、6 任期中、7 卸任交接 */
   stage: number
   is_open: boolean
+  /** 有生效中的覆寫（activity_overrides）蓋在這支任務上；console_timeline 回傳，跟主控台同一欄 */
+  overridden?: boolean
   queue_count: number | null
   election_count?: number
   daily_count?: number
   stage_end?: string | null
   /** 這一屆還有件數，而且這一段已經結束 */
   stale?: boolean
-  by_type?: { election_type: string | null; n: number; is_open: boolean }[]
+  by_type?: { election_type: string | null; n: number; is_open: boolean; overridden?: boolean }[]
   windows: TimelineWindow[]
 }
 export interface TimelineMilestone {
@@ -57,6 +59,35 @@ export interface Passive {
   news_queued: number
   news_7d: Record<string, number> | null
 }
+/** 生效中的覆寫（視圖 console_active_overrides，anon 可讀，主控台同一份） */
+export type OverrideForce = 'open' | 'closed' | 'window'
+export interface OverrideRow {
+  id: number
+  activity: string
+  election_id: number | string | null
+  election_type: string | null
+  force: OverrideForce
+  open_from: string | null
+  open_until: string | null
+  reason: string
+  expires_at: string | null
+}
+export const OVERRIDE_FORCE_LABEL: Record<OverrideForce, string> = { open: '一律開', closed: '一律關', window: '限定期間' }
+/** 徽章字樣：一律關＝手動關閉（暫停），其餘沿用主控台的「覆寫」 */
+export const overrideBadge = (o: OverrideRow) => (o.force === 'closed' ? '手動關閉' : o.force === 'open' ? '手動開放' : '覆寫')
+/** 這支任務（某個職位）在這一屆生效的覆寫；職位空的蓋全部職位，選舉空的蓋全部選舉（同主控台 armOverrides） */
+export function armOverrides(all: OverrideRow[], arm: string, electionId: string, type?: string | null): OverrideRow[] {
+  return all.filter((o) => o.activity === arm
+    && (o.election_id == null || String(o.election_id) === electionId)
+    && (type === undefined || o.election_type == null || o.election_type === type))
+}
+/** 覆寫的說明（滑過提示）：種類、期間、到期、理由 */
+export function overrideText(o: OverrideRow): string {
+  const span = o.force === 'window' ? `（${o.open_from ?? '不限起'} ～ ${o.open_until ?? '不限止'}）` : ''
+  return `覆寫：${OVERRIDE_FORCE_LABEL[o.force]}${span}${o.election_type ? `・${o.election_type}` : ''}${o.expires_at ? `・到期 ${o.expires_at}` : ''}
+理由：${o.reason}`
+}
+
 /** 規則的排除職位與流量條件（rule id 為鍵） */
 export interface RuleFlags { except: string[]; traffic: boolean }
 

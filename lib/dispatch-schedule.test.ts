@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { DAILY_GROUPS, STAGE_META, armGroup, armLabel, fromDay, makeScale, milestoneLabel, toDay } from "./dispatch-schedule.ts";
+import { DAILY_GROUPS, STAGE_META, armGroup, armLabel, armOverrides, fromDay, makeScale, milestoneLabel, overrideBadge, overrideText, toDay, type OverrideRow } from "./dispatch-schedule.ts";
 
 Deno.test("日期與天數互轉", () => {
   assertEquals(fromDay(toDay("2026-11-28")), "2026-11-28");
@@ -34,4 +34,16 @@ Deno.test("名稱與歸類：查得到中文名、查不到原樣、未登記的
   assertEquals(armGroup("no_such_arm"), "unclassified");
   assertEquals(DAILY_GROUPS.map((g) => g.key), ["cleanup", "backlog", "unclassified"]);
   assertEquals(milestoneLabel("polling"), "投票日");
+});
+
+Deno.test("覆寫：依任務、選舉、職位篩選，徽章與提示帶理由", () => {
+  const o = (p: Partial<OverrideRow>): OverrideRow => ({ id: 1, activity: "ballot_numbers", election_id: null, election_type: null, force: "closed", open_from: null, open_until: null, reason: "暫停補號次", expires_at: null, ...p });
+  const all = [o({}), o({ id: 2, election_id: 9 }), o({ id: 3, activity: "other" }), o({ id: 4, election_type: "村里長" })];
+  assertEquals(armOverrides(all, "ballot_numbers", "9").map((x) => x.id), [1, 2, 4]);
+  assertEquals(armOverrides(all, "ballot_numbers", "2026").map((x) => x.id), [1, 4]);
+  assertEquals(armOverrides(all, "ballot_numbers", "9", "市長").map((x) => x.id), [1, 2]);
+  assertEquals(overrideBadge(o({})), "手動關閉");
+  assertEquals(overrideBadge(o({ force: "window" })), "覆寫");
+  assert(overrideText(o({ force: "window", open_from: "2026-11-01" })).includes("不限止"));
+  assert(overrideText(o({})).includes("理由：暫停補號次"));
 });
