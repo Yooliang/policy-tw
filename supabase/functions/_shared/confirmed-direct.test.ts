@@ -124,6 +124,9 @@ Deno.test("C2 舊資料清理區塊：只動 pending 的 no_change confirmed，�
   assert(sql.includes("'verify:' || n.id::text"));
   assert(sql.includes("NOT EXISTS (SELECT 1 FROM task_checks x WHERE x.contribution_id = n.id)"));
   assert(sql.trimEnd().endsWith("SELECT refresh_dispatch_blocked();"));
+  // ON CONFLICT DO UPDATE 不能在同一條 INSERT 兩次碰同一列（正式庫同一個人有多筆等票的 duplicate_policy，第一次部署因此失敗）：兩個 upsert 都要先 DISTINCT ON
+  assert(/INSERT INTO policy_dupe_reviews[\s\S]*?SELECT DISTINCT ON \(m\[1\]::uuid\)/.test(sql), "policy_dupe_reviews 要 DISTINCT ON 人物");
+  assert(/INSERT INTO lineage_candidate_reviews[\s\S]*?SELECT DISTINCT ON \(k\.review_key\)/.test(sql), "lineage_candidate_reviews 要 DISTINCT ON review_key");
 });
 
 Deno.test("C3 refresh_dispatch_blocked：結案的 auto: 任務永久 blocked，手動任務關閉", async () => {
