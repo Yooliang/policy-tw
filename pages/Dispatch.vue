@@ -308,7 +308,8 @@ const FUNNEL: [string, string][] = [
         <!-- 當屆選舉 -->
         <div class="overflow-x-auto">
           <div class="min-w-[760px] space-y-6">
-            <section class="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-election-section">
+            <section class="relative bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-election-section">
+              <div class="pointer-events-none absolute inset-y-0 left-56 right-20 z-20" aria-hidden="true" data-testid="dispatch-today-line"><div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today }"></div></div>
               <div class="flex border-b border-slate-200">
                 <div class="w-56 shrink-0 px-4 py-2 text-xs text-slate-500 self-end">任務</div>
                 <div class="relative h-28 flex-1">
@@ -344,7 +345,6 @@ const FUNNEL: [string, string][] = [
                       <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-1.5 inline-block rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                     </div>
                     <div class="relative h-7 flex-1">
-                      <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
                       <div
                         v-for="b in bars(a)" :key="b.key" class="absolute top-1.5 h-4 rounded-sm"
                         :style="{
@@ -363,7 +363,6 @@ const FUNNEL: [string, string][] = [
                     <div v-for="b in a.by_type" :key="b.election_type ?? ''" class="flex items-center">
                       <div class="w-56 shrink-0 py-1 pl-10 pr-4 text-xs">{{ b.election_type ?? '不分職位' }}</div>
                       <div class="relative h-5 flex-1">
-                        <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
                         <div
                           v-for="t in typeBars(a, b.election_type)" :key="t.key" class="absolute top-1 h-3 rounded-sm"
                           :style="{
@@ -382,7 +381,8 @@ const FUNNEL: [string, string][] = [
             </section>
 
             <!-- 日常：不跟選舉日曆走，沿用同一條軸好對照今天 -->
-            <section v-if="dailyGroups.length" class="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-daily-section">
+            <section v-if="dailyGroups.length" class="relative bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden" data-testid="dispatch-daily-section">
+              <div class="pointer-events-none absolute inset-y-0 left-56 right-20 z-20" aria-hidden="true" data-testid="dispatch-today-line"><div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today }"></div></div>
               <!-- 這一區自己的刻度列：日期刻度＋今天，不用往上對照 -->
               <div class="flex border-b border-slate-200" data-testid="dispatch-daily-axis">
                 <div class="w-56 shrink-0 px-4 py-2 text-xs text-slate-500 self-end">任務</div>
@@ -414,7 +414,6 @@ const FUNNEL: [string, string][] = [
                     <span v-for="o in ovsOf(a)" :key="`b${o.id}`" class="ml-1.5 inline-block rounded px-1 align-middle text-[10px]" style="background: rgba(245,158,11,0.15); color: #b45309" :title="overrideText(o)" data-testid="dispatch-override-badge">{{ overrideBadge(o) }}</span>
                   </div>
                   <div class="relative h-7 flex-1">
-                    <div class="absolute bottom-0 top-0 border-l-2" :style="{ left: `${todayX}%`, borderColor: C.today, opacity: 0.4 }"></div>
                     <div
                       v-for="b in bars(a)" :key="b.key" class="absolute top-1.5 h-4 rounded-sm"
                       :style="{
