@@ -179,7 +179,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
       <div
         v-for="politician in shown"
         :key="politician.id"
-        class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col"
+        class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col h-full"
       >
         <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
           <img
@@ -202,7 +202,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           ><Check :size="14" :stroke-width="3" /></span>
           <PartyBadge :party="politician.party" class="absolute bottom-2 right-2" />
         </div>
-        <div class="p-3 text-left">
+        <div class="p-3 text-left flex-1">
           <!-- 真的 <a>：預渲染 HTML 才有選舉頁 → 候選人頁的連結給爬蟲走（stretched link，整張卡都點得到）-->
           <h4 class="text-base font-bold text-navy-900 group-hover:text-violet-700 transition-colors">
             <router-link :to="`/politician/${politician.id}`" class="after:absolute after:inset-0 after:content-['']">{{ politician.name }}</router-link>
@@ -217,10 +217,12 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
           <p v-if="currentTitle(politician)" class="text-[11px] text-sky-700 mt-1 line-clamp-1">現任 {{ currentTitle(politician) }}</p>
           <!-- 0 用灰色：純嚴格只算當屆之後，多數參選人是 0，全部紫色徽章會變成一片噪音；
                但不能直接藏起來——「這個人還沒有當屆政見」正是要讓人看見、有人去補的事 -->
-          <span :class="['inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded mt-2 font-bold',
-                         getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
-            <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項{{ voted && politician.candidacyStatus === 'elected' ? '政見' : '承諾' }}
-          </span>
+
+        </div>
+        <!-- 承諾數：整張卡寬的底部色帶，mt-auto 貼卡片最底，同列卡片內容高度不同也對齊 -->
+        <div :class="['mt-auto flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-left',
+                      getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
+          <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項{{ voted && politician.candidacyStatus === 'elected' ? '政見' : '承諾' }}
         </div>
       </div>
     </div>
