@@ -113,7 +113,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 | source | 是什麼 | open／closed | 出生時的插隊 | 備註 |
 |---|---|---|---|---|
-| `web_request` | 網站請求：訪客在網頁按「請 AI 幫忙查」等；visitor 臂 | 1,076／4,571 | `visitor_front_seconds`（10 年） | 村里長／鄉鎮市民代表 × 缺政見，在選舉公報上架前**停放**（`web_request_parked`，`20261028130000`）：不出現在臂輸出、不被拉回；`elections.bulletin_published_on` 一填自動放出 |
+| `web_request` | 網站請求：訪客在網頁按「請 AI 幫忙查」等；visitor 臂 | 1,076／4,571 | `visitor_front_seconds`（10 年） | 村里長／鄉鎮市民代表 × 缺政見，在選舉公報上架前**停放**（`web_request_parked`，`20261028130000`）：不出現在臂輸出、不被拉回；`elections.bulletin_published_on` 一填自動放出；**同一人已有開著的 `policy_missing`／`term_policy_missing` 缺口的缺政見請求併入缺口**（`web_request_coverage`，`20261111010000`）：請求不單獨派（臂不輸出、仍 open），缺口拿一次 `visitor_front_seconds` 插隊（標記 `opened_by.web_request_boost_ids`，冷卻中的缺口不插），請求只在「缺口已不覆蓋它、而且人物現在有承諾」時由 10 分鐘對帳關閉（`closed_reason='gap_filled:…'`，不單憑 gap_events 的 filled），`window` 關閉則請求回到可派並接回派出歷史（`web_request_dispatch_memory`） |
 | `question`（`task_type='question'`） | 公民提問：訪客的提問；`manual_task_is_visitor` 視同 visitor | 現無列 | 同 visitor | 一題最多收 3 份答案（`question_answer_cap()`）；同鍵時支持度高的先 |
 | `suggested` | AI 提議：代理交 `task_suggestion` 或系統（`system-one?action=followups`，每小時）從投票備註產生的跟進；多數 `task_type='other'` | 2,273／533 | 0 | 佇列中最大的手動來源；出生來源屬推測（見下） |
 | `manual` | 維護者建的 | 168／462 | `manual_front_seconds`（5 年） | 例：`news_sweep`、`candidate_status_stale` |
@@ -187,7 +187,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 - `candidacy_source_missing` 的 32 列：`cand_no` 10（村里長 8、鄉鎮市民代表 1、原住民區民代表 1）、`cand_no_recheck` 22（村里長 15、縣市議員 2、鄉鎮市民代表 5）；其中 cooling 11。號次已幾乎補完。
 - `roster_check` 311 列依職位：鄉鎮市民代表 144（cooling 134）、村里長 113（boosted 70）、縣市議員 23、縣市長 17、原住民區民代表 7、鄉鎮市長 3、立委 2、總統 1、原住民區長 1。
-- `contribution_tasks`（手動任務表）open／closed：`web_request` 1,076／4,571、`suggested` 2,273／533、`manual` 168／462、`auto_dispute` 7／233；本表 open 比佇列列數多，差在停放（`web_request_parked`）與已被臂輸出濾掉的。差額來自 `contribution_auto_tasks_manual`（`20261028130000`）的兩道過濾：`NOT web_request_parked(t.id)`（村里長、鄉鎮市民代表缺政見的網站請求在公報前停放，佔絕大部分）與已收滿答案的公民提問。
+- `contribution_tasks`（手動任務表）open／closed：`web_request` 1,076／4,571、`suggested` 2,273／533、`manual` 168／462、`auto_dispute` 7／233；本表 open 比佇列列數多，差在停放（`web_request_parked`）與已被臂輸出濾掉的。差額來自 `contribution_auto_tasks_manual`（`20261028130000`）的兩道過濾：`NOT web_request_parked(t.id)`（村里長、鄉鎮市民代表缺政見的網站請求在公報前停放，佔絕大部分）與已收滿答案的公民提問；`20261111010000` 起再多一道 `NOT EXISTS web_request_coverage`（缺政見請求被同一人的既有缺口覆蓋，2026-11-10 正式庫 57 件）。
 - 以 `policy_missing` 的**中位列**為準，它前面（可派、`queue_at` 更早）有：`profile_gap` 4,058、`policy_missing` 自己 857、驗證票 653、手動任務 228、`duplicate_policy` 196、`roster_check` 92、`lineage_candidate` 90，其餘各 ≤ 17。
 
 ## 4. 已知的坑（2026-11-07 查到的）
@@ -265,6 +265,7 @@ SELECT task_id, task_type, queue_at, boost_seconds, priority_seconds, dispatch_c
 - 驗證票：`20261017010000_verify_ticket_follows_task.sql`、`20261104120000_verify_ticket_key.sql`、`20261028140000_no_change_verify_defer.sql`（延後欄位已不用）
 - 插隊：`20260921000030_single_queue_boosts.sql`、`20261019050000_boost_no_seed.sql`、`20261104110000_boost_maintainer_only.sql`、`20261029050000_cand_no_front_pull_hourly.sql`（之後多次改定義，現行見 `pg_get_functiondef`）
 - 停放：`20261028130000_park_village_policy_web_requests.sql`
+- 網站請求併入缺口：`20261111010000_web_request_merge_gap.sql`（視圖 `web_request_coverage`、函式 `web_request_gap_sync()`／`web_request_gap_boost()`／`web_request_close_filled()`、pg_cron `web-request-gap-sync-10min`；決策 `docs/decisions/2026-11-11-網站請求併入既有缺口.md`）
 - `/next`：`supabase/functions/next/index.ts`、`supabase/functions/_shared/dispatch.ts`（`pickQueueHead`）
 - 規則與決策的來源：`CLAUDE.md`「派工佇列」條目、`docs/DECISIONS.md`、`docs/PIPELINE.md`（自動缺口任務一覽）、`docs/PLAN-tasks-as-rows.md`（歷史設計）
 
