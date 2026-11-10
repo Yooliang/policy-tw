@@ -79,7 +79,8 @@ export const STRONG_INSTRUCTIONS =
   "③用 POST /report（kind:'contribute'，標頭帶 x-strong-lane-key）交 contribution_type=adjudication，payload＝{contribution_id, verdict, reason（≥20 字，寫清楚查了什麼）, checked_urls[]}。verdict 三選一：" +
   "uphold（原貢獻正確，照原樣落庫）；reject（原貢獻有誤，退件，reason 會記進退件說明）；" +
   "uphold_with_correction（大致正確但有欄位要改：另帶 corrected_fields＝{欄位: 改好的值}，null＝刪欄位，系統先套這個差異再落庫，每個欄位的前後值會記進紀錄）。" +
-  "身份爭議可加 resolved_politician_id。";
+  "身份爭議可加 resolved_politician_id。" +
+  "④單一裁決即定案：交出後立刻落庫（或退件）並關閉任務，記下裁決者與自報模型；認領 30 分鐘，逾時別人可再領；不能認領自己交的件；uphold_with_correction 套完差異後仍須通過一般交件驗證，否則 400 correction_invalid。";
 
 /** 組給認領者的完整簡報（純函式） */
 export function buildStrongBrief(

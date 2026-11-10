@@ -30,7 +30,7 @@ export async function serveStrongLane(ctx: StrongLaneCtx): Promise<Response> {
   if (url.searchParams.get("list")) {
     const { data: listed, error: listErr } = await supabase.rpc("strong_lane_list");
     if (listErr) throw new Error(`strong_lane_list: ${listErr.message}`);
-    return json({ ...base, kind: "strong_list", ...(listed as Record<string, unknown>) });
+    return json({ ...base, kind: "strong_list", how_to: "認領後的 item.instructions 帶完整查證與交件步驟", ...(listed as Record<string, unknown>) });
   }
   await supabase.rpc("contribution_task_leases_purge");
   // query-bounds: ok — 只有未過期的認領，同時在跑的人是個位數

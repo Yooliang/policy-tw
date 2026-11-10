@@ -5,7 +5,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { latestFn, readMig } from "./arms-pglite.ts";
-import { applyPayloadCorrection, buildStrongBrief, correctionProblems, isStrongTarget, STRONG_KEY_HEADER, STRONG_REVIEWER, strongKeyOk } from "./strong-lane.ts";
+import { applyPayloadCorrection, buildStrongBrief, correctionProblems, isStrongTarget, STRONG_INSTRUCTIONS, STRONG_KEY_HEADER, STRONG_REVIEWER, strongKeyOk } from "./strong-lane.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 
 const MIG = "20261109230000_strong_lane.sql";
@@ -249,9 +249,11 @@ Deno.test("D3 applyAdjudication：單一裁決認 reviewed_by＝strong-adjudicat
   assertEquals(STRONG_REVIEWER, "strong-adjudication");
 });
 
-Deno.test("D4 協議文件與版號：skill.md 講清楚鑰匙、認領、三種 verdict、授權不看模型名", async () => {
+Deno.test("D4 協議文件不外露鑰匙細節、指示在認領簡報、版號一致", async () => {
   const skill = await read("../../../public/skill.md");
-  for (const needle of ["x-strong-lane-key", "lane=strong", "uphold_with_correction", "corrected_fields", "單一裁決即定案", "不拿來授權", "strong-lane-key"]) assertStringIncludes(skill, needle);
+  for (const needle of ["x-strong-lane-key", "strong-lane-key", "STRONG_LANE_KEY"]) assertEquals(skill.includes(needle), false, needle);
+  assertStringIncludes(skill, "requires_tier");
+  for (const needle of ["uphold_with_correction", "corrected_fields", "單一裁決即定案", "checked_urls"]) assertStringIncludes(STRONG_INSTRUCTIONS, needle);
   const proto = await read("./protocol.ts");
   const v = /PROTOCOL_VERSION = "(\d+\.\d+\.\d+)"/.exec(proto)![1];
   assertStringIncludes(skill, `**版本**：${v}`);
