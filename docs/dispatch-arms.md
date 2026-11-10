@@ -113,7 +113,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 | source | 是什麼 | open／closed | 出生時的插隊 | 備註 |
 |---|---|---|---|---|
-| `web_request` | 網站請求：訪客在網頁按「請 AI 幫忙查」等；visitor 臂 | 1,076／4,571 | `visitor_front_seconds`（10 年） | 村里長／鄉鎮市民代表 × 缺政見，在選舉公報上架前**停放**（`web_request_parked`，`20261028130000`）：不出現在臂輸出、不被拉回；`elections.bulletin_published_on` 一填自動放出；**同一人已有開著的 `policy_missing`／`term_policy_missing` 缺口的缺政見請求併入缺口**（`web_request_coverage`，`20261111010000`）：請求不單獨派（臂不輸出、仍 open），缺口拿一次 `visitor_front_seconds` 插隊（標記 `opened_by.web_request_boost_ids`，冷卻中的缺口不插），缺口 `filled` 關閉時請求跟著關（`closed_reason='gap_filled:…'`），`window` 關閉則請求回到可派 |
+| `web_request` | 網站請求：訪客在網頁按「請 AI 幫忙查」等；visitor 臂 | 1,076／4,571 | `visitor_front_seconds`（10 年） | 村里長／鄉鎮市民代表 × 缺政見，在選舉公報上架前**停放**（`web_request_parked`，`20261028130000`）：不出現在臂輸出、不被拉回；`elections.bulletin_published_on` 一填自動放出；**同一人已有開著的 `policy_missing`／`term_policy_missing` 缺口的缺政見請求併入缺口**（`web_request_coverage`，`20261111010000`）：請求不單獨派（臂不輸出、仍 open），缺口拿一次 `visitor_front_seconds` 插隊（標記 `opened_by.web_request_boost_ids`，冷卻中的缺口不插），請求只在「缺口已不覆蓋它、而且人物現在有承諾」時由 10 分鐘對帳關閉（`closed_reason='gap_filled:…'`，不單憑 gap_events 的 filled），`window` 關閉則請求回到可派並接回派出歷史（`web_request_dispatch_memory`） |
 | `question`（`task_type='question'`） | 公民提問：訪客的提問；`manual_task_is_visitor` 視同 visitor | 現無列 | 同 visitor | 一題最多收 3 份答案（`question_answer_cap()`）；同鍵時支持度高的先 |
 | `suggested` | AI 提議：代理交 `task_suggestion` 或系統（`system-one?action=followups`，每小時）從投票備註產生的跟進；多數 `task_type='other'` | 2,273／533 | 0 | 佇列中最大的手動來源；出生來源屬推測（見下） |
 | `manual` | 維護者建的 | 168／462 | `manual_front_seconds`（5 年） | 例：`news_sweep`、`candidate_status_stale` |
