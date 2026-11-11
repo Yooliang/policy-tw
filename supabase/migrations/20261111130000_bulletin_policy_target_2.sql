@@ -68,7 +68,7 @@ BEGIN
   FROM contributions WHERE id = p_contribution_id;
   IF v_need IS NULL THEN RETURN NULL; END IF;
   v_sys := contribution_system_vote(p_contribution_id);
-  RETURN CASE WHEN v_sys = 'supported' AND contribution_roster_matched(p_contribution_id) THEN GREATEST(v_floor, LEAST(v_need, 1))
+  RETURN CASE WHEN v_sys = 'supported' AND contribution_roster_matched(p_contribution_id) THEN LEAST(v_need, 1)
               WHEN v_sys = 'supported' THEN GREATEST(v_floor, 1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))
               WHEN v_sys = 'not_supported' THEN v_need + 1
               ELSE v_need END;

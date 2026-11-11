@@ -206,7 +206,7 @@ Deno.test("SQL contribution_effective_agree：有 v_floor、判斷與目標函�
   const t = await readMig(MIG);
   const fn = extractFn(t, "contribution_effective_agree");
   assertStringIncludes(fn, "GREATEST(v_floor, 1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))");
-  assertStringIncludes(fn, "GREATEST(v_floor, LEAST(v_need, 1))");
+  assertStringIncludes(fn, "THEN LEAST(v_need, 1)", "名冊吻合（目標 1）不套 floor");
   assertStringIncludes(fn, "WHEN v_sys = 'not_supported' THEN v_need + 1");
   assertStringIncludes(fn, "source_doc_kind(btrim(u)) = 'election_bulletin' AND btrim(u) !~* '^https?://[^/?#]+/?$'");
 });

@@ -285,7 +285,7 @@ export function isRosterMatchModel(model: string | null | undefined): boolean {
 }
 /** rosterMatched：最新那張有效系統票是名冊逐位核對、而且 supported */
 export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false, supportedSources = 1, floor = 1): number {
-  if (systemVote === "supported" && rosterMatched) return Math.max(floor, Math.min(required, ROSTER_MATCHED_TARGET));
+  if (systemVote === "supported" && rosterMatched) return Math.min(required, ROSTER_MATCHED_TARGET); // 名冊吻合（只有參選紀錄）目標 1，floor 不生效
   // 兩個以上獨立來源核得過再多降 1，上限 −2、最少 1（2026-10-09，policy-ops#39；SQL contribution_system_vote_sources）
   // floor：公報來源的政見下限 2（targetFloor；2026-11-11），避免「公報網址＋一個新聞網址被 Jev 核過」單票上線
   if (systemVote === "supported") return Math.max(floor, 1, required - Math.min(2, Math.max(1, Math.floor(supportedSources))));
