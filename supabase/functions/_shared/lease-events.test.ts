@@ -12,6 +12,8 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIG_NAME = "20261111120000_lease_events.sql";
 const MIG = await Deno.readTextFile(new URL(`../../migrations/${MIG_NAME}`, import.meta.url));
+const MIG2_NAME = "20261111190000_lease_release_reason.sql";
+const MIG2 = await Deno.readTextFile(new URL(`../../migrations/${MIG2_NAME}`, import.meta.url));
 const MARGIN_HOURS = 24;
 
 // 最小 stub：只放觸發器與清理函式會碰到的欄位
@@ -21,6 +23,7 @@ CREATE TABLE contribution_task_leases (
   task_id TEXT PRIMARY KEY, target_key TEXT NOT NULL, agent_name TEXT NOT NULL, ip_hash TEXT NOT NULL,
   leased_until TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE contributions (id SERIAL PRIMARY KEY, task_id TEXT, contribution_type TEXT, payload JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE contribution_tasks (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), task_type TEXT NOT NULL, target JSONB NOT NULL DEFAULT '{}');
 CREATE TABLE verify_dispatches (contribution_id TEXT, ip_hash TEXT, agent_name TEXT, dispatched_at TIMESTAMPTZ);
 CREATE TABLE contribution_task_skips (task_id TEXT, ip_hash TEXT, agent_name TEXT, skipped_at TIMESTAMPTZ);
 CREATE TABLE dispatch_records_settings (
@@ -34,6 +37,7 @@ async function fresh(): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(STUB);
   await db.exec(MIG);
+  await db.exec(MIG2);
   return db;
 }
 const events = async (db: PGlite, task: string) =>
@@ -196,7 +200,7 @@ Deno.test("E2 其他 migration 不得讀 lease_events 而沒有時限（只有�
   assert(Number.isFinite(retention), "抽不出 lease_events_days 預設值");
   const seen: string[] = [];
   for await (const f of Deno.readDir(new URL("../../migrations/", import.meta.url))) {
-    if (f.name === MIG_NAME) continue;
+    if (f.name === MIG_NAME || f.name === MIG2_NAME) continue;
     const sql = await Deno.readTextFile(new URL(`../../migrations/${f.name}`, import.meta.url));
     if (!/\b(FROM|JOIN)\s+(public\.)?lease_events\b/i.test(sql)) continue;
     seen.push(f.name);
@@ -230,4 +234,50 @@ Deno.test("E3 程式端（supabase/functions/**/*.ts，不含測試）不得讀 
   }
   await walk(root);
   assertEquals(bad, [], "程式端讀 lease_events 必須有 at 時限，並更新這支守門與 dispatch-records-purge 的回看期");
+});
+
+const ADJ_TASK = "11111111-1111-1111-1111-111111111111";
+const adjSetup = async (db: PGlite) => {
+  await db.exec(`INSERT INTO contribution_tasks (id, task_type, target) VALUES ('${ADJ_TASK}', 'adjudicate', '{"contribution_id":"c-orig","requires_tier":"strong"}')`);
+  await lease(db, ADJ_TASK, "opus_judge40");
+};
+
+Deno.test("F1 強模型專線：裁決交件（task_id、payload.task_id 都空，只帶 payload.contribution_id）→ 租約被刪＝reported（推斷）", async () => {
+  const db = await fresh();
+  await adjSetup(db);
+  await db.exec(`INSERT INTO contributions (task_id, contribution_type, payload) VALUES (NULL, 'adjudication', '{"contribution_id":"c-orig","verdict":"uphold"}')`);
+  await db.exec(`DELETE FROM contribution_task_leases WHERE task_id = '${ADJ_TASK}'`);
+  const ev = await events(db, ADJ_TASK);
+  assertEquals(ev.map((e) => e.event), ["issued", "reported"]);
+  assertEquals(ev[1].by, "contribution_after_lease");
+});
+
+Deno.test("F2 裁決的推斷只認同一件原貢獻：別件的裁決、或租約之前的裁決不算", async () => {
+  const db = await fresh();
+  await db.exec(`INSERT INTO contributions (task_id, contribution_type, payload, created_at) VALUES (NULL, 'adjudication', '{"contribution_id":"c-orig"}', now() - interval '2 days')`);
+  await adjSetup(db);
+  await db.exec(`INSERT INTO contributions (task_id, contribution_type, payload) VALUES (NULL, 'adjudication', '{"contribution_id":"c-other"}')`);
+  await db.exec(`DELETE FROM contribution_task_leases WHERE task_id = '${ADJ_TASK}'`);
+  assertEquals((await events(db, ADJ_TASK)).map((e) => e.event), ["issued", "released"]);
+});
+
+Deno.test("F3 lease_release 明講 reported：即使推斷不出來也記 reported（by=setting）、設定不外洩、reason 要合法", async () => {
+  const db = await fresh();
+  await lease(db, "f3");
+  const n = (await db.query<{ lease_release: number }>(`SELECT lease_release(ARRAY['f3','nope'], 'reported')`)).rows[0].lease_release;
+  assertEquals(n, 1);
+  const ev = await events(db, "f3");
+  assertEquals(ev.map((e) => e.event), ["issued", "reported"]);
+  assertEquals(ev[1].by, "setting");
+  assertEquals((await db.query<{ v: string }>(`SELECT current_setting('app.lease_release_reason', true) AS v`)).rows[0].v, "");
+  let threw = false;
+  try { await db.exec(`SELECT lease_release(ARRAY['x'], 'bogus')`); } catch { threw = true; }
+  assert(threw);
+});
+
+Deno.test("F4 文字層：交件釋放租約走 lease_release(reported)，裁決的任務從 target.contribution_id 找回來", async () => {
+  const src = await Deno.readTextFile(new URL("./contribute-handler.ts", import.meta.url));
+  assert(/rpc\("lease_release",\s*\{[^}]*p_reason:\s*"reported"/.test(src));
+  assert(/eq\("target->>contribution_id", cid\)/.test(src));
+  assert(/GRANT EXECUTE ON FUNCTION lease_release\(TEXT\[\], TEXT\) TO service_role/.test(MIG2));
 });
