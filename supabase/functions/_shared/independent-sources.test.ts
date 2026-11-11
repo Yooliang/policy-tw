@@ -161,7 +161,7 @@ async function latestDefining(marker: string): Promise<string> {
 
 Deno.test("e. SQL 與 TS 一致：依核得過的獨立來源數降分、上限 2、讀的鍵就是 system-one 寫的鍵", async () => {
   const eff = await latestDefining("FUNCTION contribution_effective_agree");
-  assert(eff.includes("WHEN v_sys = 'supported' THEN GREATEST(v_floor, 1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))"), "supported 依獨立來源數降分、最少 1（公報來源的政見最少 v_floor＝2，20261111130000）");
+  assert(eff.includes("WHEN v_sys = 'supported' THEN GREATEST(1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))"));
   const s = await latestDefining("FUNCTION contribution_system_vote_sources");
   assert(s.includes(`LEAST(${MAX_SOURCE_DISCOUNT}, GREATEST(1,`), "上限跟 TS 的 MAX_SOURCE_DISCOUNT 一致、最少 1");
   assert(s.includes("j.state->'supported_sources'") && s.includes("j.state->>'supported_sources'"), "讀 state.supported_sources");
