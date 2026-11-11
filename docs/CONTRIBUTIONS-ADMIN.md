@@ -176,3 +176,73 @@ Authorization: Bearer <service role key>
 回應帶 `matched_tasks`／`matched_verifies`；`GET /boost` 列最近 20 次與各自還剩多少沒領。誰插的、插了什麼都是公開紀錄（`task_boosts`）。
 
 
+
+## 強模型裁決端點 `strong-adjudicate`（2026-11-11，主控台「強模型裁決」頁用）
+
+難題（`strong_lane_list()` 那批 `requires_tier='strong'` 的裁決任務）由維護者在主控台逐件排進作業、**執行者**（VM 上持 `STRONG_LANE_KEY` 的強模型 claude）領題查證、回報結果，維護者看過後才送出定案。**端點本身不呼叫任何模型**（不需要模型 secret 與 `model_pricing`），用量由執行者回報、端點寫進 `ai_usage_logs`。不是代理協議、不升版號。migration `20261111180000_strong_adjudications.sql`（表只有 service_role 能碰），邏輯 `_shared/strong-adjudicate.ts`，守門 `_shared/strong-adjudicate.test.ts`。
+
+`POST https://<project>.supabase.co/functions/v1/strong-adjudicate`，body `{ "action": … }`，回應 `{ success, … }`（失敗 `{ success:false, error }`）。
+
+**兩種憑證，不能混用**：維護者動作帶 `Authorization: Bearer <Firebase ID token>`（同 `console-admin`，只收主控台擁有者）；執行者動作（`claim`／`complete`／`fail`）帶標頭 `x-strong-lane-key: <STRONG_LANE_KEY>`。沒帶憑證 401、鑰匙或帳號不對 403。`STRONG_LANE_KEY` 只在伺服器端（`finalize` 送 `/report`、`claim` 取 `/next` 都由函式自己帶）與執行者手上，瀏覽器與主控台永遠不經手，回應絕不含鑰匙、ip 雜湊、派工憑證。
+
+狀態：`queued` → `running` → `previewed` → `finalizing` → `finalized`；旁支 `returned`（退回人工）、`failed`（執行者回報或取不到題）、`finalize_failed`（`/report` 沒收下，**不自動重試**）。`running` 超過 30 分鐘沒 `complete` 自動回 `queued`；`finalizing` 超過 10 分鐘沒結果（函式中途死掉）回 `previewed` 並記 `last_error`（`/report` 若其實已收下，再 finalize 會被拒收、記 `finalize_failed`）。`claim` 取題遇 5xx／429／連線錯誤放回 `queued` 記 `last_error`，連續 3 次才 `failed`；只有 `/next` 回 `kind:none`（題已不在待辦）才直接 `failed`。同一件任務同時只能有一筆 `queued`／`running`（資料庫唯一索引）；已有進行中、或 30 分鐘內才出爐（`previewed`／`finalizing`，以 `completed_at` 算）的結果時再 `enqueue` 回 409（避免重複燒錢）。成因類別固定八個（資料庫 CHECK 與 TS 常數 `CAUSE_CATEGORIES` 同一份）：`來源難讀`、`前提過時`、`沒判斷型別`、`身分`、`拿錯名冊`、`規格不清`、`來源打不開`、`其他`。
+
+### 維護者動作
+
+```jsonc
+// list：待辦清單＋每件最近一筆 job 狀態（主控台輪詢用這個）
+{ "action": "list" }
+→ { "success": true, "total": 2, "items": [{
+    "task_id": "…", "contribution_id": "…", "contribution_type": "policy", "subject": "王小明", "reason": "投太多輪",
+    "contribution_status": "disputed", "votes": 5, "tally": { "agree": 1, "disagree": 2, "unsure": 0 },
+    "created_at": "2026-11-08T…", "waiting_hours": 72, "claimed_by": null, "claimed_at": null,
+    "job": { "id": "…", "status": "queued", "verdict": null, "cause_category": null, "updated_at": "…" } | null }] }
+
+// enqueue：排進作業（建 queued）。404＝不在強模型待辦；409＝已有進行中或 30 分鐘內剛出爐的（回 job）
+{ "action": "enqueue", "task_id": "…" }   → { "success": true, "job": { …完整 job… } }
+
+// status：單筆（adjudication_id）或某任務的歷次（task_id，新→舊）
+{ "action": "status", "adjudication_id": "…" }   → { "success": true, "job": {…} }
+
+// finalize：只收 previewed。伺服器端帶鑰匙 POST /report（adjudication，單一裁決即定案）；成功 finalized，失敗 finalize_failed（502，記錯誤、不重試）
+{ "action": "finalize", "adjudication_id": "…" }   → { "success": true, "job": { "status": "finalized", "report_response": {…} } }
+
+// return_to_human：reason 必填；只有 previewed／finalize_failed／failed 可退，任務本身不動
+{ "action": "return_to_human", "adjudication_id": "…", "reason": "來源要人看" }
+
+// summary：since 選填（YYYY-MM-DD 或 ISO，預設 7 天），最多 500 件
+{ "action": "summary", "since": "2026-11-01" }
+→ { "success": true, "since": "…", "total": 12, "truncated": false, "by_cause": { "來源難讀": 5 },
+    "by_verdict": { "uphold": 6, "reject": 3, "uphold_with_correction": 3 }, "by_status": { "finalized": 8 },
+    "cost_total": 1.84, "tokens_total": 91234, "items": [ /* job … */ ] }
+```
+
+job 欄位：`id`、`task_id`、`contribution_id`、`status`、`requested_by`、`created_at`、`claimed_at`、`completed_at`、`model`、`verdict`、`corrected_fields`、`reasoning`、`checked_urls`、`cause_category`、`cause_note`、`prompt_tokens`、`completion_tokens`、`cost`、`finalized_by`、`finalized_at`、`report_response`、`returned_by`、`returned_at`、`return_reason`、`error`。
+
+### 執行者動作（給 policy-ops 的 VM 腳本接）
+
+```jsonc
+// 1) claim：領最舊的一筆 queued → running；同時用伺服器端鑰匙 GET /next?lane=strong&task_id=…，把題目一併回來。沒有排隊的回 job:null
+POST … x-strong-lane-key: <STRONG_LANE_KEY>
+{ "action": "claim", "runner": "vm-claude-1" }   // runner 選填，只記錄
+→ { "success": true,
+    "job": { "id": "<adjudication_id>", "task_id": "…", "status": "running" },
+    "task": { "item": { /* 簡報：contribution、votes、hint_sources、instructions */ }, "type_spec": null, "dispute": null, "current": null, "how_to": "…" },
+    "result_fields": { "verdicts": ["uphold","reject","uphold_with_correction"], "cause_categories": [ /* 八個 */ ] } }
+// 題目已不在待辦（別人裁決了）的那筆會標 failed 並自動換下一筆；都沒有就回 job:null
+
+// 2) 照 task.item.instructions 查證（逐一打開來源、必要時讀 PDF／API），然後 complete
+{ "action": "complete", "adjudication_id": "<id>",
+  "verdict": "uphold" | "reject" | "uphold_with_correction",
+  "corrected_fields": { "欄位": "改好的值", "要刪的欄位": null },   // 只有 uphold_with_correction 才要、且不可空
+  "reasoning": "給人看的理由，20～1000 字（建議 200 字內，會原樣當 /report 的 reason）",
+  "cause_category": "來源難讀", "cause_note": "一句話（≤300 字）",
+  "model": "<具體模型版本>", "prompt_tokens": 12345, "completion_tokens": 876, "cost": 0.31,   // 用量與金額（USD）由執行者回報，選填
+  "checked_urls": ["https://…"] }                                  // 選填，最多 30 個 http(s)
+→ { "success": true, "job": { "status": "previewed" } }           // 不會送 /report；只有 running 的能 complete（逾時被收回要重新 claim，409）
+
+// 做不出來：回報失敗（不影響任務，維護者可再 enqueue）
+{ "action": "fail", "adjudication_id": "<id>", "error": "原因" }
+```
+
+`complete` 驗證失敗回 400 並指明欄位（tokens 上限 1000 萬、cost 上限 1000 美元，超過 400；verdict 不在三選一、`cause_category` 不在清單、`uphold_with_correction` 沒帶 `corrected_fields`、`reasoning` 少於 20 字…）；用量會同時寫一筆 `ai_usage_logs`（`function_type='verify'`，寫入失敗不影響結果）。新增 secrets：**無**（沿用既有 `STRONG_LANE_KEY`、`CONSOLE_OWNER_EMAIL`／`CONSOLE_FIREBASE_PROJECT_ID`）。
