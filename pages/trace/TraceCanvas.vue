@@ -30,7 +30,7 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const DOT_LIFE = 1.4 // 秒（真實時間）
 const EVENT_SEC = 1.2 // events 模式一件事走多久（speed 1）
 const MAX_DOTS = 160
-// 流程圖是 697×820 等比縮放；手機太窄時字會小到看不清，所以最窄畫 520，超出的用左右捲動看
+// 流程圖是 697×660 等比縮放；手機太窄時字會小到看不清，所以最窄畫 520，超出的用左右捲動看
 const MIN_WIDTH = 520
 
 interface Dot { path: Pt[]; len: number; color: string; born: number; flash: NodeId | null; end: NodeId; arrived: boolean }
@@ -186,12 +186,7 @@ function activeEdgeKeys(): Set<string> {
   return out
 }
 
-const STYLE: Record<string, { color: string; dash: number[]; text: string }> = {
-  solid: { color: '#cbd5e1', dash: [], text: '#64748b' },
-  return: { color: '#d97706', dash: [6, 4], text: '#b45309' },
-  propose: { color: '#2563eb', dash: [2, 4], text: '#1d4ed8' },
-  system: { color: '#16a34a', dash: [], text: '#15803d' },
-}
+const LINE_COLOR = '#475569' // 深灰：所有線同色，只有「順手提議」是虛線
 
 /** 文字塞得進寬度才用；太寬就一路縮小字，最小 7px */
 function fitFont(c: CanvasRenderingContext2D, text: string, base: number, maxW: number, bold: boolean): void {
@@ -203,6 +198,34 @@ function fitFont(c: CanvasRenderingContext2D, text: string, base: number, maxW: 
   }
 }
 
+/** 四種框：系統＝實線方框、代理＝圓角框、Jev＝雙線框、終點＝粗框填底；亮起時換底色 */
+function drawBox(c: CanvasRenderingContext2D, n: { kind: string; cx: number; cy: number; w: number; h: number }, glowAmt: number, s: number): void {
+  const x = n.cx - n.w / 2
+  const y = n.cy - n.h / 2
+  const lit = glowAmt > 0
+  const fill = lit ? `rgba(251,191,36,${0.15 + glowAmt * 0.35})` : n.kind === 'end' ? '#e2e8f0' : '#ffffff'
+  const stroke = lit ? '#f59e0b' : '#334155'
+  const radius = n.kind === 'agent' ? Math.min(n.h / 2, 12 * s) : 0
+  const path = (inset: number): void => {
+    if (radius > 0) roundRect(c, x + inset, y + inset, n.w - inset * 2, n.h - inset * 2, Math.max(1, radius - inset))
+    else {
+      c.beginPath()
+      c.rect(x + inset, y + inset, n.w - inset * 2, n.h - inset * 2)
+    }
+  }
+  path(0)
+  c.fillStyle = fill
+  c.fill()
+  c.strokeStyle = stroke
+  c.lineWidth = Math.max(1, (n.kind === 'end' ? 3.2 : 1.4) * s)
+  c.stroke()
+  if (n.kind === 'jev') {
+    path(Math.max(3, 4 * s))
+    c.lineWidth = Math.max(1, 1.2 * s)
+    c.stroke()
+  }
+}
+
 function draw(): void {
   const c = ctx
   if (!c) return
@@ -210,46 +233,31 @@ function draw(): void {
   const s = layout.scale
   c.clearRect(0, 0, layout.width, layout.height)
   const hot = activeEdgeKeys()
-  // 連線
+  // 連線：不放文字
   for (const r of layout.routes) {
     const on = hot.has(`${r.from}>${r.to}`)
-    const st = STYLE[r.style] ?? STYLE.solid
-    const col = on ? '#334155' : st.color
-    c.strokeStyle = col
-    c.lineWidth = Math.max(1, (on ? 2.4 : r.style === 'solid' ? 1.4 : 1.8) * Math.max(0.8, s))
-    c.setLineDash(st.dash.map((d) => d * Math.max(0.8, s)))
+    c.strokeStyle = on ? '#0f172a' : LINE_COLOR
+    c.lineWidth = Math.max(1, (on ? 2.6 : 1.5) * Math.max(0.8, s))
+    c.setLineDash(r.style === 'dashed' ? [6 * Math.max(0.8, s), 4 * Math.max(0.8, s)] : [])
     c.beginPath()
     r.pts.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])))
     c.stroke()
     c.setLineDash([])
-    arrow(c, r.pts[r.pts.length - 2], r.pts[r.pts.length - 1], col, Math.max(0.8, s))
-    if (r.label && r.labelAt) {
-      c.font = `${Math.max(8, 10 * s)}px ${fontFamily}`
-      c.fillStyle = st.text
-      c.textAlign = r.labelAlign ?? 'left'
-      c.textBaseline = 'middle'
-      c.fillText(r.label, r.labelAt[0], r.labelAt[1])
-    }
+    arrow(c, r.pts[r.pts.length - 2], r.pts[r.pts.length - 1], on ? '#0f172a' : LINE_COLOR, Math.max(0.8, s))
   }
   // 節點
   for (const n of Object.values(layout.nodes)) {
-    const g = glow[n.id] ?? 0
-    roundRect(c, n.cx - n.w / 2, n.cy - n.h / 2, n.w, n.h, 6 * s)
-    c.fillStyle = g > 0 ? `rgba(251,191,36,${0.15 + g * 0.35})` : '#ffffff'
-    c.fill()
-    c.strokeStyle = g > 0 ? '#f59e0b' : '#94a3b8'
-    c.lineWidth = Math.max(1, 1.4 * s)
-    c.stroke()
+    drawBox(c, n, glow[n.id] ?? 0, s)
     const cl = COUNT_LABEL[n.id]
     const num = counts[n.id]
     const second = cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : ''
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillStyle = '#0f172a'
-    fitFont(c, n.label, 10 * s, n.w - 8 * s, true)
+    fitFont(c, n.label, 10 * s, n.w - 12 * s, true)
     c.fillText(n.label, n.cx, second ? n.cy - 6 * s : n.cy)
     if (second) {
-      fitFont(c, second, 9 * s, n.w - 8 * s, false)
+      fitFont(c, second, 9 * s, n.w - 12 * s, false)
       c.fillStyle = num ? '#0369a1' : '#64748b'
       c.fillText(second, n.cx, n.cy + 8 * s)
     }

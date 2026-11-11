@@ -4,7 +4,7 @@
 /** 流程圖上的節點代號（版面在 lib/trace-layout.ts） */
 export type NodeId =
   | 'official' | 'detector' | 'card' | 'queue' | 'dispatcher' | 'vote' | 'applied' | 'visitor'
-  | 'suggest' | 'jev' | 'submit' | 'notfound' | 'cooldown' | 'dispute' | 'strongLane' | 'rejected'
+  | 'suggest' | 'jevSort' | 'jevVote' | 'submit' | 'notfound' | 'cooldown' | 'dispute' | 'strongLane' | 'rejected'
 
 export interface TraceEvent {
   at: string
@@ -43,7 +43,7 @@ const KINDS: Record<string, KindInfo> = {
   task_created: { group: 'request', route: ['queue'] },
   task_closed: { group: 'request', route: ['queue'] },
   request_merged: { group: 'request', route: ['visitor', 'card'] },
-  submitted: { group: 'submit', route: ['dispatcher', 'submit', 'jev', 'queue'] },
+  submitted: { group: 'submit', route: ['dispatcher', 'submit', 'jevSort', 'queue'] },
   verify_dispatched: { group: 'verify', route: ['dispatcher', 'vote'] },
   vote: { group: 'verify', route: ['vote'] },
   verified: { group: 'verify', route: ['vote'] },
@@ -74,6 +74,9 @@ export const GROUP_LABEL: Record<KindGroup, string> = {
   check: '查核',
 }
 
+/** 系統票：投票的是 Jev（或顯示名以「系統」開頭） */
+export const isSystemVoter = (e: TraceEvent): boolean => /^(jev|系統)/i.test(e.agent_name ?? '')
+
 const detailText = (e: TraceEvent, key: string): string => {
   const v = e.detail?.[key]
   return typeof v === 'string' ? v : ''
@@ -87,14 +90,14 @@ export function groupOf(kind: string): KindGroup {
 export function eventRoute(e: TraceEvent): NodeId[] {
   if (e.kind === 'submitted') {
     const type = detailText(e, 'type')
-    if (type === 'task_suggestion') return ['dispatcher', 'submit', 'jev', 'suggest', 'card']
+    if (type === 'task_suggestion') return ['dispatcher', 'submit', 'jevSort', 'suggest', 'card']
     if (type === 'no_change') return ['dispatcher', 'submit']
-    return ['dispatcher', 'submit', 'jev', 'queue']
+    return ['dispatcher', 'submit', 'jevSort', 'queue']
   }
   if (e.kind === 'task_created') return detailText(e, 'source') === 'web_request' ? ['visitor', 'card', 'queue'] : ['queue']
   if (e.kind === 'check') return detailText(e, 'outcome') === 'not_found' ? ['submit', 'notfound', 'cooldown'] : ['submit']
-  // 系統票（Jev）：從 Jev 走到投票
-  if (e.kind === 'vote' && /^(jev|系統)/i.test(e.agent_name ?? '')) return ['jev', 'vote']
+  // 系統票（Jev）：從 Jev 系統票走到投票
+  if (e.kind === 'vote' && isSystemVoter(e)) return ['jevVote', 'vote']
   return KINDS[e.kind]?.route ?? ['queue']
 }
 
@@ -177,7 +180,7 @@ export function dedupe(rows: readonly TraceEvent[]): TraceEvent[] {
 // ---- 節點計數 ----
 
 export const COUNT_LABEL: Partial<Record<NodeId, string>> = {
-  detector: '新缺口', queue: '收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', notfound: '查無', visitor: '請求', suggest: '提議',
+  detector: '新缺口', queue: '收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
 }
 
 /** 這個事件算在哪個節點的計數上；不計數回 null */
@@ -187,7 +190,7 @@ export function countNode(e: TraceEvent): NodeId | null {
     case 'gap_closed': return 'queue'
     case 'lease_issued': case 'verify_dispatched': return 'dispatcher'
     case 'submitted': return detailText(e, 'type') === 'task_suggestion' ? 'suggest' : 'submit'
-    case 'vote': return 'vote'
+    case 'vote': return isSystemVoter(e) ? 'jevVote' : 'vote'
     case 'applied': return 'applied'
     case 'rejected': return 'rejected'
     case 'check': return detailText(e, 'outcome') === 'not_found' ? 'notfound' : null

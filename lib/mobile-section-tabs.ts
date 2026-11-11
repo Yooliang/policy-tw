@@ -25,6 +25,7 @@ export const MOBILE_SECTION_TABS: SectionTab[][] = [
     { key: 'tasks', label: '任務清單', to: '/tasks' },
     { key: 'queue', label: '派工隊列', to: '/queue' },
     { key: 'dispatch', label: '任務排派日程', to: '/dispatch' },
+    { key: 'trace', label: '重播', to: '/trace' },
   ],
   // 搜尋
   [
@@ -40,7 +41,8 @@ export function sectionTabsFor(path: string, query: Record<string, unknown>): { 
   const p = path.length > 1 ? path.replace(/\/+$/, '') : path
   let key: string | null = null
   if (p === '/tracking') key = query.view === 'mine' ? 'mine' : 'tracking'
-  else if (['/analysis', '/regional-data', '/stats', '/skill', '/community', '/contributions', '/ai', '/tasks', '/queue', '/dispatch', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
+  else if (['/analysis', '/regional-data', '/stats', '/skill', '/community', '/contributions', '/ai', '/tasks', '/queue', '/dispatch', '/trace', '/search', '/elections', '/politicians', '/parties'].includes(p)) key = p.slice(1)
+  else if (p.startsWith('/trace/')) key = 'trace'
   else if (p === '/stats/map') key = 'stats-map'
   else if (p === '/parties/flow') key = 'party-flow'
   if (!key) return null

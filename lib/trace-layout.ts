@@ -1,46 +1,53 @@
-// /trace 流程圖的版面（維護者 2026-11-11 定案）：16 個節點、22 條全直角的線。
-// 基準畫布 697×820，節點一律 126×36，寬度不同時等比縮放。純計算，不碰 DOM。
+// /trace 流程圖的版面（維護者 2026-11-11 定稿）：17 個節點、23 條全直角的線。
+// 基準畫布 697×660，節點一律 126×36，寬度不同時等比縮放。純計算，不碰 DOM。
 // 連接點：左右兩側各 3 個（index 0 上、1 中、2 下），上下兩側各 5 個（index 0 左 … 4 右）。
 import type { NodeId } from './trace'
 
 export const BASE_W = 697
-export const BASE_H = 820
+export const BASE_H = 660
 export const NODE_W = 126
 export const NODE_H = 36
 
 export type Side = 't' | 'b' | 'l' | 'r'
 export type Pt = [number, number]
 
+/** 框型：系統節點＝實線方框、代理節點＝圓角框、Jev＝雙線框、終點＝粗框填底 */
+export type NodeKind = 'system' | 'agent' | 'jev' | 'end'
+
 export interface NodeDef {
   id: NodeId
   label: string
+  kind: NodeKind
   cx: number
   cy: number
 }
 
-/** 節點中心座標（基準畫布） */
+/** 節點中心座標（基準畫布）。維護者 2026-11-11 定稿：17 個節點 */
 export const NODE_DEFS: readonly NodeDef[] = [
-  { id: 'official', label: '官方資料', cx: 87, cy: 41 },
-  { id: 'detector', label: '資料缺口偵測（44 支臂）', cx: 87, cy: 123 },
-  { id: 'card', label: '工作卡（人×事）', cx: 87, cy: 205 },
-  { id: 'queue', label: '一條佇列', cx: 87, cy: 287 },
-  { id: 'dispatcher', label: '派工分配器', cx: 87, cy: 369 },
-  { id: 'vote', label: '別的代理投票', cx: 87, cy: 451 },
-  { id: 'applied', label: '落庫上線', cx: 87, cy: 697 },
-  { id: 'visitor', label: '訪客請求', cx: 261, cy: 41 },
-  { id: 'suggest', label: '代理提議', cx: 436, cy: 41 },
-  { id: 'jev', label: 'Jev', cx: 261, cy: 287 },
-  { id: 'submit', label: '代理交件', cx: 436, cy: 451 },
-  { id: 'notfound', label: '查無', cx: 610, cy: 533 },
-  { id: 'cooldown', label: '冷卻 5／10／20 天', cx: 610, cy: 615 },
-  { id: 'dispute', label: '爭議', cx: 261, cy: 451 },
-  { id: 'strongLane', label: '強模型通道', cx: 261, cy: 533 },
-  { id: 'rejected', label: '退件／結案', cx: 436, cy: 615 },
+  { id: 'official', label: '官方資料', kind: 'system', cx: 87, cy: 41 },
+  { id: 'detector', label: '資料缺口偵測（44 支臂）', kind: 'system', cx: 87, cy: 123 },
+  { id: 'card', label: '工作卡（人×事）', kind: 'system', cx: 87, cy: 205 },
+  { id: 'queue', label: '派工佇列', kind: 'system', cx: 87, cy: 287 },
+  { id: 'dispatcher', label: '派工分配器', kind: 'system', cx: 87, cy: 369 },
+  { id: 'vote', label: '別的代理投票', kind: 'agent', cx: 87, cy: 451 },
+  { id: 'applied', label: '落庫上線', kind: 'end', cx: 87, cy: 615 },
+  { id: 'visitor', label: '訪客請求', kind: 'agent', cx: 261, cy: 41 },
+  { id: 'suggest', label: '代理提議', kind: 'agent', cx: 436, cy: 41 },
+  { id: 'jevSort', label: 'Jev 整理', kind: 'jev', cx: 436, cy: 287 },
+  { id: 'jevVote', label: 'Jev 系統票', kind: 'jev', cx: 436, cy: 451 },
+  { id: 'submit', label: '代理交件', kind: 'agent', cx: 436, cy: 369 },
+  { id: 'notfound', label: '查無', kind: 'system', cx: 610, cy: 369 },
+  { id: 'cooldown', label: '冷卻 5／10／20 天', kind: 'system', cx: 610, cy: 205 },
+  { id: 'dispute', label: '爭議', kind: 'system', cx: 261, cy: 533 },
+  { id: 'strongLane', label: '強模型通道', kind: 'system', cx: 436, cy: 533 },
+  { id: 'rejected', label: '退件／結案', kind: 'end', cx: 610, cy: 533 },
 ]
 
-export type LinkStyle = 'solid' | 'return' | 'propose' | 'system'
+/** 線型：只有「順手提議」是虛線，其餘一律深灰實線；線上不放文字 */
+export type LinkStyle = 'solid' | 'dashed'
 
 export interface LinkDef {
+  id: string
   from: NodeId
   fromSide: Side
   fromIdx: number
@@ -50,35 +57,36 @@ export interface LinkDef {
   /** 起點與終點之間的轉折點（基準畫布座標），全部是直角 */
   via: readonly Pt[]
   style: LinkStyle
-  label?: string
-  labelAt?: Pt
-  labelAlign?: 'left' | 'right' | 'center'
 }
 
-/** 22 條線：from → to，side／index 是連接點 */
+const L = (id: string, from: NodeId, fs: Side, fi: number, to: NodeId, ts: Side, ti: number, via: readonly Pt[] = [], style: LinkStyle = 'solid'): LinkDef =>
+  ({ id, from, fromSide: fs, fromIdx: fi, to, toSide: ts, toIdx: ti, via, style })
+
+/** 23 條線：from → to，side／index 是連接點 */
 export const LINKS: readonly LinkDef[] = [
-  { from: 'official', fromSide: 'b', fromIdx: 2, to: 'detector', toSide: 'r', toIdx: 1, via: [[87, 82], [170, 82], [170, 123]], style: 'solid' },
-  { from: 'detector', fromSide: 'b', fromIdx: 2, to: 'card', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'card', fromSide: 'b', fromIdx: 2, to: 'queue', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'queue', fromSide: 'b', fromIdx: 2, to: 'dispatcher', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'dispatcher', fromSide: 'b', fromIdx: 2, to: 'vote', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'vote', fromSide: 'b', fromIdx: 2, to: 'applied', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'visitor', fromSide: 'b', fromIdx: 2, to: 'card', toSide: 'r', toIdx: 0, via: [[261, 195]], style: 'solid' },
-  { from: 'suggest', fromSide: 'b', fromIdx: 1, to: 'card', toSide: 'r', toIdx: 1, via: [[412, 205]], style: 'solid' },
-  { from: 'jev', fromSide: 'r', fromIdx: 0, to: 'suggest', toSide: 'b', toIdx: 3, via: [[460, 277]], style: 'propose', label: '順手提議', labelAt: [466, 160], labelAlign: 'left' },
-  { from: 'submit', fromSide: 't', fromIdx: 3, to: 'jev', toSide: 'r', toIdx: 2, via: [[460, 297]], style: 'solid' },
-  { from: 'dispatcher', fromSide: 'r', fromIdx: 1, to: 'submit', toSide: 't', toIdx: 1, via: [[412, 369]], style: 'solid' },
-  { from: 'jev', fromSide: 't', fromIdx: 2, to: 'queue', toSide: 't', toIdx: 4, via: [[261, 250], [135, 250]], style: 'return', label: '驗證票回隊', labelAt: [198, 243], labelAlign: 'center' },
-  { from: 'jev', fromSide: 'l', fromIdx: 2, to: 'vote', toSide: 'r', toIdx: 0, via: [[175, 297], [175, 441]], style: 'system', label: '系統票', labelAt: [181, 322], labelAlign: 'left' },
-  { from: 'vote', fromSide: 'b', fromIdx: 4, to: 'dispute', toSide: 'l', toIdx: 2, via: [[135, 485], [180, 485], [180, 461]], style: 'solid' },
-  { from: 'dispute', fromSide: 'b', fromIdx: 2, to: 'strongLane', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'strongLane', fromSide: 'b', fromIdx: 1, to: 'applied', toSide: 'r', toIdx: 1, via: [[237, 697]], style: 'solid' },
-  { from: 'strongLane', fromSide: 'b', fromIdx: 3, to: 'rejected', toSide: 't', toIdx: 2, via: [[285, 574], [436, 574]], style: 'solid' },
-  { from: 'vote', fromSide: 'b', fromIdx: 3, to: 'rejected', toSide: 'l', toIdx: 1, via: [[111, 615]], style: 'solid' },
-  { from: 'submit', fromSide: 'r', fromIdx: 1, to: 'notfound', toSide: 't', toIdx: 2, via: [[610, 451]], style: 'solid' },
-  { from: 'notfound', fromSide: 'b', fromIdx: 2, to: 'cooldown', toSide: 't', toIdx: 2, via: [], style: 'solid' },
-  { from: 'cooldown', fromSide: 'l', fromIdx: 1, to: 'rejected', toSide: 'r', toIdx: 1, via: [], style: 'solid' },
-  { from: 'cooldown', fromSide: 'r', fromIdx: 1, to: 'card', toSide: 'r', toIdx: 2, via: [[690, 615], [690, 215]], style: 'return', label: '冷卻完回卡', labelAt: [560, 207], labelAlign: 'center' },
+  L('a1b', 'official', 'b', 2, 'detector', 't', 2),
+  L('bw', 'detector', 'b', 2, 'card', 't', 2),
+  L('wc', 'card', 'b', 2, 'queue', 't', 2),
+  L('cd', 'queue', 'b', 2, 'dispatcher', 't', 2),
+  L('dv', 'dispatcher', 'b', 2, 'vote', 't', 2),
+  L('vl', 'vote', 'b', 2, 'applied', 't', 2),
+  L('a2w', 'visitor', 'b', 2, 'card', 'r', 0, [[261, 195]]),
+  L('a3w', 'suggest', 'b', 2, 'card', 'r', 1, [[436, 205]]),
+  L('ja', 'jevSort', 'r', 0, 'suggest', 'r', 1, [[520, 277], [520, 41]], 'dashed'),
+  L('ep3', 'submit', 'r', 2, 'jevVote', 'r', 2, [[520, 379], [520, 461]]),
+  L('ep2', 'submit', 'r', 0, 'jevSort', 'r', 2, [[515, 359], [515, 297]]),
+  L('de', 'dispatcher', 'r', 1, 'submit', 'l', 1),
+  L('jq', 'jevSort', 'l', 1, 'queue', 'r', 1),
+  L('jv', 'jevVote', 'l', 1, 'vote', 'r', 1),
+  L('vg', 'vote', 'b', 3, 'dispute', 'l', 1, [[111, 533]]),
+  L('gq', 'dispute', 'r', 1, 'strongLane', 'l', 1),
+  L('ql', 'strongLane', 'b', 2, 'applied', 'r', 1, [[436, 615]]),
+  L('qr', 'strongLane', 'r', 1, 'rejected', 'l', 1),
+  L('vr', 'vote', 'b', 4, 'rejected', 't', 2, [[135, 490], [610, 490]]),
+  L('en', 'submit', 'r', 1, 'notfound', 'l', 1),
+  L('nk', 'notfound', 't', 2, 'cooldown', 'b', 2),
+  L('kr', 'cooldown', 'r', 1, 'rejected', 'r', 1, [[690, 205], [690, 533]]),
+  L('kw', 'cooldown', 'l', 2, 'card', 'r', 2),
 ]
 
 const SIDE_STEP_LR = 10 // 左右側連接點上下間距
@@ -98,6 +106,7 @@ export function anchorPoint(id: NodeId, side: Side, idx: number): Pt {
 export interface NodeBox {
   id: NodeId
   label: string
+  kind: NodeKind
   cx: number
   cy: number
   w: number
@@ -105,13 +114,11 @@ export interface NodeBox {
 }
 
 export interface Route {
+  id: string
   from: NodeId
   to: NodeId
   pts: Pt[]
   style: LinkStyle
-  label?: string
-  labelAt?: Pt
-  labelAlign?: 'left' | 'right' | 'center'
 }
 
 export interface Layout {
@@ -127,14 +134,12 @@ export function computeLayout(width: number): Layout {
   const s = Math.max(1, width) / BASE_W
   const sc = (p: Pt): Pt => [p[0] * s, p[1] * s]
   const nodes = {} as Record<NodeId, NodeBox>
-  for (const d of NODE_DEFS) nodes[d.id] = { id: d.id, label: d.label, cx: d.cx * s, cy: d.cy * s, w: NODE_W * s, h: NODE_H * s }
+  for (const d of NODE_DEFS) nodes[d.id] = { id: d.id, label: d.label, kind: d.kind, cx: d.cx * s, cy: d.cy * s, w: NODE_W * s, h: NODE_H * s }
   const routes: Route[] = LINKS.map((l) => ({
+    id: l.id,
     from: l.from,
     to: l.to,
     style: l.style,
-    label: l.label,
-    labelAt: l.labelAt ? sc(l.labelAt) : undefined,
-    labelAlign: l.labelAlign,
     pts: [sc(anchorPoint(l.from, l.fromSide, l.fromIdx)), ...l.via.map(sc), sc(anchorPoint(l.to, l.toSide, l.toIdx))],
   }))
   return { width: BASE_W * s, height: BASE_H * s, scale: s, nodes, routes }

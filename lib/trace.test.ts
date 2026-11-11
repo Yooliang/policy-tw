@@ -29,13 +29,13 @@ Deno.test('dedupe：交界重複的去掉，不同人的票留著', () => {
 })
 
 Deno.test('eventRoute：交件依型別、查核依結果、系統票走 Jev', () => {
-  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'policy' } })), ['dispatcher', 'submit', 'jev', 'queue'])
-  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'task_suggestion' } })), ['dispatcher', 'submit', 'jev', 'suggest', 'card'])
+  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'policy' } })), ['dispatcher', 'submit', 'jevSort', 'queue'])
+  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'task_suggestion' } })), ['dispatcher', 'submit', 'jevSort', 'suggest', 'card'])
   assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'no_change' } })), ['dispatcher', 'submit'])
   assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'not_found' } })), ['submit', 'notfound', 'cooldown'])
   assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'confirmed' } })), ['submit'])
   assertEquals(eventRoute(ev({ kind: 'verify_dispatched' })), ['dispatcher', 'vote'])
-  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: 'Jev' })), ['jev', 'vote'])
+  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: 'Jev' })), ['jevVote', 'vote'])
   assertEquals(eventRoute(ev({ kind: 'vote', agent_name: '小明' })), ['vote'])
   assertEquals(eventRoute(ev({ kind: 'applied' })), ['vote', 'applied'])
   assertEquals(eventRoute(ev({ kind: 'rejected' })), ['vote', 'rejected'])
@@ -65,6 +65,7 @@ Deno.test('nodeCounts／indexAtOrBefore', () => {
     ev({ at: '2026-11-11T06:00:00Z', kind: 'applied' }),
   ])
   assertEquals(nodeCounts(items), { dispatcher: 2, vote: 1, notfound: 1, applied: 1 })
+  assertEquals(nodeCounts(toItems([ev({ kind: 'vote', agent_name: 'Jev' }), ev({ kind: 'vote', agent_name: '小明' })])), { jevVote: 1, vote: 1 })
   assertEquals(nodeCounts(items, 1), { dispatcher: 2 })
   assertEquals(indexAtOrBefore(items, Date.parse('2026-11-11T03:30:00Z')), 2)
   assertEquals(indexAtOrBefore(items, Date.parse('2026-11-11T00:00:00Z')), -1)
@@ -94,38 +95,46 @@ Deno.test('gapText／timeSlices', () => {
   assertEquals(timeSlices(0, 10, 4), [[0, 4], [4, 8], [8, 10]])
 })
 
-// ---- 版面（維護者 2026-11-11 定案：16 個節點、22 條線、基準畫布 697×820） ----
+// ---- 版面（維護者 2026-11-11 定稿：17 個節點、23 條線、基準畫布 697×660） ----
 
 const WIDTHS = [520, 697, 768, 1024, 1440]
 const EXPECTED_NODES: Record<string, [number, number]> = {
-  official: [87, 41], detector: [87, 123], card: [87, 205], queue: [87, 287], dispatcher: [87, 369], vote: [87, 451], applied: [87, 697],
-  visitor: [261, 41], suggest: [436, 41], jev: [261, 287], submit: [436, 451], notfound: [610, 533], cooldown: [610, 615],
-  dispute: [261, 451], strongLane: [261, 533], rejected: [436, 615],
+  official: [87, 41], detector: [87, 123], card: [87, 205], queue: [87, 287], dispatcher: [87, 369], vote: [87, 451], applied: [87, 615],
+  visitor: [261, 41], suggest: [436, 41], jevSort: [436, 287], jevVote: [436, 451], submit: [436, 369], notfound: [610, 369], cooldown: [610, 205],
+  dispute: [261, 533], strongLane: [436, 533], rejected: [610, 533],
 }
 const EXPECTED_LINKS = [
-  'official b2 detector r1', 'detector b2 card t2', 'card b2 queue t2', 'queue b2 dispatcher t2', 'dispatcher b2 vote t2', 'vote b2 applied t2',
-  'visitor b2 card r0', 'suggest b1 card r1', 'jev r0 suggest b3', 'submit t3 jev r2', 'dispatcher r1 submit t1', 'jev t2 queue t4',
-  'jev l2 vote r0', 'vote b4 dispute l2', 'dispute b2 strongLane t2', 'strongLane b1 applied r1', 'strongLane b3 rejected t2',
-  'vote b3 rejected l1', 'submit r1 notfound t2', 'notfound b2 cooldown t2', 'cooldown l1 rejected r1', 'cooldown r1 card r2',
+  'a1b official b2 detector t2', 'bw detector b2 card t2', 'wc card b2 queue t2', 'cd queue b2 dispatcher t2', 'dv dispatcher b2 vote t2', 'vl vote b2 applied t2',
+  'a2w visitor b2 card r0', 'a3w suggest b2 card r1', 'ja jevSort r0 suggest r1', 'ep3 submit r2 jevVote r2', 'ep2 submit r0 jevSort r2',
+  'de dispatcher r1 submit l1', 'jq jevSort l1 queue r1', 'jv jevVote l1 vote r1', 'vg vote b3 dispute l1', 'gq dispute r1 strongLane l1',
+  'ql strongLane b2 applied r1', 'qr strongLane r1 rejected l1', 'vr vote b4 rejected t2', 'en submit r1 notfound l1', 'nk notfound t2 cooldown b2',
+  'kr cooldown r1 rejected r1', 'kw cooldown l2 card r2',
 ]
+const EXPECTED_KINDS: Record<string, string> = {
+  official: 'system', detector: 'system', card: 'system', queue: 'system', dispatcher: 'system', notfound: 'system', cooldown: 'system', dispute: 'system', strongLane: 'system',
+  vote: 'agent', visitor: 'agent', suggest: 'agent', submit: 'agent', jevSort: 'jev', jevVote: 'jev', applied: 'end', rejected: 'end',
+}
 
-Deno.test('版面：16 個節點、全 126×36、中心座標照維護者定案、基準畫布 697×820', () => {
-  assertEquals([BASE_W, BASE_H, NODE_W, NODE_H], [697, 820, 126, 36])
-  assertEquals(NODE_DEFS.length, 16)
+Deno.test('版面：17 個節點、全 126×36、中心座標與框型照維護者定稿、基準畫布 697×660', () => {
+  assertEquals([BASE_W, BASE_H, NODE_W, NODE_H], [697, 660, 126, 36])
+  assertEquals(NODE_DEFS.length, 17)
   const L = computeLayout(BASE_W)
   assertEquals(L.width, 697)
-  assertEquals(L.height, 820)
+  assertEquals(L.height, 660)
   for (const [id, [cx, cy]] of Object.entries(EXPECTED_NODES)) {
     const n = L.nodes[id as NodeId]
     assertEquals([n.cx, n.cy, n.w, n.h], [cx, cy, 126, 36], id)
+    assertEquals(n.kind, EXPECTED_KINDS[id], `${id} 框型`)
   }
+  assertEquals(L.nodes.queue.label, '派工佇列')
 })
 
-Deno.test('版面：22 條線的起訖與連接點（左右 3 個、上下 5 個）照定案', () => {
-  assertEquals(LINKS.map((l) => `${l.from} ${l.fromSide}${l.fromIdx} ${l.to} ${l.toSide}${l.toIdx}`), EXPECTED_LINKS)
+Deno.test('版面：23 條線的起訖與連接點（左右 3 個、上下 5 個）照定稿，只有順手提議是虛線', () => {
+  assertEquals(LINKS.map((l) => `${l.id} ${l.from} ${l.fromSide}${l.fromIdx} ${l.to} ${l.toSide}${l.toIdx}`), EXPECTED_LINKS)
+  assertEquals(LINKS.filter((l) => l.style === 'dashed').map((l) => l.id), ['ja'])
   for (const l of LINKS) {
     for (const [side, idx] of [[l.fromSide, l.fromIdx], [l.toSide, l.toIdx]] as const) {
-      assert(idx >= 0 && idx <= (side === 't' || side === 'b' ? 4 : 2), `${l.from}>${l.to} 連接點 ${side}${idx} 超出範圍`)
+      assert(idx >= 0 && idx <= (side === 't' || side === 'b' ? 4 : 2), `${l.id} 連接點 ${side}${idx} 超出範圍`)
     }
   }
   const L = computeLayout(BASE_W)
@@ -184,20 +193,33 @@ Deno.test('版面：節點與連線都在畫布內、節點彼此不重疊、線
 Deno.test('版面：所有事件會用到的相鄰節點都找得到直角連線', () => {
   const L = computeLayout(697)
   const pairs: Array<[NodeId, NodeId]> = [
-    ['detector', 'card'], ['card', 'queue'], ['queue', 'dispatcher'], ['dispatcher', 'queue'], ['dispatcher', 'submit'], ['submit', 'jev'], ['jev', 'queue'],
-    ['jev', 'suggest'], ['suggest', 'card'], ['visitor', 'card'], ['dispatcher', 'vote'], ['vote', 'applied'], ['vote', 'rejected'], ['submit', 'notfound'],
-    ['notfound', 'cooldown'], ['jev', 'vote'], ['dispute', 'strongLane'], ['strongLane', 'rejected'],
+    ['detector', 'card'], ['card', 'queue'], ['queue', 'dispatcher'], ['dispatcher', 'queue'], ['dispatcher', 'submit'], ['submit', 'jevSort'], ['jevSort', 'queue'],
+    ['jevSort', 'suggest'], ['suggest', 'card'], ['visitor', 'card'], ['dispatcher', 'vote'], ['vote', 'applied'], ['vote', 'rejected'], ['submit', 'notfound'],
+    ['notfound', 'cooldown'], ['jevVote', 'vote'], ['dispute', 'strongLane'], ['strongLane', 'rejected'], ['strongLane', 'applied'],
   ]
   for (const [a, b] of pairs) {
+    const direct = L.routes.some((r) => (r.from === a && r.to === b) || (r.from === b && r.to === a))
+    assert(direct, `${a}>${b} 沒有對應的線`)
     const pts = routeBetween(L, a, b)
-    assert(pts.length >= 2, `${a}>${b}`)
     for (let i = 0; i < pts.length - 1; i++) assert(pts[i][0] === pts[i + 1][0] || pts[i][1] === pts[i + 1][1], `${a}>${b} 不是直角`)
   }
   assertEquals(routeBetween(L, 'dispatcher', 'queue'), [...routeBetween(L, 'queue', 'dispatcher')].reverse())
-  // 串接：dispatcher→submit→jev 接點不重複
-  const p = pathThrough(L, ['dispatcher', 'submit', 'jev'])
+  // 串接：dispatcher→submit→jevSort 接點不重複
+  const p = pathThrough(L, ['dispatcher', 'submit', 'jevSort'])
   assertEquals(p[0], routeBetween(L, 'dispatcher', 'submit')[0])
-  assertEquals(p[p.length - 1], routeBetween(L, 'submit', 'jev').at(-1))
+  assertEquals(p[p.length - 1], routeBetween(L, 'submit', 'jevSort').at(-1))
+})
+
+Deno.test('事件對應：每個事件走的相鄰節點都有線（不會憑空飛過去）', () => {
+  const L = computeLayout(697)
+  const kinds = ['gap_opened', 'gap_reopened', 'gap_closed', 'lease_issued', 'lease_reported', 'lease_released', 'lease_expired', 'task_created', 'task_closed',
+    'request_merged', 'submitted', 'verified', 'verify_dispatched', 'vote', 'applied', 'rejected', 'check']
+  for (const kind of kinds) for (const detail of [{}, { type: 'task_suggestion' }, { type: 'no_change' }, { outcome: 'not_found' }, { source: 'web_request' }]) for (const agent of [null, 'Jev']) {
+    const r = eventRoute(ev({ kind, detail, agent_name: agent }))
+    for (let i = 0; i < r.length - 1; i++) {
+      assert(L.routes.some((x) => (x.from === r[i] && x.to === r[i + 1]) || (x.from === r[i + 1] && x.to === r[i])), `${kind} ${JSON.stringify(detail)}：${r[i]}→${r[i + 1]} 沒有線`)
+    }
+  }
 })
 
 Deno.test('等比縮放：寬度加倍，座標與尺寸都加倍', () => {
