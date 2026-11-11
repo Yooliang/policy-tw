@@ -3,6 +3,8 @@
 -- 為什麼是函式、不是開表：派工真實流動散在八張表，其中交件（contributions）、投票（contribution_votes）、
 -- 驗證票派出（verify_dispatches）、認領事件（lease_events）匿名讀不到（RLS 只開 service_role 或根本沒有 policy）。
 -- 不開這些表，改用一支 SECURITY DEFINER 函式，只回「事件時間、種類、任務、交件、人物、顯示名、少量摘要」。
+-- 不回投票與查核的備註原文（可能含人名或連結）、不回審核者原文（只分「自動」「人工」）。
+-- 匿名可呼叫，所以函式自帶 3 秒 timeout（單次實測約 40～210 ms）。
 -- 只回代理的顯示名（agent_name）；來源網段雜湊、憑證、序號、帳號識別一律不選、不進 detail。守門 _shared/trace-events.test.ts 守著。
 --
 -- 參數：
@@ -45,7 +47,7 @@ CREATE OR REPLACE FUNCTION trace_events(
   agent_name      TEXT,
   detail          JSONB
 )
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public SET statement_timeout = '3s' AS $$
 #variable_conflict use_column
 DECLARE
   v_since  TIMESTAMPTZ := GREATEST(coalesce(p_since, now() - interval '4 hours'), now() - interval '14 days');
@@ -62,11 +64,11 @@ BEGIN
       v_cids := v_cids || coalesce((
         SELECT array_agg(c.id) FROM (
           SELECT c.id FROM contributions c
-           WHERE c.task_id = p_task_id AND c.created_at >= GREATEST(v_since, now() - interval '14 days')
+           WHERE c.task_id = p_task_id AND c.created_at >= now() - interval '14 days'
           UNION
           SELECT c.id FROM contributions c
            WHERE c.contribution_type = 'no_change' AND c.payload->>'task_id' = p_task_id
-             AND c.created_at >= GREATEST(v_since, now() - interval '14 days')
+             AND c.created_at >= now() - interval '14 days'
           LIMIT 300
         ) c), ARRAY[]::UUID[]);
     END IF;
@@ -81,7 +83,7 @@ BEGIN
       v_cids := v_cids || coalesce((
         SELECT array_agg(c.id) FROM (
           SELECT c.id FROM contributions c
-           WHERE c.created_at >= GREATEST(v_since, now() - interval '14 days')
+           WHERE c.created_at >= now() - interval '14 days'
              AND (c.applied_politician_id = p_politician_id OR c.payload->>'politician_id' = v_pid)
            ORDER BY c.created_at DESC LIMIT 300
         ) c), ARRAY[]::UUID[]);
@@ -90,10 +92,10 @@ BEGIN
           SELECT coalesce(c.task_id, c.payload->>'task_id') AS tid FROM contributions c WHERE c.id = ANY(v_cids)
           UNION
           SELECT g.task_id FROM gap_events g
-           WHERE g.at >= GREATEST(v_since, now() - interval '14 days') AND g.task_id LIKE 'auto:%' AND position(v_pid in g.task_id) > 0
+           WHERE g.at >= now() - interval '14 days' AND g.task_id LIKE 'auto:%' AND position(v_pid in g.task_id) > 0
           UNION
           SELECT w.task_id::text FROM web_request_coverage w
-           WHERE w.requested_at >= GREATEST(v_since, now() - interval '14 days') AND w.politician_id = v_pid
+           WHERE w.requested_at >= now() - interval '14 days' AND w.politician_id = v_pid
         ) t WHERE t.tid IS NOT NULL), ARRAY[]::TEXT[]);
     END IF;
   END IF;
@@ -159,14 +161,14 @@ BEGIN
     UNION ALL
     -- 落庫
     (SELECT c.applied_at, 'applied', coalesce(c.task_id, c.payload->>'task_id'), NULL::text, c.id, c.applied_politician_id, NULL::text,
-            jsonb_strip_nulls(jsonb_build_object('type', c.contribution_type, 'reviewed_by', c.reviewed_by))
+            jsonb_strip_nulls(jsonb_build_object('type', c.contribution_type, 'reviewed_by', CASE WHEN c.reviewed_by IS NULL THEN NULL WHEN c.reviewed_by ~ '^(auto-|system:|cec-|soumu-|estat-|consensus|strong-adjudication$|adjudication$)|-auto$' THEN '自動' ELSE '人工' END))
        FROM contributions c
       WHERE c.applied_at >= GREATEST(v_since, now() - interval '14 days') AND c.applied_at < v_until AND (v_all OR c.id = ANY(v_cids))
       ORDER BY c.applied_at DESC LIMIT v_lim)
     UNION ALL
     -- 退件
     (SELECT c.reviewed_at, 'rejected', coalesce(c.task_id, c.payload->>'task_id'), NULL::text, c.id, c.applied_politician_id, NULL::text,
-            jsonb_strip_nulls(jsonb_build_object('type', c.contribution_type, 'reviewed_by', c.reviewed_by))
+            jsonb_strip_nulls(jsonb_build_object('type', c.contribution_type, 'reviewed_by', CASE WHEN c.reviewed_by IS NULL THEN NULL WHEN c.reviewed_by ~ '^(auto-|system:|cec-|soumu-|estat-|consensus|strong-adjudication$|adjudication$)|-auto$' THEN '自動' ELSE '人工' END))
        FROM contributions c
       WHERE c.status = 'rejected' AND c.reviewed_at >= GREATEST(v_since, now() - interval '14 days') AND c.reviewed_at < v_until AND (v_all OR c.id = ANY(v_cids))
       ORDER BY c.reviewed_at DESC LIMIT v_lim)
@@ -181,14 +183,14 @@ BEGIN
     -- 一張投票
     (SELECT v.created_at, 'vote', coalesce(c.task_id, c.payload->>'task_id'), NULL::text, v.contribution_id, NULL::uuid, v.agent_name,
             jsonb_strip_nulls(jsonb_build_object('verdict', v.verdict, 'weight', v.weight, 'type', c.contribution_type,
-                                                 'note', left(v.note, 160), 'evidence_url', v.evidence_url))
+                                                 'evidence_url', v.evidence_url))
        FROM contribution_votes v JOIN contributions c ON c.id = v.contribution_id
       WHERE v.created_at >= GREATEST(v_since, now() - interval '14 days') AND v.created_at < v_until AND (v_all OR v.contribution_id = ANY(v_cids))
       ORDER BY v.created_at DESC LIMIT v_lim)
     UNION ALL
     -- 查核（查無等）
     (SELECT k.checked_at, 'check', k.task_id, k.work_key, k.contribution_id, NULL::uuid, k.agent_name,
-            jsonb_strip_nulls(jsonb_build_object('outcome', k.outcome, 'note', left(k.note, 160)))
+            jsonb_strip_nulls(jsonb_build_object('outcome', k.outcome))
        FROM task_checks k
       WHERE k.checked_at >= GREATEST(v_since, now() - interval '14 days') AND k.checked_at < v_until AND (v_all OR k.task_id = ANY(v_tasks))
       ORDER BY k.checked_at DESC LIMIT v_lim)
