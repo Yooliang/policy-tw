@@ -259,7 +259,7 @@ CREATE FUNCTION contribution_subject_politician(p jsonb) RETURNS uuid LANGUAGE s
 ${await latestFn("uuid_or_null")}
 UPDATE elections SET bulletin_published_on = DATE '2026-11-18' WHERE id = 2026;
 ALTER TABLE contributions ADD COLUMN contributor_ip_hash text, ADD COLUMN agent_name text, ADD COLUMN payload jsonb;
-CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text, work_key text);
 ${await latestFn("task_target_key")}
 DROP FUNCTION queue_slot(text);
 ${await latestFn("queue_slot")}

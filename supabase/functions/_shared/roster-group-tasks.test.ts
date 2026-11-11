@@ -34,7 +34,7 @@ const OLD = "d.task_type NOT IN ('question', 'adjudicate', 'roster_check')";
 // ============================================================
 Deno.test("A1 機械式替換的底：三支函式現行定義裡「三型不停放」字串的次數＝migration 斷言的次數", async () => {
   const count = (s: string) => s.split(OLD).length - 1;
-  assertEquals(count(await latestFn("contribution_queue_tasks")), 2);
+  assertEquals(count(await latestFn("contribution_queue_tasks", "20261111100000_work_key.sql")), 2);
   assertEquals(count(await latestFn("contribution_auto_tasks")), 2);
   assertEquals(count(fnText(await readMig("20261017020100_overvoted_votes.sql"), "console_queue_state")), 1);
   const exempt = section(MIG, "exempt");
@@ -49,7 +49,7 @@ Deno.test("A1 機械式替換的底：三支函式現行定義裡「三型不停
     for (const n of names.sort()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) out.push(n);
     return out;
   };
-  assertEquals((await defining("contribution_queue_tasks")).at(-1), "20261017010000_verify_ticket_follows_task.sql");
+  assertEquals((await defining("contribution_queue_tasks")).filter((n) => n < "20261111100000").at(-1), "20261017010000_verify_ticket_follows_task.sql");  // 20261111100000（work_key）整支重寫，底是線上現行定義
   assertEquals((await defining("console_queue_state")).at(-1), "20261017020100_overvoted_votes.sql");
   assertEquals((await defining("manual_task_closes_on_applied")).at(-1), MIG_NAME);
 });
@@ -97,7 +97,7 @@ CREATE TABLE queue_settings (id smallint PRIMARY KEY, boost_seconds bigint NOT N
   manual_front_seconds bigint NOT NULL DEFAULT 157680000, verify_priority_seconds integer NOT NULL DEFAULT 1209600, dispatch_horizon_seconds integer NOT NULL DEFAULT 86400,
   verify_inherit_negative boolean NOT NULL DEFAULT false);
 INSERT INTO queue_settings (id) VALUES (1);
-CREATE TABLE task_dispatches (task_id text PRIMARY KEY, last_dispatched_at timestamptz NOT NULL DEFAULT now(), dispatch_count integer NOT NULL DEFAULT 1, refreshed_at timestamptz,
+CREATE TABLE task_dispatches (task_id text PRIMARY KEY, work_key text, last_dispatched_at timestamptz NOT NULL DEFAULT now(), dispatch_count integer NOT NULL DEFAULT 1, refreshed_at timestamptz,
   queue_at timestamptz NOT NULL DEFAULT now(), task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
   blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false, verify_target integer, priority_seconds integer NOT NULL DEFAULT 0,
   boost_seconds bigint NOT NULL DEFAULT 0, cool_until timestamptz, opened_at timestamptz NOT NULL DEFAULT now(), verify_follows_task boolean NOT NULL DEFAULT true);
@@ -105,7 +105,7 @@ CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_
   payload jsonb NOT NULL DEFAULT '{}'::jsonb, contributor_ip_hash text, agent_name text, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, task_type text NOT NULL, source text NOT NULL DEFAULT 'manual', status text NOT NULL DEFAULT 'open',
   target jsonb NOT NULL DEFAULT '{}'::jsonb, last_dispatched_at timestamptz);
-CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text, work_key text);
 CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
 CREATE TABLE question_answers (question_id uuid, agent_name text);
 CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);

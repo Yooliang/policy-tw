@@ -536,9 +536,9 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // task：先清過期認領、讀未過期的（別人領走的目標 30 分鐘內不派）
     await supabase.rpc("contribution_task_leases_purge");
     // query-bounds: ok — 只有未過期的認領（LEASE_MINUTES=30 分鐘），上面剛 purge 過，同時在跑的代理是個位數
-    const { data: leaseRows, error: leaseError } = await supabase.from("contribution_task_leases").select("task_id, target_key, agent_name, leased_until").gt("leased_until", new Date().toISOString());
+    const { data: leaseRows, error: leaseError } = await supabase.from("contribution_task_leases").select("task_id, target_key, work_key, agent_name, leased_until").gt("leased_until", new Date().toISOString());
     if (leaseError) throw new Error(`leases read: ${leaseError.message}`);
-    let leases = (leaseRows ?? []) as Array<{ task_id: string; target_key: string; agent_name: string; leased_until: string }>;
+    let leases = (leaseRows ?? []) as Array<{ task_id: string; target_key: string; work_key?: string | null; agent_name: string; leased_until: string }>;
     if (skipTaskId) {
       // 只能釋放自己認領的，不能幫別人放掉
       const { error: relErr } = await supabase.from("contribution_task_leases")

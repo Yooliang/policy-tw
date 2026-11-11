@@ -275,3 +275,10 @@ SELECT task_id, task_type, queue_at, boost_seconds, priority_seconds, dispatch_c
 - 存：側表 `task_estimates`（每任務一列、現行答案）＋ `jev_decisions`（`subject_type=task`，題目 `task_difficulty`／`task_time`／`task_model`／`task_hardness`，成本照舊記在這）。重問條件由 `task_estimate_candidates()` 判：沒估過、`target_hash`（task_type＋target）變了、或題目版本 `TASK_ESTIMATE_VERSION` 不同。
 - 曝露：`/next` 的 `item.estimate`（沒估過是 `null`）。**階段 1 不影響派工順序、不排程（沒有 cron）。**
 - 守門 `task-estimate.test.ts`（Jev 與資料庫 stub）。
+
+## 8. work_key：工作卡鍵（2026-11-11，migration `20261111100000`，不升協議版）
+
+- **是什麼**：同一人×同一件事同一個鍵，跨臂、跨指紋、跨手動任務。SQL 函式 `task_work_key(task_id, target)` 從現有 `task_id`（手動任務查 `contribution_tasks`）算，不改任何臂的輸出；對應表在 migration 檔頭（`activity_arm_names()` 逐臂列出）。形狀：`politician:<pid>:policies:<屆>`（`policy_missing` 與 `term_policy_missing` 同人同屆同鍵，網站請求缺政見也是同一張）、`politician:<pid>:profile`、`policy:<policy_id>:<臂>`、`unit:<屆>:<型>:<縣市[:鄉鎮]>:<need>[:pN]`、帶指紋的臂去掉末段指紋、其餘 auto 臂原樣；`verify:<id>` 取母任務的鍵。
+- **存在哪**：`task_dispatches.work_key`（BEFORE INSERT／UPDATE OF task_id, target 觸發器）、`task_checks.work_key`、`contribution_task_leases.work_key`（BEFORE INSERT 觸發器，TS 不算；算不出來的 task_checks 用 `task:<task_id>`）。
+- **誰認它**：①查核階梯（視圖 `task_ladder_closed`、`task_check_cooldown_days_for` 按 `work_key` 累計，結案輸出這張卡現在的每個任務代號）②`refresh_dispatch_blocked` 的 `cool_until` 取同一張卡最晚的查核 ③租約：`contribution_queue_tasks` 與 `_shared/dispatch.ts` 的 `filterLeasedTasks` 除了原本的 `target_key`（整個人／整條政見）也比 `work_key`（只多擋、不少擋）。換號（指紋變）不用搬資料：新列鍵相同，`task_checks` 自然延續。
+- **注意**：`policy_missing` 的屆別用 `campaign_election_id()`，換屆（2028 新增）時舊列的鍵不會回頭改；未接 work_key 的還有「插隊拉回」（`manual_front_pull`、`cand_no_front_pull`，仍按自己的 `task_id` 讀 `task_checks`）。新增派工臂：task_id 長相若不是既有形狀，要在 `task_work_key` 補一段並在 `work-key.test.ts` 加樣本。守門 `_shared/work-key.test.ts`。

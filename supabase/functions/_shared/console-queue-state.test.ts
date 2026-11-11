@@ -21,7 +21,7 @@ async function db(sql = SQL): Promise<PGlite> {
   const d = new PGlite();
   await d.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
-    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, task_type text, target jsonb, queue_at timestamptz,
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, work_key text, task_type text, target jsonb, queue_at timestamptz,
       dispatch_count int DEFAULT 0, last_dispatched_at timestamptz, blocked boolean DEFAULT false, cooling boolean DEFAULT false, verify_target int);
     CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, source text, task_type text, target jsonb);
     CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count int);
@@ -171,7 +171,7 @@ Deno.test("停放條件與派工 SQL 同一份：console 的 parked 條件＝con
 Deno.test("隊頭 agent 欄（20261109010000）：只顯示未過期的認領者；過期、沒人領、驗證票都是 null；重跑冪等", async () => {
   const d = await db();
   await d.exec(`
-    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz);
+    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz, work_key text);
     INSERT INTO contribution_task_leases VALUES
       ('auto:a:ready', 'task:auto:a:ready', 'W-Policy', now() + interval '10 minutes'),
       ('${U1}', 'task:${U1}', 'Old-Agent', now() - interval '1 minute');
@@ -191,7 +191,7 @@ Deno.test("隊頭 agent 欄（20261109010000）：只顯示未過期的認領者
 Deno.test("隊頭 agent 欄補驗證票（20261109130000）：30 分鐘內派到、還沒投票的代理，新的在前用「、」連；投過票、過期、其他票都不算；任務列不變", async () => {
   const d = await db();
   await d.exec(`
-    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz);
+    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, agent_name text, leased_until timestamptz, work_key text);
     INSERT INTO contribution_task_leases VALUES ('auto:a:ready', 'task:auto:a:ready', 'W-Policy', now() + interval '10 minutes');
     CREATE TABLE verify_dispatches (contribution_id int, ip_hash text, agent_name text, dispatched_at timestamptz, PRIMARY KEY (contribution_id, ip_hash));
     CREATE TABLE contribution_votes (contribution_id int, agent_name text);

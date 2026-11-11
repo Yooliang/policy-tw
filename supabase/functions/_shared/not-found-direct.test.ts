@@ -39,7 +39,8 @@ async function days(taskId: string, outcome: string, priorNotFound = 0): Promise
   await db.exec(`
     CREATE TABLE task_cooldown_settings (id integer PRIMARY KEY, enabled boolean, task_types text[], not_found_first_days integer, not_found_repeat_days integer);
     INSERT INTO task_cooldown_settings VALUES (1, true, ARRAY['progress_stale','deadline_due'], 14, 30);
-    CREATE TABLE task_checks (id bigint PRIMARY KEY, task_id text, outcome text, checked_at timestamptz);
+    CREATE TABLE task_checks (id bigint PRIMARY KEY, task_id text, outcome text, checked_at timestamptz, work_key text GENERATED ALWAYS AS ('task:' || task_id) STORED);
+    CREATE FUNCTION task_work_key(t text, g jsonb) RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
     CREATE FUNCTION task_unreachable_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT 2 $$;
     CREATE FUNCTION task_check_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT ${TASK_CHECK_COOLDOWN_DAYS} $$;
     CREATE TABLE task_check_ladder_settings (outcome text PRIMARY KEY, days integer[] NOT NULL);
