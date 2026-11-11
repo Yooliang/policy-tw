@@ -50,6 +50,12 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
     out.push(`jev_decisions 的 j.${col}${m[2] ?? ""} 不能回（只准 choice、question、asked_at 與 state 的 supported_sources）`);
   }
   if (!/FROM jev_decisions j/.test(code)) out.push("少了 jev_decisions 分支");
+  // strong_adjudications（別名 s）：只准讀 verdict、status、finalized_at、task_id、contribution_id（不回 reasoning、cause_note、報告回應、模型、費用）
+  for (const m of code.matchAll(/\bs\.(\w+)/g)) {
+    if (["verdict", "status", "finalized_at", "task_id", "contribution_id"].includes(m[1])) continue;
+    out.push(`strong_adjudications 的 s.${m[1]} 不能讀（只准 verdict、status、finalized_at、task_id、contribution_id）`);
+  }
+  if (!/FROM strong_adjudications s/.test(code)) out.push("少了 strong_adjudications 分支");
 
   // B. 有界
   const m =/RETURN QUERY([\s\S]*?)\nEND;\n\$\$;/.exec(code);
@@ -287,4 +293,11 @@ Deno.test("還原驗證：拿掉強模型分支時限 → 紅", () => {
   assert(problemsOf(noBound, leaseDays).some((p) => p.includes("沒有 >= 時限")));
   const noLease = mutate(REAL, "l.at >= GREATEST(v_since, now() - interval '13 days') AND l.at < v_until AND (v_all OR c.id", "l.at < v_until AND (v_all OR c.id");
   assert(problemsOf(noLease, leaseDays).some((p) => p.includes("沒有 >= 時限")));
+});
+
+Deno.test("還原驗證：strong_adjudications 多讀 reasoning／cause_note／model → 紅", () => {
+  for (const col of ["reasoning", "cause_note", "model", "report_response"]) {
+    const bad = mutate(REAL, "jsonb_build_object('verdict', s.verdict,", `jsonb_build_object('x', s.${col}, 'verdict', s.verdict,`);
+    assert(problemsOf(bad, leaseDays).some((p) => p.includes(`s.${col}`)), `${col} 應該被抓到`);
+  }
 });

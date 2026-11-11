@@ -205,6 +205,7 @@ export function countNode(e: TraceEvent): NodeId | null {
   switch (e.kind) {
     case 'gap_opened': case 'gap_reopened': return 'detector'
     case 'gap_closed': return 'queue'
+    // 強模型專線的認領也是一筆租約事件，所以同時算進一般「派出」；strong_claim 另算在強模型通道格
     case 'lease_issued': case 'verify_dispatched': return 'dispatcher'
     case 'submitted': return detailText(e, 'type') === 'task_suggestion' ? 'suggest' : 'submit'
     case 'vote': return 'vote'
