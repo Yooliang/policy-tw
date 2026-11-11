@@ -11,7 +11,8 @@
  *   6. 開關：預設關、關著 plan 回空、apply 不做事、乾跑不看開關
  *   7. revert：只還原現值仍是它寫的（被改過的算 blocked）、還原自動關開關、被還原的之後不再寫
  *   8. migration 本身不改任何參選紀錄
- *   9. 還原驗證：拿掉單位 fresh 判斷、拿掉同名多筆判斷、拿掉重複號次判斷都要紅
+ *   9. 不一致視圖 cand_no_auto_mismatch：站上已有號次、鏡像唯一對上但不同的只列不寫
+ *  10. 還原驗證：拿掉單位 fresh 判斷、拿掉同名多筆判斷、拿掉重複號次判斷都要紅
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
@@ -235,7 +236,7 @@ Deno.test("migration 本身不改任何參選紀錄、不留 run", async () => {
 Deno.test("還原驗證：拿掉任一道守門，對應情境要紅", async () => {
   // 單位 fresh
   {
-    const { db } = await build((s) => mutate(s, "u.status = 'ok' AND u.fetched_at > now() - INTERVAL '3 days'", "u.status = 'ok'"));
+    const { db } = await build((s) => s.split("u.status = 'ok' AND u.fetched_at > now() - INTERVAL '3 days'").join("u.status = 'ok'"));
     const p = await planOf(db);
     assert(p.find((x) => Number(x.politician_election_id) === 5)!.action === "write", "拿掉 fresh 判斷，不 fresh 的單位就會被寫（測試要抓得到）");
     await db.close();
@@ -269,4 +270,23 @@ Deno.test("還原驗證：拿掉任一道守門，對應情境要紅", async () 
     assert(p.find((x) => Number(x.politician_election_id) === 10)!.action === "write");
     await db.close();
   }
+});
+
+Deno.test("不一致視圖：站上已有號次、鏡像唯一對上但號次不同的只列不寫；一致的、單位不 fresh 的不列；status 帶計數", async () => {
+  const { db } = await build((s) => s, false); // 開關關著也看得到
+  const m = await rows<{ politician_election_id: number; our_name: string; our_cand_no: number; roster_cand_no: number; roster_fetched_at: string | null; unit: string }>(db,
+    `SELECT politician_election_id, our_name, our_cand_no, roster_cand_no, roster_fetched_at, unit FROM cand_no_auto_mismatch ORDER BY 1`);
+  // pe14 寅M：站上 9、鏡像 2；pe7 己F 站上 2＝鏡像 2 → 一致，不列
+  assertEquals(m.map((x) => [Number(x.politician_election_id), x.our_name, Number(x.our_cand_no), Number(x.roster_cand_no)]), [[14, "寅M", 9, 2]]);
+  assert(m[0].roster_fetched_at !== null && m[0].unit === "新竹縣");
+  assertEquals(Number((await rows<{ mismatch: number }>(db, `SELECT mismatch FROM cand_no_auto_status`))[0].mismatch), 1);
+  // 只列不寫：打開開關跑一輪，站上的 9 不動、沒有 edit_history
+  await db.exec(`UPDATE cand_no_auto_settings SET enabled = true WHERE id = 1`);
+  await db.exec(`SELECT cand_no_auto_apply()`);
+  assertEquals((await rows<{ cand_no: number }>(db, `SELECT cand_no FROM politician_elections WHERE id = 14`))[0].cand_no, 9);
+  assertEquals((await rows(db, `SELECT 1 FROM edit_history WHERE record_id = '14'`)).length, 0);
+  // 單位超過 3 天沒抓成功就不列
+  await db.exec(`UPDATE cec_roster_units SET fetched_at = now() - interval '5 days' WHERE url = 'u-hc'`);
+  assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_mismatch`)).length, 0);
+  await db.close();
 });

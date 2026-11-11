@@ -289,7 +289,48 @@ GRANT EXECUTE ON FUNCTION cand_no_auto_apply(INTEGER, BOOLEAN) TO service_role;
 GRANT EXECUTE ON FUNCTION cand_no_auto_revert(BIGINT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION cand_no_auto_plan(BOOLEAN) TO service_role;
 
--- ── 5. 現況視圖與排程 ──────────────────────────────────────────
+-- ── 5. 站上號次跟鏡像不一致（唯讀，只列不寫） ──────────────────
+-- 我方已有號次、鏡像同單位同名唯一對上（我們這邊也只有一列）、鏡像有號次而且跟站上不同的 filed 列。
+-- 實例（2026-11-11 乾跑對照）：站上三筆錯、鏡像對（中選會 JSON 核過）。系統不寫已有的號次（只補空白），這裡只讓人看得到，改正走更正流程。
+CREATE OR REPLACE VIEW cand_no_auto_mismatch AS
+  WITH fresh AS MATERIALIZED (
+    SELECT u.election_type, replace(u.county, '臺', '台') AS county, replace(u.town, '臺', '台') AS town
+      FROM cec_roster_units u WHERE u.status = 'ok' AND u.fetched_at > now() - INTERVAL '3 days'
+  ),
+  rc AS MATERIALIZED (
+    SELECT x.election_type, x.unit_key AS unit, COALESCE(x.name_key, roster_name_key(x.name)) AS nkey,
+           count(*)::INTEGER AS n, min(x.cand_no) AS cand_no, min(x.unit_url) AS unit_url, min(x.name) AS name
+      FROM cec_roster_2026 x
+      JOIN fresh f ON f.election_type = x.election_type AND f.county = replace(x.county, '臺', '台')
+                  AND (x.election_type <> '村里長' OR f.town = replace(x.town, '臺', '台'))
+     GROUP BY x.election_type, x.unit_key, COALESCE(x.name_key, roster_name_key(x.name))
+  ),
+  o AS MATERIALIZED (
+    SELECT pe.id AS pe_id, pe.politician_id, p.name, roster_name_key(p.name) AS nkey, pe.election_type, pe.cand_no, pe.candidacy_status AS status,
+           cec_roster_norm_unit(ballot_number_unit(pe.election_type, COALESCE(rg.region, p.region), rg.sub_region, rg.sub_region, rg.village)) AS fu,
+           CASE WHEN pe.election_type = '村里長'
+                THEN CASE WHEN COALESCE(rg.sub_region, '') <> '' THEN replace(COALESCE(rg.region, p.region), '臺', '台') || '|' || replace(rg.sub_region, '臺', '台') END
+                ELSE cec_roster_norm_unit(ballot_number_unit(pe.election_type, COALESCE(rg.region, p.region), rg.sub_region, rg.sub_region, rg.village)) END AS mu
+      FROM politician_elections pe
+      JOIN politicians p ON p.id = pe.politician_id AND p.merged_into IS NULL
+      LEFT JOIN regions rg ON rg.id = pe.region_id
+     WHERE pe.election_id = 2026
+       AND pe.election_type IN ('縣市長', '縣市議員', '鄉鎮市長', '直轄市山地原住民區長', '鄉鎮市民代表', '直轄市山地原住民區民代表', '村里長')
+       AND pe.candidacy_status IS DISTINCT FROM 'withdrawn'
+  ),
+  oc AS MATERIALIZED (SELECT o.election_type, o.mu, o.nkey, count(*)::INTEGER AS n FROM o WHERE o.mu IS NOT NULL GROUP BY 1, 2, 3)
+  SELECT o.pe_id AS politician_election_id, o.politician_id, o.name AS our_name, o.election_type, o.fu AS unit,
+         o.cand_no AS our_cand_no, rc.cand_no AS roster_cand_no, rc.name AS roster_name, rc.unit_url AS roster_unit_url, u.fetched_at AS roster_fetched_at
+    FROM o
+    JOIN oc ON oc.election_type = o.election_type AND oc.mu = o.mu AND oc.nkey = o.nkey AND oc.n = 1
+    JOIN rc ON rc.election_type = o.election_type AND rc.unit = o.mu AND rc.nkey = o.nkey AND rc.n = 1
+    JOIN cec_roster_units u ON u.url = rc.unit_url
+   WHERE o.status = 'filed' AND o.cand_no IS NOT NULL AND rc.cand_no IS NOT NULL AND rc.cand_no <> o.cand_no;
+COMMENT ON VIEW cand_no_auto_mismatch IS
+  '站上已有號次、但名冊鏡像（近 3 天抓成功的單位）同單位同名唯一對上且號次不同的 filed 參選紀錄：只列不寫（系統只補空白）。2026-11-11 乾跑實例三筆，中選會 JSON 核過都是站上錯、鏡像對；改正走更正流程';
+GRANT SELECT ON cand_no_auto_mismatch TO service_role;
+
+-- ── 6. 現況視圖與排程 ──────────────────────────────────────────
 -- 不看開關（關著也看得到若打開會寫多少）；pending 在排程跑完應歸零，unresolved 是留給代理的
 CREATE OR REPLACE VIEW cand_no_auto_status AS
   WITH p AS MATERIALIZED (SELECT * FROM cand_no_auto_plan(true))
@@ -299,11 +340,12 @@ CREATE OR REPLACE VIEW cand_no_auto_status AS
          (SELECT count(*) FROM cand_no_auto_log l WHERE l.result = 'reverted')::INTEGER AS reverted,
          (SELECT count(*) FROM p WHERE p.action = 'unresolved')::INTEGER AS unresolved,
          COALESCE((SELECT jsonb_object_agg(g.reason, g.n) FROM (SELECT p.reason, count(*) AS n FROM p WHERE p.action = 'unresolved' GROUP BY p.reason) g), '{}'::jsonb) AS unresolved_by_reason,
-         (SELECT max(r.ran_at) FROM cand_no_auto_runs r WHERE r.reverted_at IS NULL) AS last_run_at
+         (SELECT max(r.ran_at) FROM cand_no_auto_runs r WHERE r.reverted_at IS NULL) AS last_run_at,
+         (SELECT count(*) FROM cand_no_auto_mismatch)::INTEGER AS mismatch
     FROM cand_no_auto_settings s
    WHERE s.id = 1;
 COMMENT ON VIEW cand_no_auto_status IS
-  '號次系統寫入的現況（一列）：還有多少位等著寫（pending，排程跑完應歸零）、已寫（written）、已還原（reverted）、留給代理的（unresolved，依原因分）。不看開關（2026-11-11）';
+  '號次系統寫入的現況（一列）：還有多少位等著寫（pending，排程跑完應歸零）、已寫（written）、已還原（reverted）、留給代理的（unresolved，依原因分）、站上號次跟鏡像不一致的（mismatch，視圖 cand_no_auto_mismatch，只列不寫）。不看開關（2026-11-11）';
 GRANT SELECT ON cand_no_auto_status TO service_role;
 
 DO $$
