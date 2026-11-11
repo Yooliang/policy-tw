@@ -13,7 +13,8 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
-const TRACE_MIG = "20261111140000_trace_events.sql";
+// 目前生效的是最後一版（CREATE OR REPLACE 整支）：160000 起多 Jev 系統票與系統判定
+const TRACE_MIG = "20261111160000_trace_events_system_vote.sql";
 const LEASE_MIG = "20261111120000_lease_events.sql";
 const norm = (s: string) => s.replace(/\r\n/g, "\n");
 const REAL = norm(await Deno.readTextFile(new URL(TRACE_MIG, MIGRATIONS)));
@@ -41,6 +42,15 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
   if (!resolve) out.push("找不到對象解析區");
   else if (/v_since/.test(resolve[1].replace(/v_since\s+TIMESTAMPTZ[^;]*;/, ""))) out.push("對象解析（交件、任務集合）用了 v_since：切段查詢時早一段建立的交件在後段會漏");
 
+  // jev_decisions：只准讀 subject_type／subject_id／question／choice／asked_at 與 state 裡的 supported_sources
+  for (const m of code.matchAll(/\bj\.(\w+)(->>?'(\w+)')?/g)) {
+    const col = m[1];
+    if (["subject_type", "subject_id", "question", "choice", "asked_at"].includes(col)) continue;
+    if (col === "state" && m[3] === "supported_sources") continue;
+    out.push(`jev_decisions 的 j.${col}${m[2] ?? ""} 不能回（只准 choice、question、asked_at 與 state 的 supported_sources）`);
+  }
+  if (!/FROM jev_decisions j/.test(code)) out.push("少了 jev_decisions 分支");
+
   // B. 有界
   const m =/RETURN QUERY([\s\S]*?)\nEND;\n\$\$;/.exec(code);
   if (!m) return [...out, "找不到 RETURN QUERY 本體"];
@@ -51,7 +61,7 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
   if (branches.length < 10) out.push(`UNION 分支只有 ${branches.length} 個，少了來源`);
   for (const b of branches) {
     const label = /FROM\s+([a-z_]+)/i.exec(b)?.[1] ?? b.slice(0, 40);
-    const lim = /(?:created_at|\bat|checked_at|requested_at|closed_at|verified_at|applied_at|reviewed_at|dispatched_at)\s*>=\s*GREATEST\(v_since,\s*now\(\)\s*-\s*interval\s*'(\d+) days'\)/.exec(b);
+    const lim = /(?:created_at|\bat|asked_at|checked_at|requested_at|closed_at|verified_at|applied_at|reviewed_at|dispatched_at)\s*>=\s*GREATEST\(v_since,\s*now\(\)\s*-\s*interval\s*'(\d+) days'\)/.exec(b);
     if (!lim) { out.push(`分支 ${label} 沒有 >= 時限`); continue; }
     const days = Number(lim[1]);
     if (days > MAX_DAYS) out.push(`分支 ${label} 回看 ${days} 天 > ${MAX_DAYS}`);
@@ -150,6 +160,7 @@ CREATE TABLE web_request_coverage (task_id uuid, politician_id text, requested_a
 CREATE TABLE contributions (id uuid primary key default gen_random_uuid(), contribution_type text, payload jsonb default '{}', task_id text, agent_name text, status text, agree_count int, disagree_count int, unsure_count int, verified_at timestamptz, reviewed_by text, reviewed_at timestamptz, applied_politician_id uuid, created_at timestamptz default now(), applied_at timestamptz);
 CREATE TABLE contribution_votes (id uuid default gen_random_uuid(), contribution_id uuid, verdict text, evidence_url text, note text, agent_name text, created_at timestamptz default now(), weight smallint);
 CREATE TABLE verify_dispatches (contribution_id uuid, ip_hash text, agent_name text, dispatched_at timestamptz);
+CREATE TABLE jev_decisions (id bigserial, subject_type text, subject_id text, question text, choice text, probability numeric, model text, state jsonb, asked_at timestamptz default now());
 CREATE TABLE task_checks (id bigserial, task_id text, checked_at timestamptz, agent_name text, note text, contribution_id uuid, outcome text, work_key text);
 `;
 const CID = "11111111-1111-1111-1111-111111111111";
@@ -195,5 +206,44 @@ Deno.test("行為：不回備註原文、不回審核者原文、不回來源網
     const text = JSON.stringify(rows);
     for (const bad of ["私人備註", "someone@example.com", "secret-hash"]) assert(!text.includes(bad), `回了 ${bad}`);
     assert(text.includes("人工"), "審核者應顯示「人工」");
+  });
+});
+
+Deno.test("還原驗證：jev_decisions 多回 state 其他內容／模型／機率，或拿掉時限 → 紅", () => {
+  const model = mutate(REAL, "jsonb_build_object('question', j.question, 'choice', j.choice,", "jsonb_build_object('question', j.question, 'choice', j.choice, 'model', j.model,");
+  assert(problemsOf(model, leaseDays).some((p) => p.includes("j.model")));
+  const state = mutate(REAL, "CASE WHEN jsonb_typeof(j.state->'supported_sources') = 'number' THEN j.state->'supported_sources' END", "j.state");
+  assert(problemsOf(state, leaseDays).some((p) => p.includes("j.state")));
+  const noBound = mutate(REAL, "AND j.asked_at >= GREATEST(v_since, now() - interval '14 days') AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- Jev 的其他", "AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- Jev 的其他");
+  assert(problemsOf(noBound, leaseDays).some((p) => p.includes("沒有 >= 時限")));
+});
+
+Deno.test("行為：Jev 系統票與系統判定從 jev_decisions 來，只回選項與來源數，不回模型與機率", async () => {
+  await withDb(async (db) => {
+    await db.exec(`
+      INSERT INTO jev_decisions(subject_type, subject_id, question, choice, probability, model, state, asked_at) VALUES
+        ('contribution', '${CID}', 'source_support', 'supported', 0.93, 'secret-model', '{"supported_sources": 2, "secret_field": "不能回"}', now() - interval '20 minutes'),
+        ('contribution', '${CID}', 'second_source', 'not_supported', 0.5, 'secret-model', '{}', now() - interval '10 minutes'),
+        ('contribution', '${CID}', 'vote_budget', '3', 0.5, 'secret-model', '{}', now() - interval '5 minutes'),
+        ('policy', '${CID}', 'source_support', 'supported', 0.5, 'secret-model', '{}', now() - interval '5 minutes');`);
+    const rows = (await db.query<{ kind: string; agent_name: string | null; detail: Record<string, unknown> }>(
+      `SELECT kind, agent_name, detail FROM trace_events(p_contribution_id => '${CID}', p_since => now() - interval '1 hour', p_until => now() + interval '1 minute')`)).rows;
+    const sys = rows.filter((r) => r.kind === "system_vote");
+    assertEquals(sys.length, 1);
+    assertEquals(sys[0].agent_name, "Jev");
+    assertEquals(sys[0].detail.choice, "supported");
+    assertEquals(sys[0].detail.supported_sources, 2);
+    const chk = rows.filter((r) => r.kind === "system_check");
+    assertEquals(chk.length, 1);
+    assertEquals([chk[0].detail.question, chk[0].detail.choice], ["second_source", "not_supported"]);
+    const text = JSON.stringify(rows);
+    for (const bad of ["secret-model", "secret_field", "不能回", "vote_budget", "0.93"]) assert(!text.includes(bad), `回了 ${bad}`);
+    // 全站模式也有
+    const all = await kindsOf(db, "p_since => now() - interval '1 hour', p_until => now() + interval '1 minute'");
+    assert(all.includes("system_vote") && all.includes("system_check"));
+    // 時限：一小時前的判定在最近 5 分鐘的段落不出現
+    await db.exec(`UPDATE jev_decisions SET asked_at = now() - interval '3 hours' WHERE question = 'source_support'`);
+    const late = await kindsOf(db, "p_since => now() - interval '1 hour', p_until => now() + interval '1 minute'");
+    assert(!late.includes("system_vote"));
   });
 });
