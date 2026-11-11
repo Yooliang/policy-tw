@@ -178,7 +178,7 @@ Deno.test("E 文字層：視圖有 7 天時限、保留天數預設與 CHECK 下
  * N 天 ＋ 邊際 ≤ 保留天數預設（lease_events_days）。要新增讀者就在這裡登記並說明回看期。
  *   20261111140000_trace_events.sql、20261111160000_trace_events_system_vote.sql：/trace 重播頁的 trace_events()，回看 13 天
  */
-const REGISTERED_READERS = ["20261111140000_trace_events.sql", "20261111160000_trace_events_system_vote.sql", "20261111200000_trace_events_dispute_strong.sql"];
+const REGISTERED_READERS = ["20261111140000_trace_events.sql", "20261111160000_trace_events_system_vote.sql", "20261111200000_trace_events_dispute_strong.sql", "20261111210000_trace_events_perf.sql"];
 
 /** 登記讀者的每一處 FROM lease_events 的問題清單（空＝合格） */
 function leaseReaderProblems(name: string, sql: string, retentionDays: number): string[] {

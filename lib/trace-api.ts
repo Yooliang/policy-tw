@@ -20,6 +20,8 @@ export interface TraceResult {
   rows: TraceEvent[]
   /** 有任何一段回滿上限，代表事件比畫面上多 */
   truncated: boolean
+  /** 有幾段讀不到（其餘照常顯示） */
+  partial: boolean
   /** 函式還沒上線（前端比 migration 早幾分鐘） */
   unavailable: boolean
   since: number
@@ -43,29 +45,49 @@ async function fetchSlice(scope: Scope, since: number, until: number, label: str
   return (data ?? []) as TraceEvent[]
 }
 
-/** 一次取一整段，同時最多 4 個請求 */
-async function fetchSlices(scope: Scope, slices: Array<[number, number]>): Promise<{ rows: TraceEvent[]; truncated: boolean }> {
-  const rows: TraceEvent[] = []
+/**
+ * 依序取每一段（不併發：同時打好幾段會互相搶資料庫資源，單段反而逾時）。
+ * 單一段失敗不讓整頁失敗：記為 partial，其餘照常；全部段都失敗才丟錯。
+ * 每取完一段呼叫 onSlice（累計結果），讓畫面可以先畫出已經到的部分。
+ */
+async function fetchSlices(
+  scope: Scope,
+  slices: Array<[number, number]>,
+  onSlice?: (rows: TraceEvent[], partial: boolean, truncated: boolean) => void,
+): Promise<{ rows: TraceEvent[]; truncated: boolean; partial: boolean }> {
+  let rows: TraceEvent[] = []
   let truncated = false
-  for (let i = 0; i < slices.length; i += 4) {
-    const batch = await Promise.all(slices.slice(i, i + 4).map(([a, b]) => fetchSlice(scope, a, b, scope.by)))
-    for (const part of batch) {
+  let failed = 0
+  let lastError: unknown = null
+  for (const [a, b] of slices) {
+    try {
+      const part = await fetchSlice(scope, a, b, scope.by)
       if (part.length >= PAGE_ROWS) truncated = true
-      rows.push(...part)
+      rows = dedupe([...rows, ...part])
+    } catch (e) {
+      if (isMissingFunction(e)) throw e
+      failed++
+      lastError = e
+      console.info('[重播] 有一段讀不到', e)
     }
+    onSlice?.(rows, failed > 0, truncated)
   }
-  return { rows: dedupe(rows), truncated }
+  if (failed === slices.length && failed > 0) throw lastError
+  return { rows, truncated, partial: failed > 0 }
 }
 
-/** 全站近 4 小時：切 30 分鐘一段 */
-export async function fetchWindow(hours = 4, now = Date.now()): Promise<TraceResult> {
+/** 全站近 4 小時：切 30 分鐘一段，由新到舊依序取（先到的最近時段可以先畫） */
+export async function fetchWindow(hours = 4, now = Date.now(), onSlice?: (r: TraceResult) => void): Promise<TraceResult> {
   const since = now - hours * HOUR
   const until = now + 60_000
+  const slices = timeSlices(since, until, HOUR / 2).reverse()
   try {
-    const r = await fetchSlices({ by: 'all' }, timeSlices(since, until, HOUR / 2))
+    const r = await fetchSlices({ by: 'all' }, slices, onSlice
+      ? (rows, partial, truncated) => onSlice({ rows, truncated, partial, unavailable: false, since, until })
+      : undefined)
     return { ...r, unavailable: false, since, until }
   } catch (e) {
-    if (isMissingFunction(e)) return { rows: [], truncated: false, unavailable: true, since, until }
+    if (isMissingFunction(e)) return { rows: [], truncated: false, partial: false, unavailable: true, since, until }
     throw e
   }
 }
@@ -75,10 +97,10 @@ export async function fetchScoped(scope: Exclude<Scope, { by: 'all' }>, now = Da
   const since = now - 14 * DAY
   const until = now + 60_000
   try {
-    const r = await fetchSlices(scope, timeSlices(since, until, 3 * DAY))
+    const r = await fetchSlices(scope, timeSlices(since, until, 3 * DAY).reverse())
     return { ...r, unavailable: false, since, until }
   } catch (e) {
-    if (isMissingFunction(e)) return { rows: [], truncated: false, unavailable: true, since, until }
+    if (isMissingFunction(e)) return { rows: [], truncated: false, partial: false, unavailable: true, since, until }
     throw e
   }
 }
@@ -88,13 +110,13 @@ export async function probeUuid(id: string, now = Date.now()): Promise<Exclude<S
   const since = now - 14 * DAY
   const until = now + 60_000
   const scopes: Array<Exclude<Scope, { by: 'all' }>> = [{ by: 'task', id }, { by: 'contribution', id }, { by: 'person', id }]
-  const hits = await Promise.all(scopes.map(async (s) => {
+  // 依序問（任務優先），有就停
+  for (const s of scopes) {
     const { data } = await withTimeoutAndRetry(`trace probe ${s.by}`, (signal) =>
       supabasePublic.rpc('trace_events', { ...params(s, since, until), p_limit: 1 }).abortSignal(signal).throwOnError())
-    return Array.isArray(data) && data.length > 0
-  }))
-  const i = hits.findIndex(Boolean)
-  return i < 0 ? null : scopes[i]
+    if (Array.isArray(data) && data.length > 0) return s
+  }
+  return null
 }
 
 export interface PersonHit { id: string; name: string; party: string | null; region: string | null; current_position: string | null }

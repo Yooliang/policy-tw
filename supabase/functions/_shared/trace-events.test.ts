@@ -14,7 +14,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 // 目前生效的是最後一版（CREATE OR REPLACE 整支）：160000 起多 Jev 系統票與系統判定
-const TRACE_MIG = "20261111200000_trace_events_dispute_strong.sql";
+const TRACE_MIG = "20261111210000_trace_events_perf.sql";
 const LEASE_MIG = "20261111120000_lease_events.sql";
 const norm = (s: string) => s.replace(/\r\n/g, "\n");
 const REAL = norm(await Deno.readTextFile(new URL(TRACE_MIG, MIGRATIONS)));
@@ -82,7 +82,11 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
   if (!/v_lim\s+INT\s*:=\s*LEAST\(GREATEST\(coalesce\(p_limit,\s*5000\),\s*1\),\s*5000\)/.test(code)) out.push("p_limit 沒有 5000 上限");
 
   // C. 屬性與權限
-  if (!/LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public SET statement_timeout = '3s' AS/.test(code)) out.push("不是 STABLE SECURITY DEFINER SET search_path = public SET statement_timeout = '3s'");
+  if (!/LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public SET statement_timeout = '\d+s' SET plan_cache_mode = force_custom_plan AS/.test(code)) out.push("不是 STABLE SECURITY DEFINER SET search_path = public SET statement_timeout SET plan_cache_mode = force_custom_plan")
+  const to = /SET statement_timeout = '(\d+)s'/.exec(code);
+  if (!to || Number(to[1]) < 5) out.push("函式宣告的 statement_timeout 要 ≥ 5s（匿名呼叫的預設上限很短，3s 在正式庫被砍過）")
+  // uuid 欄位不准轉成文字再比（索引用不上、整表掃描）：id::text = … 一律改用 trace_uuid()
+  if (/\b\w+\.id::text\s*=\s+(?!ANY\b)/.test(code)) out.push("uuid 欄位轉文字再比（c.id::text = …）會讓索引失效，請改成 c.id = trace_uuid(…)");
   if (!/REVOKE ALL ON FUNCTION trace_events\([^)]*\) FROM PUBLIC;/.test(code)) out.push("沒有 REVOKE ALL FROM PUBLIC");
   const grant = /GRANT EXECUTE ON FUNCTION trace_events\([^)]*\) TO ([A-Za-z_, ]+);/.exec(code);
   if (!grant) out.push("沒有 GRANT EXECUTE");
@@ -151,7 +155,7 @@ Deno.test("還原驗證：回備註、回審核者原文、對象解析用 v_sin
   assert(problemsOf(rb, leaseDays).some((p) => p.includes("reviewed_by")));
   const since = mutate(REAL, "c.task_id = p_task_id AND c.created_at >= now() - interval '14 days'", "c.task_id = p_task_id AND c.created_at >= v_since");
   assert(problemsOf(since, leaseDays).some((p) => p.includes("v_since")));
-  const to = mutate(REAL, " SET statement_timeout = '3s'", "");
+  const to = mutate(REAL, " SET statement_timeout = '8s'", "");
   assert(problemsOf(to, leaseDays).some((p) => p.includes("statement_timeout")));
 });
 
@@ -300,4 +304,23 @@ Deno.test("還原驗證：strong_adjudications 多讀 reasoning／cause_note／m
     const bad = mutate(REAL, "jsonb_build_object('verdict', s.verdict,", `jsonb_build_object('x', s.${col}, 'verdict', s.verdict,`);
     assert(problemsOf(bad, leaseDays).some((p) => p.includes(`s.${col}`)), `${col} 應該被抓到`);
   }
+});
+
+Deno.test("還原驗證：timeout 調回 3s、拿掉自訂計畫、又寫回 id::text 比對 → 紅", () => {
+  const t3 = mutate(REAL, "SET statement_timeout = '8s'", "SET statement_timeout = '3s'");
+  assert(problemsOf(t3, leaseDays).some((p) => p.includes("≥ 5s")));
+  const plan = mutate(REAL, " SET plan_cache_mode = force_custom_plan", "");
+  assert(problemsOf(plan, leaseDays).some((p) => p.includes("plan_cache_mode")));
+  const cast = mutate(REAL, "c.id = trace_uuid(j.subject_id)", "c.id::text = j.subject_id");
+  assert(problemsOf(cast, leaseDays).some((p) => p.includes("轉文字")));
+});
+
+Deno.test("行為：trace_uuid 不是 uuid 格式回 NULL，不讓整支失敗", async () => {
+  await withDb(async (db) => {
+    const r = (await db.query<{ a: string | null; b: string | null }>(`SELECT trace_uuid('${CID}')::text AS a, trace_uuid('not-a-uuid') AS b`)).rows[0];
+    assertEquals([r.a, r.b], [CID, null]);
+    // 其他 subject_type 的非 uuid 識別字（例如新聞編號 '1'）不會讓系統票分支出錯
+    await db.exec(`INSERT INTO jev_decisions(subject_type, subject_id, question, choice, probability, model, state) VALUES ('news_item', '1', 'news_relevance', 'unrelated', 0.5, 'm', '{}')`);
+    assert((await kindsOf(db, "p_since => now() - interval '1 hour'")).length >= 0);
+  });
 });
