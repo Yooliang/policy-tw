@@ -556,6 +556,7 @@ usePageHead({
               <span v-if="politician.birthYear" class="bg-white/20 px-3 py-1 rounded-full text-sm font-medium backdrop-blur-sm">
                 {{ politician.birthYear }} 年生 ({{ new Date().getFullYear() - politician.birthYear }} 歲)
               </span>
+              <span v-if="politician.possibleDuplicateOf?.length" class="bg-amber-100 text-amber-900 px-3 py-1 rounded-full text-sm font-medium">疑似同人，待補生年</span>
             </div>
 
             <h2 v-if="politician.slogan" class="text-xl md:text-2xl font-bold text-amber-400 mb-4 italic">"{{ politician.slogan }}"</h2>

@@ -61,7 +61,12 @@ export interface Resolution {
   names: string[];
   /** 候選資料自己產出的 key（new 時由呼叫端寫回新人物） */
   keys: IdentityKey[];
-  flag?: "same_name_exists";
+  flag?: "same_name_exists" | "possible_duplicate";
+  /**
+   * flag = possible_duplicate 時：交件帶了生年、同名者裡沒有任何一位生年相同、但有人缺生年——系統判 new（先建新人物上線），
+   * 這些缺生年的同名者 id 要掛在新人物的 possible_duplicate_of（疑似同人，待補生年；2026-11-11）
+   */
+  possible_duplicate_of?: string[];
   reason: string;
 }
 
@@ -123,6 +128,29 @@ export function decide(
   const live = scored.filter((c) => !c.vetoed);
   const base = { candidates: scored, names: [...names], keys: [...keys] };
 
+  // 只因缺生年才模糊（2026-11-11）：交件有生年，所有「還排除不掉」的同名者（沒被生年排除的同名者＋有命中的候選）都沒有生年可比。
+  // 這時不丟給驗證者指認，先建新人物、掛疑似同人標記，等缺生年的那位補上生年再自動分曉。
+  // 只要有一位同名者生年與交件相同、或命中的候選不是同名者，就不是「只因缺生年」，照舊。
+  const hasBirth = (id: string) => birthKeysOfHits.some((b) => b.politician_id === id);
+  const undecidedByBirth = (): string[] | null => {
+    if (candidateBirth.size === 0) return null;
+    const vetoedIds = new Set(scored.filter((c) => c.vetoed).map((c) => c.politician_id));
+    const pool = new Set<string>(live.map((c) => c.politician_id));
+    for (const p of sameName) {
+      const own = birthKeysOfHits.filter((b) => b.politician_id === p.id).map((b) => b.key_value);
+      if (!vetoedIds.has(p.id) && !(own.length > 0 && !own.some((b) => candidateBirth.has(b)))) pool.add(p.id);
+    }
+    const ids = [...pool];
+    if (ids.length === 0) return null;
+    if (!ids.every((id) => nameOf.has(id) && !hasBirth(id))) return null;
+    return ids;
+  };
+  const provisionalNew = (reason: string): Resolution | null => {
+    const ids = undecidedByBirth();
+    if (!ids) return null;
+    return { ...base, decision: "new", matched_keys: [], flag: "possible_duplicate", possible_duplicate_of: ids, reason: `${reason}；同名者 ${ids.length} 位都缺生年，先建新人物、掛疑似同人標記待補生年` };
+  };
+
   if (live.length === 0) {
     if (sameName.length === 0) {
       return { ...base, decision: "new", matched_keys: [], reason: "無任何面向命中、無同名人物" };
@@ -137,6 +165,8 @@ export function decide(
     }
     const remaining = sameName.filter((p) => !excluded.has(p.id));
     if (remaining.length > 0) {
+      const provisional = provisionalNew("無面向命中");
+      if (provisional) return provisional;
       return {
         ...base,
         decision: "ambiguous",
@@ -160,14 +190,16 @@ export function decide(
     if (top.score >= MATCH_MIN_SCORE && hasMediumOrStrong) {
       return { ...base, decision: "matched", politician_id: top.politician_id, matched_keys: top.matched_keys, reason: `唯一候選，分數 ${top.score}` };
     }
-    return { ...base, decision: "ambiguous", matched_keys: top.matched_keys, reason: `唯一候選但只有弱面向命中（分數 ${top.score}）` };
+    return provisionalNew(`唯一候選但只有弱面向命中（分數 ${top.score}）`)
+      ?? { ...base, decision: "ambiguous", matched_keys: top.matched_keys, reason: `唯一候選但只有弱面向命中（分數 ${top.score}）` };
   }
 
   const second = live[1];
   if (top.score - second.score >= MATCH_MIN_GAP && hasMediumOrStrong) {
     return { ...base, decision: "matched", politician_id: top.politician_id, matched_keys: top.matched_keys, reason: `最高分 ${top.score} 領先第二名 ${second.score}` };
   }
-  return { ...base, decision: "ambiguous", matched_keys: top.matched_keys, reason: `${live.length} 位候選分數相近（${top.score} vs ${second.score}）` };
+  return provisionalNew(`${live.length} 位候選分數相近（${top.score} vs ${second.score}）`)
+    ?? { ...base, decision: "ambiguous", matched_keys: top.matched_keys, reason: `${live.length} 位候選分數相近（${top.score} vs ${second.score}）` };
 }
 
 async function expandNames(store: IdentityStore, name: string): Promise<string[]> {

@@ -8,10 +8,9 @@
  *
  * 退回不算退件、不扣分、不記為已投；disagree／unsure 不受影響。
  */
-import { identityInputOf, newPoliticianDefaults } from "./candidate-import.ts";
+import { identityInputOf } from "./candidate-import.ts";
+import { identityCandidateOf } from "./identity-candidate.ts";
 import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
-import { normElectionType } from "./identity-normalize.ts";
-import { politicianIdFromTask } from "./task-politician.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -19,7 +18,6 @@ type Obj = Record<string, unknown>;
 
 const MAX_CANDIDATES = 20;
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
-const int = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);
 
 /** 必須指認的唯一判定（派工的 identity_pick_required 與收票的閘共用）：同名多位、系統判不出身分 */
 export function identityPickRequired(resolution: { decision: string } | null | undefined): boolean {
@@ -33,30 +31,6 @@ export interface PickCandidate {
   region: string | null;
   party: string | null;
 }
-
-/** 跟落庫端（applyPolitician／applyCandidacy）餵給 ensurePolitician 的 candidate 同一份組法；沒姓名或已指明是誰的回 null（不會有同名問題） */
-export function identityCandidateOf(contributionType: string, payload: Obj, taskId: unknown): Parameters<typeof identityInputOf>[0] | null {
-  if (contributionType !== "politician" && contributionType !== "candidacy") return null;
-  if (!str(payload.name)) return null;
-  if (str(payload.politician_id) ?? politicianIdFromTask(taskId)) return null;
-  if (contributionType === "politician") {
-    const defaults = newPoliticianDefaults({
-      position: str(payload.position), region: str(payload.region), election_type: str(payload.election_type),
-      current_position: str(payload.current_position), bio: str(payload.bio),
-    });
-    return {
-      name: String(payload.name), party: str(payload.party), region: defaults.region, election_type: str(payload.election_type),
-      position: defaults.position, current_position: str(payload.current_position), birth_year: int(payload.birth_year),
-    };
-  }
-  const electionType = normElectionType(str(payload.election_type)) ?? "縣市長";
-  return {
-    name: String(payload.name), party: str(payload.party), region: str(payload.region), election_type: electionType,
-    position: str(payload.position) ?? `${electionType}候選人`, current_position: str(payload.current_position),
-    birth_year: int(payload.birth_year), cec_cand_id: str(payload.cec_cand_id) ?? int(payload.cec_cand_id), cec_theme_id: str(payload.cec_theme_id),
-  };
-}
-
 export interface IdentityPickCheck {
   required: boolean;
   candidates: PickCandidate[];
@@ -114,3 +88,4 @@ export async function checkIdentityPick(supabase: SupabaseLike, contributionType
 export const IDENTITY_PICK_MESSAGE =
   "這一筆站上有同名的人，系統判不出是哪一位，同意票必須指認：請在 resolved_politician_id 指認是哪一位（candidates 裡的 id），都不是填 \"new\"。" +
   "補上再送一次，這次不算退件、不扣分、也還沒記為已投。";
+export { identityCandidateOf } from "./identity-candidate.ts";

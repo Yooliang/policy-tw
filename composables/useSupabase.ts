@@ -253,6 +253,7 @@ export function mapPolitician(row: RawPolitician): Politician {
   return {
     id: row.id,
     mergedInto: row.merged_into || undefined,
+    possibleDuplicateOf: row.possible_duplicate_of?.length ? row.possible_duplicate_of : undefined,
     name: row.name,
     party: row.party,
     status: row.status,

@@ -56,6 +56,8 @@ export interface EnsurePoliticianOptions {
    * 名冊對帳（系統建立）用：「Laling Yumin」不能變成「LalingYumin」。比對與 identity key 仍用正規化後的姓名。
    */
   keep_original_name?: boolean;
+  /** 建新人物時掛的「疑似同人」標記（缺生年的同名者 id）；沒給時取比對結果的 possible_duplicate_of（force_new 不取）。名冊對帳 force_new 時由呼叫端明給 */
+  possible_duplicate_of?: string[];
 }
 
 /** 顯示用姓名：原文，只 trim、連續空白（含全形空白）壓成一個空白 */
@@ -124,6 +126,7 @@ export async function ensurePolitician(
     return { resolution, politician_id: null, created: false };
   }
 
+  const dupOf = options.possible_duplicate_of ?? (!options.force_new && resolution.flag === "possible_duplicate" ? (resolution.possible_duplicate_of ?? []) : []);
   // 測試資料的姓名不建人物（2026-10-06）：管理端的匯入端點與交件落庫都走這裡；資料庫另有觸發器再擋一層
   if (isPlaceholderName(name)) throw new Error(`姓名「${name}」看起來是測試資料，不建立人物`);
   // position／region 是 NOT NULL：缺的話講清楚缺什麼，不要讓資料庫約束的錯誤（apply_failed）無限重試
@@ -139,6 +142,7 @@ export async function ensurePolitician(
       region: candidate.region ?? null,
       current_position: candidate.current_position ?? null,
       birth_year: validBirthYear,
+      ...(dupOf.length > 0 ? { possible_duplicate_of: dupOf } : {}),
       ...(options.extraInsert ?? {}),
     })
     .select("id")
