@@ -457,7 +457,9 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   // 2026-11-09 驗證池多一個讀者：握著人數（30 分鐘內派到、未投票；20261109170000）
   assertEquals(find(sql.readers, "public", "verify_dispatches", "contribution_verify_pool")?.hours !== undefined, true);
   assertEquals(of(sql.readers, "public", "verify_dispatches").filter((r) => r.hours === 30 / 60).length, 1, "驗證池：握著人數的 30 分鐘");
-  assertEquals(of(sql.readers, "public", "verify_dispatches").length, 3, "SQL 端有驗證池（15 分鐘、30 分鐘兩處）與 dispatch_recent");
+  // 2026-11-11 /trace 重播頁的 trace_events()：近 7 天（派工綁定的 7 天，保留天數 14 ＋ 邊際足夠）
+  assertEquals(find(sql.readers, "public", "verify_dispatches", "trace_events")?.hours, 7 * 24, "trace_events：近 7 天");
+  assertEquals(of(sql.readers, "public", "verify_dispatches").length, 4, "SQL 端有驗證池（15 分鐘、30 分鐘兩處）、dispatch_recent 與 trace_events");
   // public 的讀者不含日本站的檔案（jp-next 的路徑含 next/index.ts，沒分 schema 就會被當成 /next）
   assert(!ts.readers.some((r) => r.schema === "public" && /jp-next|_shared\/jp\//.test(r.where)), "日本站的檔案不能算進 public");
 
