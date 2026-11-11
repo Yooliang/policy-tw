@@ -321,6 +321,7 @@ function fakeContributeDb() {
       };
       return chain;
     },
+    rpc: () => Promise.resolve({ data: null, error: null }),
   };
   return { api, inserted };
 }

@@ -973,10 +973,25 @@ export async function handleContribute(
   }
 
   // 提交後釋放該任務的軟認領（別人可以接手同一目標）
-  const taskIds = [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string"))];
+  // 裁決（adjudication）沒有 task_id：只帶 payload.contribution_id，對應的 adjudicate 任務要從 target 找回來（強模型專線的租約就掛在它上面）
+  const adjTargetIds = [...new Set(validation.items
+    .filter((it) => it.contribution_type === "adjudication" && typeof (it.payload as Record<string, unknown>)?.contribution_id === "string")
+    .map((it) => (it.payload as Record<string, unknown>).contribution_id as string))];
+  const adjTaskIds: string[] = [];
+  for (const cid of adjTargetIds) {
+    const { data: adjTasks, error: adjErr } = await supabase.from("contribution_tasks").select("id")
+      .eq("task_type", "adjudicate").eq("target->>contribution_id", cid).limit(20);
+    if (adjErr) console.error("adjudicate task lookup for lease release failed:", adjErr.message);
+    for (const t of (adjTasks ?? []) as Array<{ id: string }>) adjTaskIds.push(t.id);
+  }
+  const taskIds = [...new Set([
+    ...validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string"),
+    ...adjTaskIds,
+  ])];
   if (taskIds.length > 0) {
+    // 明講原因 reported（lease_release 在同一交易內設 app.lease_release_reason 再刪；觸發器記進 lease_events）
     for (const chunk of chunksOf(taskIds)) {
-      const { error: leaseError } = await supabase.from("contribution_task_leases").delete().in("task_id", chunk);
+      const { error: leaseError } = await supabase.rpc("lease_release", { p_task_ids: chunk, p_reason: "reported" });
       if (leaseError) console.error("lease release failed:", leaseError.message);
     }
   }
