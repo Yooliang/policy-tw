@@ -5,6 +5,7 @@
 
 import { createSupabaseIdentityStore, resolvePolitician } from "./politician-identity.ts";
 import { identityInputOf } from "./candidate-import.ts";
+import { identityPickRequired } from "./identity-pick-gate.ts";
 import { normalizeCorrection } from "./correction.ts";
 import { normalizeSeatDistrict } from "./district-seats.ts";
 import { fetchAllRows } from "./fetch-all.ts";
@@ -1440,7 +1441,7 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
       const decision = data.identity?.decision ?? null;
       return {
         identity: data.identity ? { decision: data.identity.decision, politician_id: data.identity.politician_id ?? null, reason: data.identity.reason } : null,
-        identity_pick_required: decision === "ambiguous",
+        identity_pick_required: identityPickRequired(data.identity),
         identity_candidates: candidates,
         matching_politicians: candidates.map(({ elections: _e, ...rest }) => rest),
         elections,

@@ -14,6 +14,7 @@ import { loadQuotaLimits, type QuotaLimits } from "./quota-settings.ts";
 import { isSelfVote, voterKey, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted, isBulletinPolicy } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
+import { checkIdentityPick, IDENTITY_PICK_MESSAGE } from "./identity-pick-gate.ts";
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
 import { agentToolNoticeOnce } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
@@ -48,7 +49,7 @@ export function verifyQuotaFor(actor: Actor, ipHash: string, limits?: Pick<Quota
  * 否則它在資料上跟從未生效無法區分，遲早會被當成冗餘拿掉」）。1.25.0 的 3:1 就是這樣被當成冗餘退場的。
  * 只記時間、哪一道、哪一筆、來源 IP 雜湊（看得出被退回後有沒有補好再送），不存備註內容。記不成不影響回應。
  */
-export const LOGGED_GATES = new Set(["note_repeated", "note_copied", "note_too_thin", "cec_count_required", "cec_count_mismatch", "dispute_no_unsure"]);
+export const LOGGED_GATES = new Set(["note_repeated", "note_copied", "note_too_thin", "cec_count_required", "cec_count_mismatch", "identity_pick_required", "dispute_no_unsure"]);
 
 /**
  * `legacyIpHash`：1.79.0 以前的單一 IP 雜湊（`legacyIpHashOf`），過渡期用來認出切換前同一台機器交的貢獻與投的票（#481）。
@@ -127,7 +128,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score")
+    .select("id, status, task_id, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
@@ -294,6 +295,13 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
           "把核對內容補上再送一次，這次不算你被拒。",
       },
     };
+  }
+  // 必須指認的件（1.129.0）：同意票沒帶指認在收票當下退回，不等落庫才整筆退件。判定與落庫端同一份（identity-pick-gate.ts）；不算退件、不扣分、不記為已投
+  if (via !== "merge" && input.verdict === "agree" && !input.resolved_politician_id) {
+    const pick = await checkIdentityPick(supabase, contribution.contribution_type, contribution.payload ?? {}, contribution.task_id);
+    if (pick.required) {
+      return { status: 400, body: { success: false, error: "identity_pick_required", message: IDENTITY_PICK_MESSAGE, candidates: pick.candidates } };
+    }
   }
   // 同名指認要附中選會筆數（1.29.0）：指認一票就採用，要有只能靠實際查詢才拿得到的數字，伺服器當場核
   let cecSuffix = "";
