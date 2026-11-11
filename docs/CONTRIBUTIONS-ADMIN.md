@@ -217,7 +217,7 @@ Authorization: Bearer <service role key>
     "cost_total": 1.84, "tokens_total": 91234, "items": [ /* job … */ ] }
 ```
 
-job 欄位：`id`、`task_id`、`contribution_id`、`status`、`requested_by`、`created_at`、`claimed_at`、`completed_at`、`model`、`verdict`、`corrected_fields`、`reasoning`、`checked_urls`、`cause_category`、`cause_note`、`prompt_tokens`、`completion_tokens`、`cost`、`finalized_by`、`finalized_at`、`report_response`、`returned_by`、`returned_at`、`return_reason`、`error`。
+job 欄位：`id`、`task_id`、`contribution_id`、`contribution_type`（`status`／`summary` 回的 job 才有，join contributions，查不到為 null；`list` 的每件本來就有）、`status`、`requested_by`、`created_at`、`claimed_at`、`completed_at`、`model`、`verdict`、`corrected_fields`、`reasoning`、`checked_urls`、`cause_category`、`cause_note`、`prompt_tokens`、`completion_tokens`、`cost`、`finalized_by`、`finalized_at`、`report_response`、`returned_by`、`returned_at`、`return_reason`、`error`。
 
 ### 執行者動作（給 policy-ops 的 VM 腳本接）
 
