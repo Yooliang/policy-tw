@@ -62,11 +62,11 @@ export function canReissueForPick(row: { reviewed_by?: string | null }): boolean
 
 /**
  * 重發驗證票：跟觸發器 contribution_queue_row（只在 INSERT 觸發）與 seed 補列同一個做法——插一列 `verify:<id>`，
- * 排序基準由 task_dispatches_queue_key 觸發器照母任務算（不是隊尾）。已有票就不動。失敗不丟：seed 每 10 分鐘會補漏。
+ * 排序鍵 queue_at 由 task_dispatches_queue_key 觸發器照母任務的基準算（INSERT 時一律覆蓋），這裡不寫 queue_at。已有票就不動。失敗不丟：seed 每 10 分鐘會補漏。
  */
 async function reissueVerifyTicket(supabase: SupabaseLike, contributionId: string, nowIso: string): Promise<void> {
   const { error } = await supabase.from("task_dispatches")
-    .upsert({ task_id: `verify:${contributionId}`, last_dispatched_at: nowIso, queue_at: nowIso, dispatch_count: 0 }, { onConflict: "task_id", ignoreDuplicates: true });
+    .upsert({ task_id: `verify:${contributionId}`, last_dispatched_at: nowIso, dispatch_count: 0 }, { onConflict: "task_id", ignoreDuplicates: true });
   if (error) console.error("reissue verify ticket:", error.message);
 }
 

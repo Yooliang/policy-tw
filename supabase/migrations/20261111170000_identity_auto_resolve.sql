@@ -6,7 +6,8 @@
 --   3. contribution_auto_tasks_dup：配對條件多一項「同名＋possible_duplicate_of 指到對方」（以 20261031090000 為底，只多兩處）。
 --   4. contribution_verify_pool：needs_identity_pick 的件不被「分數已達標」濾掉（以 20261109170000 為底，只改一個條件）。
 --   5. roster_reconcile_rows：名冊有生年（鏡像）、全庫同名者都有生年且都不同 → 照「沒有同名者」處理（以 20261031160000 為底，多 birth_year 與 pn_x 兩處；SET enable_nestloop = off 保留）。merge 的同屆參選紀錄限制不動。
---   6. 視圖 politicians_with_elections 尾端多 possible_duplicate_of（前台人物頁顯示「疑似同人，待補生年」）。
+--   6. 視圖 politicians_with_elections 尾端多 possible_duplicate_of（前台人物頁顯示「疑似同人，待補生年」），輸出時排除已解決與已合併的 id。
+--   7. 標記出口：不同人結論（politician_pair_resolutions）與合併（merged_into）的觸發器。
 -- 缺生年同名者的 profile_gap：既有臂（campaign_election_arms）已會對「當屆有參選紀錄、缺生年」的人開，這裡不另開；duplicate_politician 任務本身就會在標記一建立時開出。
 
 ALTER TABLE politicians ADD COLUMN IF NOT EXISTS possible_duplicate_of UUID[];
@@ -34,6 +35,38 @@ END $fn$;
 DROP TRIGGER IF EXISTS politicians_clear_possible_duplicate ON politicians;
 CREATE TRIGGER politicians_clear_possible_duplicate AFTER INSERT OR UPDATE OF birth_year ON politicians
   FOR EACH ROW EXECUTE FUNCTION politicians_clear_possible_duplicate();
+
+-- 標記的其他出口（2026-11-11 審查）：
+--   ① 同名配對被記成「不同人」（politician_pair_resolutions.resolution = 'different'，applyMergePolitician 的 same_person=false 寫的就是它）→ 雙方標記裡指向對方的 id 拿掉。
+--   ② 某人被合併（politicians.merged_into 設值）→ 他自己的標記清掉；別人標記裡指向他的 id 改指向合併後那位（保留的那位就是標記主人自己時直接拿掉），去重。
+-- 觸發器放在 DB 這一層：merge_politician（SQL 軟合併）與 TS 的不同人分支都走得到，不必兩邊各改一次。
+CREATE OR REPLACE FUNCTION politician_pair_clear_possible_duplicate() RETURNS TRIGGER
+LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF NEW.resolution IS DISTINCT FROM 'different' THEN RETURN NEW; END IF;
+  UPDATE politicians p SET possible_duplicate_of = NULLIF(array_remove(p.possible_duplicate_of, NEW.b), '{}'::UUID[])
+   WHERE p.id = NEW.a AND p.possible_duplicate_of @> ARRAY[NEW.b];
+  UPDATE politicians p SET possible_duplicate_of = NULLIF(array_remove(p.possible_duplicate_of, NEW.a), '{}'::UUID[])
+   WHERE p.id = NEW.b AND p.possible_duplicate_of @> ARRAY[NEW.a];
+  RETURN NEW;
+END $fn$;
+DROP TRIGGER IF EXISTS politician_pair_clear_possible_duplicate ON politician_pair_resolutions;
+CREATE TRIGGER politician_pair_clear_possible_duplicate AFTER INSERT OR UPDATE OF resolution ON politician_pair_resolutions
+  FOR EACH ROW EXECUTE FUNCTION politician_pair_clear_possible_duplicate();
+
+CREATE OR REPLACE FUNCTION politicians_merged_fix_possible_duplicate() RETURNS TRIGGER
+LANGUAGE plpgsql AS $fn$
+BEGIN
+  IF NEW.merged_into IS NULL THEN RETURN NEW; END IF;
+  UPDATE politicians SET possible_duplicate_of = NULL WHERE id = NEW.id AND possible_duplicate_of IS NOT NULL;
+  UPDATE politicians p SET possible_duplicate_of = NULLIF(ARRAY(
+      SELECT DISTINCT y FROM (SELECT CASE WHEN x = NEW.id THEN NEW.merged_into ELSE x END AS y FROM unnest(p.possible_duplicate_of) AS x) z WHERE y <> p.id), '{}'::UUID[])
+   WHERE p.id <> NEW.id AND p.possible_duplicate_of @> ARRAY[NEW.id];
+  RETURN NEW;
+END $fn$;
+DROP TRIGGER IF EXISTS politicians_merged_fix_possible_duplicate ON politicians;
+CREATE TRIGGER politicians_merged_fix_possible_duplicate AFTER UPDATE OF merged_into ON politicians
+  FOR EACH ROW EXECUTE FUNCTION politicians_merged_fix_possible_duplicate();
 
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_dup()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT)
@@ -455,7 +488,10 @@ SELECT p.id,
              LEFT JOIN regions orr ON ((orr.id = o.region_id)))
              LEFT JOIN elections oe ON ((oe.id = o.election_id)))
           WHERE ((o.politician_id = p.id) AND (o.end_date IS NULL) AND (o.start_date <= CURRENT_DATE))), '[]'::json) AS offices,
-    p.possible_duplicate_of
+    -- 疑似同人標記：輸出時排除已解決（politician_pair_resolutions 已有結論）與已合併（merged_into 不為空）的 id；空了就是 NULL
+    NULLIF(ARRAY(SELECT x FROM unnest(p.possible_duplicate_of) AS x
+                  WHERE NOT EXISTS (SELECT 1 FROM politicians o WHERE o.id = x AND o.merged_into IS NOT NULL)
+                    AND NOT EXISTS (SELECT 1 FROM politician_pair_resolutions pr WHERE pr.pair_key = politician_pair_key(p.id, x))), '{}'::UUID[]) AS possible_duplicate_of
    FROM (politicians p
      LEFT JOIN regions r ON ((p.region_id = r.id)));
 ALTER VIEW politicians_with_elections SET (security_invoker = on);

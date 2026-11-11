@@ -179,3 +179,62 @@ Deno.test("E1 名冊對帳：名冊有生年、全庫同名者有生年且全不
   assertEquals(by("李六").person_action, "attach", "名冊沒生年不放寬，維持既有");
   await db.close();
 });
+
+// ---- 標記的其他出口（審查補：不同人結論、合併、視圖輸出） ----
+async function markDb() {
+  const db = new PGlite();
+  await db.exec(`CREATE TABLE politicians (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, birth_year integer, possible_duplicate_of uuid[], merged_into uuid);
+    CREATE TABLE politician_pair_resolutions (pair_key text PRIMARY KEY, a uuid NOT NULL, b uuid NOT NULL, resolution text NOT NULL);
+    CREATE FUNCTION politician_pair_key(p_a uuid, p_b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(p_a, p_b)::text || '|' || GREATEST(p_a, p_b)::text $$;`);
+  await db.exec(fnOf("CREATE OR REPLACE FUNCTION politician_pair_clear_possible_duplicate()", "$fn$;"));
+  await db.exec(`CREATE TRIGGER politician_pair_clear_possible_duplicate AFTER INSERT OR UPDATE OF resolution ON politician_pair_resolutions FOR EACH ROW EXECUTE FUNCTION politician_pair_clear_possible_duplicate()`);
+  await db.exec(fnOf("CREATE OR REPLACE FUNCTION politicians_merged_fix_possible_duplicate()", "$fn$;"));
+  await db.exec(`CREATE TRIGGER politicians_merged_fix_possible_duplicate AFTER UPDATE OF merged_into ON politicians FOR EACH ROW EXECUTE FUNCTION politicians_merged_fix_possible_duplicate()`);
+  const add = async (marks: string[] = []) => (await db.query<{ id: string }>(`INSERT INTO politicians (name, possible_duplicate_of) VALUES ('林大同', $1::uuid[]) RETURNING id`, [marks.length ? `{${marks.join(",")}}` : null])).rows[0].id;
+  const marks = async (id: string) => (await db.query<{ p: string[] | null }>(`SELECT possible_duplicate_of AS p FROM politicians WHERE id = $1`, [id])).rows[0].p;
+  return { db, add, marks };
+}
+
+Deno.test("F1 same_person=false（pair_resolutions=different）→ 雙方標記裡指向對方的 id 清掉；same 不動", async () => {
+  const { db, add, marks } = await markDb();
+  const o = await add(); const o2 = await add();
+  const f = await add([o, o2]);
+  await db.query(`INSERT INTO politician_pair_resolutions VALUES (politician_pair_key($1, $2), $1, $2, 'different')`, [f, o]);
+  assertEquals(await marks(f), [o2], "只清掉被判不同人的那位");
+  await db.query(`INSERT INTO politician_pair_resolutions VALUES (politician_pair_key($1, $2), $1, $2, 'same')`, [f, o2]);
+  assertEquals(await marks(f), [o2], "same（合併）不走這條，由 merged_into 觸發器處理");
+  await db.close();
+});
+
+Deno.test("F2 合併：被併入者自己的標記清掉；別人標記裡指向被併入者的 id 改指向合併後那位（就是自己則拿掉）", async () => {
+  const { db, add, marks } = await markDb();
+  const o = await add(); const x = await add(); const f = await add([o]); const g = await add([o]);
+  await db.query(`UPDATE politicians SET merged_into = $1 WHERE id = $2`, [x, o]);   // o 併入 x：f、g 的標記改指 x
+  assertEquals(await marks(f), [x]);
+  await db.query(`UPDATE politicians SET merged_into = $1 WHERE id = $2`, [f, x]);   // x 又併入 f：f 的標記指向自己 → 拿掉；g 的 [x] → [f]
+  assertEquals(await marks(f), null);
+  assertEquals(await marks(g), [f]);
+  const h = await add([x]);
+  await db.query(`UPDATE politicians SET merged_into = $1 WHERE id = $2`, [g, h]);   // 被併入者自己的標記清掉
+  assertEquals(await marks(h), null);
+  await db.close();
+});
+
+Deno.test("F3 視圖輸出：排除已解決與已合併的 id，空了是 NULL", async () => {
+  const { db, add } = await markDb();
+  const o1 = await add(); const o2 = await add(); const o3 = await add();
+  const f = await add([o1, o2, o3]);
+  // 繞過觸發器直接造「髒」狀態（觸發器之外的雙保險）
+  await db.exec(`ALTER TABLE politicians DISABLE TRIGGER USER`);
+  await db.query(`UPDATE politicians SET merged_into = $1 WHERE id = $2`, [o3, o1]);
+  await db.query(`INSERT INTO politician_pair_resolutions VALUES (politician_pair_key($1, $2), $1, $2, 'different')`, [f, o2]);
+  const a = MIG.indexOf("NULLIF(ARRAY(SELECT x FROM unnest(p.possible_duplicate_of)");
+  assert(a > 0);
+  const expr = MIG.slice(a, MIG.indexOf("AS possible_duplicate_of", a));
+  const got = (await db.query<{ v: string[] | null }>(`SELECT ${expr} AS v FROM politicians p WHERE p.id = $1`, [f])).rows[0].v;
+  assertEquals(got, [o3]);
+  await db.query(`DELETE FROM politician_pair_resolutions`);
+  await db.query(`UPDATE politicians SET possible_duplicate_of = ARRAY[$1]::uuid[] WHERE id = $2`, [o1, f]);
+  assertEquals((await db.query<{ v: string[] | null }>(`SELECT ${expr} AS v FROM politicians p WHERE p.id = $1`, [f])).rows[0].v, null);
+  await db.close();
+});
