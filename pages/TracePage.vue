@@ -310,7 +310,13 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
           @prev="stepEvent(-1)"
           @next="stepEvent(1)"
         />
-        <p class="text-xs text-slate-500">虛線是回流：交件後驗證票回到佇列、查無冷卻完再派、代理順手提議的新缺口。</p>
+        <ul class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600" aria-label="圖例">
+          <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white" aria-hidden="true"></span>系統</li>
+          <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 rounded-full border border-slate-700 bg-white" aria-hidden="true"></span>代理</li>
+          <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white p-[2px]" aria-hidden="true"><span class="block h-full w-full border border-slate-700"></span></span>Jev</li>
+          <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border-[3px] border-slate-700 bg-slate-200" aria-hidden="true"></span>終點</li>
+          <li class="inline-flex items-center gap-1.5"><span class="inline-block w-7 border-t-2 border-dashed border-slate-600" aria-hidden="true"></span>虛線：順手提議</li>
+        </ul>
         <ul class="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600" aria-label="這段時間各節點的事件數">
           <li v-for="c in totalChips" :key="c.key" class="tabular-nums">{{ c.label }} <b class="text-slate-900">{{ c.n.toLocaleString('zh-TW') }}</b></li>
         </ul>
