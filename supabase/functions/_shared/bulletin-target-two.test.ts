@@ -6,7 +6,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, readMig } from "./arms-pglite.ts";
-import { AGREE_THRESHOLDS, effectiveRequiredAgree, isBulletinPolicy, rejectFloor, requiredAgree, riskLevel, scoreStatus } from "./consensus.ts";
+import { AGREE_THRESHOLDS, bulletinSourceUrl, effectiveRequiredAgree, isBulletinPolicy, rejectFloor, requiredAgree, riskLevel, scoreStatus, targetFloor } from "./consensus.ts";
 import { BULLETIN_HOSTS } from "./source-archive.ts";
 import { scoringHint, shapeVerifyCurrent } from "./task-context.ts";
 
@@ -86,7 +86,7 @@ Deno.test("verify-handler 與 /next：公報來源的政見不回 evidence_warni
   const vh = await Deno.readTextFile(new URL("./verify-handler.ts", import.meta.url));
   assertStringIncludes(vh, "!isBulletinPolicy(contribution.contribution_type, contribution.source_urls ?? [])");
   const next = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  assertStringIncludes(next, "isBulletinPolicy(pick.contribution_type, pick.source_urls ?? [])");
+  assertStringIncludes(next, "bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? [])");
   assertStringIncludes(next, "BULLETIN_POLICY_VERIFY_NOTE");
 });
 
@@ -106,7 +106,7 @@ async function sqlDb(): Promise<PGlite> {
   await d.exec(extractFn(await readMig("20261005000347_sources_table.sql"), "source_doc_kind"));
   await d.exec(extractFn(await readMig("20261010080000_source_kind_news.sql"), "contribution_source_kind"));
   await d.exec(extractFn(await readMig("20260920000003_rumor_correction_normal.sql"), "correction_only_from_rumor"));
-  await d.exec(await readMig(MIG));
+  await d.exec(extractFn(await readMig(MIG), "contribution_required_agree")); // 只載入目標函式（migration 後段重算既有資料，PGlite 沒有那些表）
   return d;
 }
 /** 取出整個 CREATE OR REPLACE FUNCTION name(...) ... $$; 區段（含簽章） */
@@ -175,7 +175,45 @@ Deno.test("SQL：最新 contribution_required_agree 是這支或更新；矩陣�
   assertStringIncludes(latest.fn, "source_doc_kind(btrim(u)) = 'election_bulletin'");
 });
 
-Deno.test("migration 不碰資料：只有函式定義", async () => {
+Deno.test("migration：除了函式定義只重算既有 pending 的公報政見與對齊驗證池快照，不改別的表", async () => {
   const sql = (await readMig(MIG)).replace(/--.*$/gm, "");
-  assert(!/\b(UPDATE\s+\w+|INSERT\s+INTO|DELETE\s+FROM)\b/i.test(sql));
+  assert(!/\b(INSERT\s+INTO|DELETE\s+FROM)\b/i.test(sql));
+  const updates = [...sql.matchAll(/\bUPDATE\s+(\w+)/gi)].map((m) => m[1]);
+  assertEquals(updates, ["task_dispatches"], "只對齊 task_dispatches.verify_target");
+  assertStringIncludes(sql, "PERFORM contribution_apply_consensus(r.id);");
+  assertStringIncludes(sql, "contribution_type = 'policy' AND status = 'pending'");
+  assertStringIncludes(sql, "SET verify_target = contribution_effective_agree(c.id)");
+});
+
+Deno.test("目標下限 2：公報政見被系統票 supported（含多獨立來源）也不低於 2；其他型別照舊最少 1", () => {
+  for (const urls of [[BULLETIN, NEWS], [BULLETIN]]) {
+    const floor = targetFloor("policy", urls);
+    assertEquals(floor, 2);
+    const need = requiredAgree("policy", POLICY, urls);
+    assertEquals(effectiveRequiredAgree(need, "supported", false, 1, floor), 2, "supported 仍 2");
+    assertEquals(effectiveRequiredAgree(need, "supported", false, 2, floor), 2, "兩個獨立來源仍 2");
+    assertEquals(effectiveRequiredAgree(need, "not_supported", false, 1, floor), 3);
+    assertEquals(effectiveRequiredAgree(need, null, false, 1, floor), 2);
+  }
+  assertEquals(targetFloor("policy", [NEWS]), 1);
+  assertEquals(targetFloor("policy", ["https://bulletin.cec.gov.tw/"]), 1);
+  assertEquals(targetFloor("candidacy", [BULLETIN]), 1);
+  assertEquals(effectiveRequiredAgree(3, "supported", false, 2, targetFloor("policy", [NEWS])), 1, "一般政見仍可降到 1");
+  assertEquals(effectiveRequiredAgree(3, "supported", false, 1), 2, "舊呼叫端預設 floor 1，行為不變");
+});
+
+Deno.test("SQL contribution_effective_agree：有 v_floor、判斷與目標函式同一條公報規則", async () => {
+  const t = await readMig(MIG);
+  const fn = extractFn(t, "contribution_effective_agree");
+  assertStringIncludes(fn, "GREATEST(v_floor, 1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))");
+  assertStringIncludes(fn, "GREATEST(v_floor, LEAST(v_need, 1))");
+  assertStringIncludes(fn, "WHEN v_sys = 'not_supported' THEN v_need + 1");
+  assertStringIncludes(fn, "source_doc_kind(btrim(u)) = 'election_bulletin' AND btrim(u) !~* '^https?://[^/?#]+/?$'");
+});
+
+Deno.test("驗證提示指出哪一條是公報網址（混合來源）", () => {
+  assertEquals(bulletinSourceUrl("policy", [NEWS, BULLETIN]), BULLETIN);
+  assertEquals(bulletinSourceUrl("policy", ["https://bulletin.cec.gov.tw/", NEWS]), null);
+  assertEquals(bulletinSourceUrl("candidacy", [BULLETIN]), null);
+  assertStringIncludes(scoringHint(1, 2, "policy", [NEWS, BULLETIN]).hint, `公報網址：${BULLETIN}`);
 });

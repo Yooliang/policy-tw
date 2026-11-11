@@ -205,7 +205,7 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
   const eff = await latestMigrationDefining("FUNCTION contribution_effective_agree");
   assert(eff.includes("contribution_system_vote(p_contribution_id)"), "有效門檻要讀系統票");
   // 2026-10-09（policy-ops#39）：supported 依核得過的獨立來源數降 1～2，最少 1；細節守門在 independent-sources.test.ts
-  assert(eff.includes("GREATEST(1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))"), "supported → 門檻 −1～−2 且最少 1");
+  assert(eff.includes("GREATEST(v_floor, 1, v_need - COALESCE(contribution_system_vote_sources(p_contribution_id), 1))"), "supported → 門檻 −1～−2 且最少 1（公報來源的政見最少 2，v_floor）");
   assert(eff.includes("WHEN v_sys = 'not_supported' THEN v_need + 1"), "not_supported → 門檻 +1，不算反對");
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
   // 2026-09-21 分數制：達標判斷看 score，不看 agree_count；目標仍是有效門檻那一支函式

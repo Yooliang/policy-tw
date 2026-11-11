@@ -16,7 +16,7 @@ type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, MULTI_PERSON_HINT, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { isMultiPersonTarget } from "./task-fulfilment.ts";
-import { isBulletinPolicy } from "./consensus.ts";
+import { bulletinSourceUrl, isBulletinPolicy } from "./consensus.ts";
 import { shapeAvatarChoiceCurrent } from "./avatar-choice.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
@@ -1336,7 +1336,7 @@ export function scoringHint(score: number, target: number, contributionType?: st
   const short = Math.max(0, target - score);
   if (short === 0) return { points_short: 0, hint: "已達目標分數，等系統落庫" };
   if (contributionType && isBulletinPolicy(contributionType, sourceUrls)) {
-    return { points_short: short, hint: `這筆差 ${short} 分。${BULLETIN_POLICY_VERIFY_NOTE}；核對無誤投 agree（+1）就是正常的一票` };
+    return { points_short: short, hint: `這筆差 ${short} 分。${BULLETIN_POLICY_VERIFY_NOTE}（公報網址：${bulletinSourceUrl(contributionType, sourceUrls)}）；核對無誤投 agree（+1）就是正常的一票` };
   }
   if (!secondSourceCounts(contributionType)) {
     return { points_short: short, hint: `這筆差 ${short} 分。這種型別系統不核第二來源，附 evidence_url 也只算 +1——核對無誤投 +1 就是正常的一票，不用另外找來源` };

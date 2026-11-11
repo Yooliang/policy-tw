@@ -9,7 +9,7 @@ import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
 import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, orderVerifyByHold, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
-import { isBulletinPolicy, requiredAgree } from "../_shared/consensus.ts";
+import { bulletinSourceUrl, requiredAgree } from "../_shared/consensus.ts";
 import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
 import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts";
@@ -524,7 +524,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         // （selkie 2026-09-21）。共同的那一段（怎麼送票）不分型別。
         how_to: (dispute ? `${dispute.instruction}（前面每一票在 item.dispute.prior。）` : "") +
           // 公報來源的政見（2026-11-11）：不找第二來源
-          (isBulletinPolicy(pick.contribution_type, pick.source_urls ?? []) ? `${BULLETIN_POLICY_VERIFY_NOTE}。` : "") + (pick.contribution_type === "policy"
+          (bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? []) ? `${BULLETIN_POLICY_VERIFY_NOTE}（公報網址：${bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? [])}，混合來源時打開這一條）。` : "") + (pick.contribution_type === "policy"
           ? "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。"
           : pick.contribution_type === "adjudication"
           ? "你判的是**這份裁決站不站得住**，不是自己重判一次爭議：看裁決者的 reason 能不能從它列的 checked_urls 推得出來、有沒有漏掉反方的反證。"

@@ -83,7 +83,20 @@ export function hasCandNo(payload: unknown): boolean {
  * 只有首頁（路徑是 / 或空、沒有查詢字串）不算：附個首頁就拿目標 2 不行（SQL 同一條路徑檢查）。
  */
 export function isBulletinPolicy(contributionType: string, sourceUrls: readonly string[] | null | undefined): boolean {
-  return contributionType === "policy" && (sourceUrls ?? []).some((u) => typeof u === "string" && docKindOf(u) === "election_bulletin" && !isSiteRoot(u.trim()));
+  return bulletinSourceUrl(contributionType, sourceUrls) !== null;
+}
+
+/** 公報來源的政見裡第一條公報網址（給驗證提示指出要開哪一條）；不是公報來源的政見回 null */
+export function bulletinSourceUrl(contributionType: string, sourceUrls: readonly string[] | null | undefined): string | null {
+  if (contributionType !== "policy") return null;
+  return (sourceUrls ?? []).find((u) => typeof u === "string" && docKindOf(u) === "election_bulletin" && !isSiteRoot(u.trim()))?.trim() ?? null;
+}
+
+/** 公報來源政見的目標下限：系統票 supported 或多個獨立來源核得過都不再往下減（2026-11-11；SQL contribution_effective_agree 同步） */
+export const BULLETIN_POLICY_FLOOR = 2;
+/** 這筆的目標下限：公報來源的政見 2，其餘 1（effectiveRequiredAgree 的 floor 參數） */
+export function targetFloor(contributionType: string, sourceUrls: readonly string[] | null | undefined): number {
+  return isBulletinPolicy(contributionType, sourceUrls) ? BULLETIN_POLICY_FLOOR : 1;
 }
 
 export function riskLevel(contributionType: string, payload: unknown, sourceUrls: readonly string[] | null = null): RiskLevel {
@@ -271,10 +284,11 @@ export function isRosterMatchModel(model: string | null | undefined): boolean {
   return typeof model === "string" && model.startsWith(ROSTER_MATCH_MODEL_PREFIX);
 }
 /** rosterMatched：最新那張有效系統票是名冊逐位核對、而且 supported */
-export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false, supportedSources = 1): number {
-  if (systemVote === "supported" && rosterMatched) return Math.min(required, ROSTER_MATCHED_TARGET);
+export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false, supportedSources = 1, floor = 1): number {
+  if (systemVote === "supported" && rosterMatched) return Math.max(floor, Math.min(required, ROSTER_MATCHED_TARGET));
   // 兩個以上獨立來源核得過再多降 1，上限 −2、最少 1（2026-10-09，policy-ops#39；SQL contribution_system_vote_sources）
-  if (systemVote === "supported") return Math.max(1, required - Math.min(2, Math.max(1, Math.floor(supportedSources))));
+  // floor：公報來源的政見下限 2（targetFloor；2026-11-11），避免「公報網址＋一個新聞網址被 Jev 核過」單票上線
+  if (systemVote === "supported") return Math.max(floor, 1, required - Math.min(2, Math.max(1, Math.floor(supportedSources))));
   if (systemVote === "not_supported") return required + 1;
   return required;
 }
