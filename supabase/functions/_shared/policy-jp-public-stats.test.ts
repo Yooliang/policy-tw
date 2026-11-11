@@ -30,6 +30,7 @@ const MIG_SQL = await readMig(MIG);
 /** 跟進版：正見改了被抄的函式、日本版跟進的 migration（函式名 → 檔名）。逐字比對改讀跟進版；dispatch-drift 的 OTHER_COPIES_FOLLOWED 對這份 */
 const STATS_FOLLOWED: Record<string, string> = {
   contribution_activity: "20261016000002_policy_jp_stats_activity_hourly.sql", // 168 小時內按小時（維護者 2026-10-16）
+  model_vote_stats: "20261111240000_system_vote_label_systemone.sql", // 系統票標籤 Jev→SystemOne（維護者 2026-11-12）
 };
 const FOLLOW_SQL: Record<string, string> = Object.fromEntries(await Promise.all(Object.entries(STATS_FOLLOWED).map(async ([n, f]) => [n, await readMig(f)])));
 
@@ -183,7 +184,7 @@ function expectedModelContribs(sinceH: number | null, untilH: number | null): Mo
   }
   return out;
 }
-const SYSTEM_MODEL = "系統票（Jev）";
+const SYSTEM_MODEL = "系統票（SystemOne）";
 /** 排序鍵相同（票數相同）或排序規則（collation）不同的列，SQL 與 JS 的先後可能不一樣；比對前兩邊都用同一個確定的順序 */
 const normVotes = (rs: Record<string, unknown>[]) => [...rs].sort((a, b) => Number(b.votes) - Number(a.votes) || (String(a.model) < String(b.model) ? -1 : 1));
 const normModels = (rs: Record<string, unknown>[]) =>
@@ -211,7 +212,12 @@ function expectedModelVotes(sinceH: number | null, untilH: number | null) {
 // ---------------------------------------------------------------------------------------------
 const main = await baseDb();
 await main.exec(MIG_SQL);
-for (const sql of Object.values(FOLLOW_SQL)) await main.exec(sql);
+// 跟進版若同時含正見（public）函式（例：20261111240000），測試庫沒有 public 的表，只套日本版那一段
+for (const sql of Object.values(FOLLOW_SQL)) {
+  const at = sql.indexOf("CREATE OR REPLACE FUNCTION policy_jp.");
+  const publicFirst = sql.indexOf("CREATE OR REPLACE FUNCTION ") < at;
+  await main.exec(publicFirst ? sql.slice(at) : sql);
+}
 await seed(main);
 
 const ANON_STATS = [

@@ -192,7 +192,7 @@ const toolsText = (tools: RawTool[]) => tools.map((t) => `${t.tool ?? '（空白
       <h4 class="font-bold text-slate-700 text-sm mt-5 mb-1">投票</h4>
       <p class="text-xs text-slate-500 mb-2">
         只算投下去的那筆貢獻已有結果（上線或退件）的票。「事後證明投錯」＝投同意但最後退件、或投反對但最後上線，分母是同意＋反對（不確定不算對錯）。
-        系統票（Jev）不算進任何模型，單獨放最後一列；Jev 參與共識的系統來源票不記在投票紀錄裡，這裡數不到。
+        系統票（SystemOne）不算進任何模型，單獨放最後一列；SystemOne 參與共識的系統來源票不記在投票紀錄裡，這裡數不到。
       </p>
       <p v-if="votes.models.length === 0 && !votes.system" class="text-sm text-slate-400">這段期間沒有已定案的票。</p>
       <div v-else class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" :class="{ 'opacity-60': loading }">

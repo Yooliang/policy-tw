@@ -56,12 +56,12 @@ Deno.test("模型依交件數排序；未填與其他排最後", () => {
 
 Deno.test("投票：錯誤率分母是同意＋反對，不確定不算對錯；系統票另放", () => {
   const rows: VoteStatsRow[] = [
-    { model: "系統票（Jev）", votes: 6, agree: 3, disagree: 0, unsure: 3, wrong: 2, raw_tools: null },
+    { model: "系統票（SystemOne）", votes: 6, agree: 3, disagree: 0, unsure: 3, wrong: 2, raw_tools: null },
     { model: "Claude Haiku（未標版本）", votes: 9814, agree: 7594, disagree: 1240, unsure: 980, wrong: 185, raw_tools: null },
   ];
   const out = summarizeVotes(rows);
   assertEquals(out.models.map((m) => m.model), ["Claude Haiku（未標版本）"]);
-  assertEquals(out.system?.model, "系統票（Jev）");
+  assertEquals(out.system?.model, "系統票（SystemOne）");
   const [h] = out.models;
   assertEquals(h.wrong, { num: 185, den: 7594 + 1240 });
   assertEquals(formatPct(h.wrong), "2.1%", "10% 以下留一位小數");
@@ -74,4 +74,13 @@ Deno.test("分母為 0 顯示破折號；PostgREST 回字串的數字也吃得�
   const [m] = summarizeContributions([row("A", null, { submitted: "3" as unknown as number, applied: "3" as unknown as number })]).models;
   assertEquals(m.applied, { num: 3, den: 3 });
   assert(m.submitted === 3);
+});
+
+Deno.test("投票：舊標籤『系統票（Jev）』也認成系統票（後端 migration 上線前後都能顯示）", () => {
+  const out = summarizeVotes([
+    { model: "系統票（Jev）", votes: 6, agree: 3, disagree: 0, unsure: 3, wrong: 2, raw_tools: null },
+    { model: "Claude Haiku（未標版本）", votes: 10, agree: 8, disagree: 1, unsure: 1, wrong: 1, raw_tools: null },
+  ]);
+  assertEquals(out.models.map((m) => m.model), ["Claude Haiku（未標版本）"]);
+  assertEquals(out.system?.model, "系統票（Jev）");
 });
