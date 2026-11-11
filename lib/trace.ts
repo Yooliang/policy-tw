@@ -238,14 +238,15 @@ export function strongBreakdown(items: readonly TraceItem[], upTo: number = item
 }
 
 /** 前 upTo 筆事件裡系統票各選項的數量（支持／不支持／無法判斷） */
-export function systemVoteBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { supported: number; notSupported: number; other: number } {
-  const out = { supported: 0, notSupported: 0, other: 0 }
+export function systemVoteBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { supported: number; notSupported: number; cannotTell: number; other: number } {
+  const out = { supported: 0, notSupported: 0, cannotTell: 0, other: 0 }
   const last = Math.min(upTo, items.length - 1)
   for (let i = 0; i <= last; i++) {
     if (items[i].kind !== 'system_vote') continue
     const c = typeof items[i].detail?.choice === 'string' ? items[i].detail.choice : ''
     if (c === 'supported') out.supported++
     else if (c === 'not_supported') out.notSupported++
+    else if (c === 'cannot_tell') out.cannotTell++
     else out.other++
   }
   return out

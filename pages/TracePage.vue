@@ -63,7 +63,14 @@ const totalChips = computed(() => (Object.keys(COUNT_LABEL) as NodeId[])
   .map((n) => ({ key: n, label: COUNT_LABEL[n] as string, n: totals.value[n] ?? 0 })))
 const strongCounts = computed(() => strongBreakdown(items.value))
 const sysVotes = computed(() => systemVoteBreakdown(items.value))
-const top = computed(() => (mode.value === 'window' ? topActive(items.value, 10) : []))
+// 最活躍：任務前 10、人物前 10。人物 id 可能其實不是人（缺口編號裡的第一個 uuid 也可能是政見或選舉），查不到姓名的不列
+const TOP_N = 10
+const topAll = computed(() => (mode.value === 'window' ? topActive(items.value, 40) : []))
+const top = computed(() => {
+  const tasks = topAll.value.filter((a) => a.kind === 'task').slice(0, TOP_N)
+  const people = topAll.value.filter((a) => a.kind === 'person' && names.value[a.id] !== '').slice(0, TOP_N)
+  return [...tasks, ...people]
+})
 
 const canvasLabel = computed(() => mode.value === 'window'
   ? '派工流程圖：近 4 小時全站事件重播，圓點沿線從官方資料、臂、佇列、派工、交件、驗證走到落庫或退件'
@@ -105,7 +112,10 @@ async function loadNames(ids: string[]): Promise<void> {
   const missing = ids.filter((i) => !(i in names.value))
   if (missing.length === 0) return
   try {
-    names.value = { ...names.value, ...(await fetchNames(missing)) }
+    const found = await fetchNames(missing)
+    // 查不到的記成空字串（不是人物），之後不再重查、也不顯示
+    const unknown = Object.fromEntries(missing.filter((i) => !(i in found)).map((i) => [i, '']))
+    names.value = { ...names.value, ...unknown, ...found }
   } catch (e) {
     console.info('[重播] 讀不到人名', e)
   }
@@ -115,8 +125,9 @@ async function loadAll(my: number): Promise<void> {
   const r = await fetchWindow()
   if (my !== seq) return
   reset({ by: 'all' }, r, '全站近 4 小時')
-  void loadNames(topActive(items.value, 10).filter((a) => a.kind === 'person').map((a) => a.id))
-  void loadNames(topActive(items.value, 10).filter((a) => a.kind === 'task').map((a) => personFromTaskId(a.id)).filter((x): x is string => !!x))
+  const all = topActive(items.value, 40)
+  void loadNames(all.filter((a) => a.kind === 'person').map((a) => a.id))
+  void loadNames(all.filter((a) => a.kind === 'task').slice(0, 10).map((a) => personFromTaskId(a.id)).filter((x): x is string => !!x))
 }
 
 const SCOPE_LABEL = { task: '任務', contribution: '交件', person: '人物' } as const
@@ -325,7 +336,7 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
         <ul class="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600" aria-label="這段時間各節點的事件數">
           <li v-for="c in totalChips" :key="c.key" class="tabular-nums">{{ c.label }} <b class="text-slate-900">{{ c.n.toLocaleString('zh-TW') }}</b></li>
           <li class="tabular-nums">強模型 認領 <b class="text-slate-900">{{ strongCounts.claim.toLocaleString('zh-TW') }}</b>／定案 <b class="text-slate-900">{{ strongCounts.finalized.toLocaleString('zh-TW') }}</b>（駁回 {{ strongCounts.rejected.toLocaleString('zh-TW') }}）；強模型認領也算在「派出」裡</li>
-          <li class="tabular-nums">系統票 <b class="text-slate-900">{{ (sysVotes.supported + sysVotes.notSupported + sysVotes.other).toLocaleString('zh-TW') }}</b>（來源撐得住 {{ sysVotes.supported.toLocaleString('zh-TW') }}／撐不住 {{ sysVotes.notSupported.toLocaleString('zh-TW') }}）</li>
+          <li class="tabular-nums">系統票 <b class="text-slate-900">{{ (sysVotes.supported + sysVotes.notSupported + sysVotes.other).toLocaleString('zh-TW') }}</b>（來源撐得住 {{ sysVotes.supported.toLocaleString('zh-TW') }}／撐不住 {{ sysVotes.notSupported.toLocaleString('zh-TW') }}／無法判斷 {{ sysVotes.cannotTell.toLocaleString('zh-TW') }}）</li>
         </ul>
       </section>
 
