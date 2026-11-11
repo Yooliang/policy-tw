@@ -163,7 +163,7 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     // 而且每件只退回一次（needs_identity_pick 已經是 true 還判不出，就照舊退件，不無限迴圈）。
     if (status === "rejected" && outcome.identity_pick && !row.needs_identity_pick && canReissueForPick(row)) {
       const note = `[auto] ${outcome.message}。改回待指認重發驗證票：同意票請在 resolved_politician_id 指認是哪一位（都不是填 "new"）`;
-      const err = await update({ status: "pending", needs_identity_pick: true, ...mergeReview(row, note), reviewed_at: now });
+      const err = await update({ status: "pending", needs_identity_pick: true, needs_identity_pick_at: now, ...mergeReview(row, note), reviewed_at: now });
       if (!err) await reissueVerifyTicket(supabase, lock.id, now);
       return { triggered: true, status: "pending", outcome, ...(err ? { error: err } : {}) };
     }

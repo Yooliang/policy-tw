@@ -140,18 +140,6 @@ Deno.test("D1 補上生年：兩邊不同 → 標記清掉；相同 → 標記�
   await db.close();
 });
 
-Deno.test("D2 重複人物臂：標記指到對方的同名者就配對（縣市、生年都對不上也開）；沒標記不開（還原驗證）", () => {
-  assert(/OR a\.id = ANY\(COALESCE\(b\.possible_duplicate_of/.test(MIG) && /OR b\.id = ANY\(COALESCE\(a\.possible_duplicate_of/.test(MIG));
-  // 臂的其他條件原樣保留（以 20261031090000 為底只多一項）：同縣市或同生年或號次缺口
-  assert(/COALESCE\(a\.region, ''\) = COALESCE\(b\.region, ''\) OR \(a\.birth_year IS NOT NULL AND a\.birth_year = b\.birth_year\) OR up\.a_id IS NOT NULL/.test(MIG));
-  assert(/SELECT p\.id, p\.name, p\.party, p\.region, p\.birth_year, p\.current_position, p\.possible_duplicate_of,/.test(MIG), "n CTE 要帶標記欄");
-});
-
-Deno.test("D3 驗證池：needs_identity_pick 不被「分數已達標」濾掉", () => {
-  assert(/OR c\.needs_identity_pick\)/.test(MIG));
-  assert(/AND \(c\.score < COALESCE\(c\.target_score, d\.verify_target, contribution_effective_agree\(c\.id\)\) OR c\.needs_identity_pick\)/.test(MIG));
-});
-
 Deno.test("E1 名冊對帳：名冊有生年、全庫同名者有生年且全不同 → 唯一可建（new）；生年相同不放寬；SET enable_nestloop = off 保留", async () => {
   assert(/SET enable_nestloop = off/.test(fnOf("CREATE OR REPLACE FUNCTION roster_reconcile_rows()", "\n$$;")));
   const { db } = await buildReconcileDb();
@@ -237,4 +225,137 @@ Deno.test("F3 視圖輸出：排除已解決與已合併的 id，空了是 NULL"
   await db.query(`UPDATE politicians SET possible_duplicate_of = ARRAY[$1]::uuid[] WHERE id = $2`, [o1, f]);
   assertEquals((await db.query<{ v: string[] | null }>(`SELECT ${expr} AS v FROM politicians p WHERE p.id = $1`, [f])).rows[0].v, null);
   await db.close();
+});
+
+// ---- 審查（珊宜）補：生年來源一致、逾時、真跑 SQL、邊界 ----
+Deno.test("G1 缺生年的判定兩邊同源：只有 politicians.birth_year 欄位、沒有 birth key 的人物，比對端與清標記觸發器都當「有生年」", async () => {
+  const withColumnOnly = await resolveWith(people({ id: P2, name: "林大同", region: "台北市", birth_year: 1960 }), [], payload({ birth_year: 1980 }));
+  assertEquals([withColumnOnly.decision, withColumnOnly.flag, withColumnOnly.possible_duplicate_of], ["new", "same_name_exists", undefined], "有欄位生年且不同 → 排除，不掛標記");
+  const sameColumn = await resolveWith(people({ id: P2, name: "林大同", region: "台北市", birth_year: 1980 }), [], payload({ birth_year: 1980 }));
+  assertEquals(sameColumn.decision, "ambiguous", "欄位生年相同：不能當缺生年建新人物");
+  const missing = await resolveWith(people({ id: P2, name: "林大同", region: "台北市" }), [], payload({ birth_year: 1980 }));
+  assertEquals([missing.decision, missing.flag], ["new", "possible_duplicate"]);
+  // 觸發器端：同一個欄位（見 D1／F1）。這裡確認它看的是 politicians.birth_year
+  assert(/NEW\.birth_year/.test(fnOf("CREATE OR REPLACE FUNCTION politicians_clear_possible_duplicate()", "$fn$;")));
+});
+
+Deno.test("G2 生年差 1 年：現行比對把它當不同人（新人物）——這是既有行為（decide 的生年比對是整數相等），本 PR 不改", async () => {
+  const r = await resolveWith(people({ id: P1, name: "林大同", region: "彰化縣", birth_year: 1981 }), [BIRTH(P1, "林大同", 1981)], payload({ birth_year: 1980 }));
+  assertEquals([r.decision, r.flag], ["new", "same_name_exists"]);
+});
+
+Deno.test("G3 名冊鏡像生年：民國 6 碼（YYMMDD）換算西元；7 碼（民國 100 年後出生）目前換不出來＝NULL（已知限制，名冊對帳那時就不放寬、維持既有行為）", async () => {
+  const a = MIG.indexOf("CASE WHEN x.birth ~ '^[0-9]{6}$'");
+  assert(a > 0);
+  const expr = MIG.slice(a, MIG.indexOf(" END", a) + 4);
+  const db = new PGlite();
+  const q = async (b: string | null) => (await db.query<{ v: number | null }>(`SELECT ${expr} AS v FROM (SELECT $1::text AS birth) x`, [b])).rows[0].v;
+  assertEquals(await q("690101"), 1980);
+  assertEquals(await q("350630"), 1946);
+  assertEquals(await q("1000101"), null);
+  assertEquals(await q(null), null);
+  await db.close();
+});
+
+Deno.test("D2 重複人物臂（真跑 SQL）：同名且標記指到對方才配對（縣市、生年都對不上也開）；沒標記不開", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE TABLE politicians (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text, party text, region text, birth_year integer, current_position text, possible_duplicate_of uuid[], merged_into uuid);
+    CREATE TABLE politician_elections (id serial PRIMARY KEY, election_id integer, election_type text, politician_id uuid, region_id integer, candidacy_status text, cand_no integer);
+    CREATE TABLE elections (id integer PRIMARY KEY, election_date date);
+    CREATE TABLE regions (id integer PRIMARY KEY, region text, sub_region text, village text);
+    CREATE TABLE politician_pair_resolutions (pair_key text PRIMARY KEY, a uuid, b uuid, resolution text);
+    CREATE TABLE jev_decisions (subject_type text, question text, subject_id text, choice text, probability numeric, asked_at timestamptz);
+    CREATE TABLE contributions (contribution_type text, status text, payload jsonb);
+    CREATE FUNCTION activity_today() RETURNS date LANGUAGE sql AS $$ SELECT current_date $$;
+    CREATE FUNCTION ballot_number_unit(a text, b text, c text, d text, e text) RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
+    CREATE FUNCTION system_one_min_probability() RETURNS numeric LANGUAGE sql AS $$ SELECT 0.95::numeric $$;
+    CREATE FUNCTION jev_pair_exclusion_days() RETURNS integer LANGUAGE sql AS $$ SELECT 90 $$;
+    CREATE FUNCTION politician_pair_key(p_a uuid, p_b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(p_a, p_b)::text || '|' || GREATEST(p_a, p_b)::text $$;`);
+  await db.exec(fnOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks_dup()", "$fn$;"));
+  const id = async (sql: string, args: unknown[] = []) => (await db.query<{ id: string }>(sql, args)).rows[0].id;
+  const a = await id(`INSERT INTO politicians (name, region) VALUES ('林大同', '彰化縣') RETURNING id`);
+  await db.query(`INSERT INTO politicians (name, region) VALUES ('林大同', '高雄市')`);   // 同名、別縣市、沒標記：不配
+  const b = await id(`INSERT INTO politicians (name, region, birth_year, possible_duplicate_of) VALUES ('林大同', '台北市', 1980, ARRAY[$1]::uuid[]) RETURNING id`, [a]);
+  const tasks = async () => (await db.query<{ task_id: string; task_type: string }>(`SELECT task_id, task_type FROM contribution_auto_tasks_dup()`)).rows;
+  const marked = await tasks();
+  assertEquals(marked.length, 1);
+  assertEquals(marked[0].task_type, "duplicate_politician");
+  assertEquals(marked[0].task_id, `auto:duplicate_politician:${[a, b].sort().join("|")}`);
+  await db.query(`UPDATE politicians SET possible_duplicate_of = NULL WHERE id = $1`, [b]);
+  assertEquals((await tasks()).length, 0, "沒有標記、縣市與生年都對不上 → 不開（還原驗證：拿掉標記條件就轉紅）");
+  await db.query(`UPDATE politicians SET possible_duplicate_of = ARRAY[$1]::uuid[] WHERE id = $2`, [a, b]);
+  await db.query(`INSERT INTO politician_pair_resolutions VALUES (politician_pair_key($1, $2), $1, $2, 'different')`, [a, b]);
+  assertEquals((await tasks()).length, 0, "已有「不同人」結論的不再派");
+  await db.close();
+});
+
+Deno.test("D3 驗證池（真跑 SQL）：needs_identity_pick 的件分數已達標也留在池裡；沒旗標的達標件不在", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE TABLE contributions (id uuid PRIMARY KEY, contribution_type text, payload jsonb DEFAULT '{}', source_urls text[], note text, task_id text, agent_name text, contributor_ip_hash text,
+      status text, agree_count integer DEFAULT 0, disagree_count integer DEFAULT 0, unsure_count integer DEFAULT 0, created_at timestamptz DEFAULT now(), score integer DEFAULT 0, target_score integer,
+      actor_id text, needs_identity_pick boolean NOT NULL DEFAULT false);
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, queue_at timestamptz, verify_target integer);
+    CREATE TABLE verify_dispatches (contribution_id uuid, dispatched_at timestamptz, agent_name text, ip_hash text);
+    CREATE TABLE contribution_votes (contribution_id uuid, actor_id text, agent_name text);
+    CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, source text);
+    CREATE FUNCTION uuid_if_canonical(t text) RETURNS uuid LANGUAGE sql AS $$ SELECT CASE WHEN t ~* '^[0-9a-f-]{36}$' THEN t::uuid END $$;
+    CREATE FUNCTION contribution_effective_agree(c uuid) RETURNS integer LANGUAGE sql AS $$ SELECT 3 $$;
+    CREATE FUNCTION contribution_overvoted_stop_votes() RETURNS numeric LANGUAGE sql AS $$ SELECT 100::numeric $$;`);
+  await db.exec(fnOf("CREATE OR REPLACE FUNCTION contribution_verify_pool(", "\n$$;"));
+  const ins = async (id: string, flag: boolean) => {
+    await db.query(`INSERT INTO contributions (id, contribution_type, status, agent_name, score, target_score, needs_identity_pick) VALUES ($1, 'politician', 'pending', 'alice', 3, 3, $2)`, [id, flag]);
+    await db.query(`INSERT INTO task_dispatches (task_id, queue_at) VALUES ('verify:' || $1, now())`, [id]);
+  };
+  const FLAGGED = "aaaaaaaa-0000-4000-8000-000000000001", PLAIN = "aaaaaaaa-0000-4000-8000-000000000002";
+  await ins(FLAGGED, true);
+  await ins(PLAIN, false);
+  const pool = async () => (await db.query<{ id: string }>(`SELECT id FROM contribution_verify_pool(p_ip_hash => 'ip-x', p_agent_name => 'bob')`)).rows.map((r) => r.id);
+  assertEquals(await pool(), [FLAGGED]);
+  await db.close();
+});
+
+Deno.test("H1 待指認逾時（真跑 SQL）：旗標 true 且超過 identity_pick_timeout_days 沒人帶指認 → 強模型待辦（requires_tier=strong）、轉 disputed、冪等；沒逾時／沒旗標不開", async () => {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE TABLE strong_lane_settings (id integer PRIMARY KEY, stale_dispute_days integer, enabled boolean);
+    INSERT INTO strong_lane_settings VALUES (1, 3, true);
+    CREATE TABLE queue_settings (id integer PRIMARY KEY, identity_pick_timeout_days integer NOT NULL DEFAULT 7);
+    INSERT INTO queue_settings (id) VALUES (1);
+    CREATE FUNCTION contribution_overvoted_flag_votes() RETURNS numeric LANGUAGE sql AS $$ SELECT 50::numeric $$;
+    CREATE FUNCTION contribution_overvoted_stop_votes() RETURNS numeric LANGUAGE sql AS $$ SELECT 100::numeric $$;
+    CREATE TABLE contributions (id uuid PRIMARY KEY, contribution_type text, payload jsonb DEFAULT '{}', source_urls text[], agent_name text, status text, review_notes text,
+      agree_count integer DEFAULT 2, disagree_count integer DEFAULT 0, unsure_count integer DEFAULT 0, created_at timestamptz DEFAULT now(),
+      needs_identity_pick boolean NOT NULL DEFAULT false, needs_identity_pick_at timestamptz);
+    CREATE TABLE contribution_votes (contribution_id uuid, agent_name text, agent_tool text, verdict text, note text, evidence_url text, created_at timestamptz DEFAULT now());
+    CREATE TABLE contribution_tasks (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), title text, description text, task_type text, target jsonb, priority integer, reward integer, status text,
+      source text, created_by text, hint_sources text[], closed_at timestamptz, created_at timestamptz DEFAULT now());`);
+  await db.exec(fnOf("CREATE OR REPLACE FUNCTION strong_lane_sweep()", "\n$$;"));
+  const OLD = "bbbbbbbb-0000-4000-8000-000000000001", FRESH = "bbbbbbbb-0000-4000-8000-000000000002", NOFLAG = "bbbbbbbb-0000-4000-8000-000000000003";
+  const ins = (id: string, flag: boolean, days: number) => db.query(
+    `INSERT INTO contributions (id, contribution_type, payload, status, agent_name, needs_identity_pick, needs_identity_pick_at, created_at)
+     VALUES ($1, 'politician', '{"name":"林大同"}', 'pending', 'alice', $2, now() - make_interval(days => $3), now() - make_interval(days => $3))`, [id, flag, days]);
+  await ins(OLD, true, 8); await ins(FRESH, true, 2); await ins(NOFLAG, false, 30);
+  assertEquals((await db.query<{ n: number }>(`SELECT strong_lane_sweep() AS n`)).rows[0].n, 1);
+  const tasks = (await db.query<{ target: Record<string, string>; task_type: string }>(`SELECT target, task_type FROM contribution_tasks`)).rows;
+  assertEquals(tasks.length, 1);
+  assertEquals([tasks[0].task_type, tasks[0].target.requires_tier, tasks[0].target.contribution_id], ["adjudicate", "strong", OLD]);
+  assert(tasks[0].target.reason.includes("7 天"), tasks[0].target.reason);
+  const st = async (id: string) => (await db.query<{ status: string }>(`SELECT status FROM contributions WHERE id = $1`, [id])).rows[0].status;
+  assertEquals([await st(OLD), await st(FRESH), await st(NOFLAG)], ["disputed", "pending", "pending"], "進強模型待辦的轉 disputed（離開驗證池）");
+  assertEquals((await db.query<{ n: number }>(`SELECT strong_lane_sweep() AS n`)).rows[0].n, 0, "冪等");
+  await db.query(`UPDATE queue_settings SET identity_pick_timeout_days = 1 WHERE id = 1`);   // 天數是參數
+  assertEquals((await db.query<{ n: number }>(`SELECT strong_lane_sweep() AS n`)).rows[0].n, 1, "FRESH（2 天）在 1 天門檻下逾時");
+  await db.close();
+});
+
+Deno.test("H2 改回待指認時記下時間（needs_identity_pick_at），逾時才算得出來", async () => {
+  const f = createFakeSupabase({
+    contributions: [row(payload(), { agree_count: 2, score: 2 })],
+    politicians: people({ id: P2, name: "林大同", region: "台北市" }),
+    contribution_votes: [{ contribution_id: C1, verdict: "agree", resolved_politician_id: null }, { contribution_id: C1, verdict: "agree", resolved_politician_id: null }],
+  });
+  assertEquals((await autoApplyContribution(f.client, C1)).status, "pending");
+  assert(typeof f.db.contributions[0].needs_identity_pick_at === "string");
 });

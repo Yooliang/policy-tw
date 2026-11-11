@@ -298,7 +298,19 @@ export function createSupabaseIdentityStore(supabase: SupabaseLike): IdentitySto
         .eq("key_type", "birth")
         .in("politician_id", [...politicianIds]);
       throwIf(error, "politician_keys birth lookup");
-      return data ?? [];
+      const keyed: KeyHit[] = data ?? [];
+      // 生年的唯一來源是 politicians.birth_year（清除疑似標記的觸發器也看它；birth key 是它的衍生）：
+      // 有欄位、沒有 birth key 的人物，補一把合成的 birth key，兩邊對「有沒有生年」的判定才一致（2026-11-11 審查）
+      const have = new Set(keyed.map((k) => k.politician_id));
+      const missing = politicianIds.filter((id) => !have.has(id));
+      if (missing.length === 0) return keyed;
+      const { data: rows, error: pErr } = await supabase.from("politicians").select("id, name, birth_year").in("id", [...missing]);
+      throwIf(pErr, "politicians birth_year lookup");
+      // deno-lint-ignore no-explicit-any
+      const synth: KeyHit[] = (rows ?? []).filter((r: any) => Number.isInteger(r.birth_year) && normText(r.name) !== null)
+        // deno-lint-ignore no-explicit-any
+        .map((r: any) => ({ politician_id: r.id, key_type: "birth" as const, key_value: `${normText(r.name)}|${r.birth_year}`, strength: STRENGTH.STRONG }));
+      return [...keyed, ...synth];
     },
 
     async findByNames(names) {

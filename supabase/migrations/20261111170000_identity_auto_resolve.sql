@@ -68,6 +68,77 @@ DROP TRIGGER IF EXISTS politicians_merged_fix_possible_duplicate ON politicians;
 CREATE TRIGGER politicians_merged_fix_possible_duplicate AFTER UPDATE OF merged_into ON politicians
   FOR EACH ROW EXECUTE FUNCTION politicians_merged_fix_possible_duplicate();
 
+-- ------------------------------------------------------------
+-- 待指認的件逾時（審查補）：needs_identity_pick 的件若 queue_settings.identity_pick_timeout_days（預設 7）天沒有人帶指認投票，
+-- 不留在驗證池裡空轉（投過的人不能再投），改由 strong_lane_sweep() 開 requires_tier='strong' 的 adjudicate（冪等，同原函式的 NOT EXISTS），
+-- 並把這件轉 disputed。以 20261109230000 的 strong_lane_sweep 為底，多四處（標 v_pick／needs_identity_pick）。
+-- ------------------------------------------------------------
+ALTER TABLE queue_settings ADD COLUMN IF NOT EXISTS identity_pick_timeout_days INTEGER NOT NULL DEFAULT 7 CHECK (identity_pick_timeout_days >= 1);
+COMMENT ON COLUMN queue_settings.identity_pick_timeout_days IS '待指認（contributions.needs_identity_pick）的件，這麼多天沒人帶指認投票就轉強模型待辦（strong_lane_sweep）';
+ALTER TABLE contributions ADD COLUMN IF NOT EXISTS needs_identity_pick_at TIMESTAMPTZ;
+COMMENT ON COLUMN contributions.needs_identity_pick_at IS 'needs_identity_pick 設成 true 的時間（逾時計算用）';
+
+CREATE OR REPLACE FUNCTION strong_lane_sweep() RETURNS INTEGER
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_flag NUMERIC := contribution_overvoted_flag_votes();
+  v_stop NUMERIC := contribution_overvoted_stop_votes();
+  v_days INTEGER; v_pick INTEGER; v_on BOOLEAN; v_n INTEGER := 0; r RECORD; v_votes TEXT; v_hints TEXT[];
+BEGIN
+  SELECT s.stale_dispute_days, s.enabled INTO v_days, v_on FROM strong_lane_settings s WHERE s.id = 1;
+  IF NOT COALESCE(v_on, false) THEN RETURN 0; END IF;
+  SELECT COALESCE(q.identity_pick_timeout_days, 7) INTO v_pick FROM queue_settings q WHERE q.id = 1;
+  v_pick := COALESCE(v_pick, 7);
+  FOR r IN
+    SELECT c.id, c.contribution_type, c.payload, c.source_urls, c.agent_name, c.status, c.review_notes,
+           c.agree_count + c.disagree_count + c.unsure_count AS votes,
+           CASE WHEN c.agree_count + c.disagree_count + c.unsure_count > v_stop THEN '投太多輪（票數 ' || (c.agree_count + c.disagree_count + c.unsure_count) || ' 超過停派線 ' || round(v_stop, 1) || '）'
+                WHEN c.status = 'disputed' AND c.agree_count + c.disagree_count + c.unsure_count > v_flag THEN '爭議中且票數 ' || (c.agree_count + c.disagree_count + c.unsure_count) || ' 超過標出線 ' || round(v_flag, 1)
+                WHEN c.needs_identity_pick THEN '同名身分判不出、改回待指認後 ' || v_pick || ' 天沒有人帶指認投票'
+                ELSE '爭議超過 ' || v_days || ' 天仍沒有裁決結果' END AS why
+      FROM contributions c
+     WHERE c.contribution_type <> 'adjudication'
+       AND c.status IN ('pending', 'disputed')
+       AND ((c.needs_identity_pick AND c.status = 'pending' AND COALESCE(c.needs_identity_pick_at, c.created_at) < now() - make_interval(days => v_pick))
+            OR c.agree_count + c.disagree_count + c.unsure_count > v_stop
+            OR (c.status = 'disputed' AND c.agree_count + c.disagree_count + c.unsure_count > v_flag)
+            OR (c.status = 'disputed'
+                AND NOT EXISTS (SELECT 1 FROM contribution_tasks t WHERE t.task_type = 'adjudicate' AND t.status = 'open'
+                                   AND t.target->>'contribution_id' = c.id::TEXT AND t.created_at > now() - make_interval(days => v_days))
+                AND (EXISTS (SELECT 1 FROM contribution_tasks t WHERE t.task_type = 'adjudicate' AND t.status = 'open' AND t.target->>'contribution_id' = c.id::TEXT)
+                     OR c.created_at < now() - make_interval(days => v_days))))
+       AND NOT EXISTS (SELECT 1 FROM contribution_tasks t WHERE t.task_type = 'adjudicate' AND t.target->>'requires_tier' = 'strong'
+                         AND t.target->>'contribution_id' = c.id::TEXT)
+     ORDER BY c.created_at
+  LOOP
+    SELECT COALESCE(string_agg(COALESCE(v.agent_name, '?') || '（' || COALESCE(v.agent_tool, '?') || '，' || v.verdict || '）：' || COALESCE(NULLIF(left(v.note, 300), ''), '（無說明）')
+                               || CASE WHEN v.evidence_url IS NOT NULL THEN '［' || v.evidence_url || '］' ELSE '' END, E'\n' ORDER BY v.created_at), '無')
+      INTO v_votes FROM contribution_votes v WHERE v.contribution_id = r.id;
+    v_hints := ARRAY(SELECT DISTINCT u FROM unnest(COALESCE(r.source_urls, ARRAY[]::TEXT[])) AS u
+                     UNION SELECT v.evidence_url FROM contribution_votes v WHERE v.contribution_id = r.id AND v.evidence_url IS NOT NULL);
+    -- 同一筆原有的一般裁決任務由強模型任務取代
+    UPDATE contribution_tasks SET status = 'closed', closed_at = now()
+     WHERE task_type = 'adjudicate' AND status = 'open' AND target->>'requires_tier' IS DISTINCT FROM 'strong' AND target->>'contribution_id' = r.id::TEXT;
+    INSERT INTO contribution_tasks (title, description, task_type, target, priority, reward, status, source, created_by, hint_sources)
+    VALUES (
+      left('強模型裁決：' || r.contribution_type || ' ' || COALESCE(NULLIF(r.payload->>'name', ''), NULLIF(r.payload->>'title', ''), ''), 120),
+      '【強模型專用】' || r.why || '，一般代理投不出共識，改由強模型單獨裁決（一份裁決即定案）。原貢獻 ' || r.id || '（' || r.contribution_type || '，提交者 ' || COALESCE(r.agent_name, '?')
+        || '，狀態 ' || r.status || '）payload：' || left(r.payload::TEXT, 1500)
+        || E'\n各票（含理由）：\n' || v_votes
+        || E'\n請：①逐一打開 hint_sources 與各票 evidence_url，自己查原始來源，不要只信票上的結論；動態網頁（例如 lawmaker.twreporter.org 這類先載空殼再用 JS 載資料的站）不要只看 HTML，改找它背後的 API／JSON；'
+        || '②檢查 election_id（是不是對的那一屆）、人物身份（同名不同人、重複建檔）、有沒有重複的既有紀錄、來源是否真的支持每個欄位；'
+        || '③交 contribution_type=adjudication {contribution_id, verdict: uphold（原貢獻正確）／reject（原貢獻有誤）／uphold_with_correction（大致正確但要改：另帶 corrected_fields＝{欄位: 改好的值}，null＝刪欄位）, reason（≥20 字）, checked_urls[]}。',
+      'adjudicate',
+      jsonb_build_object('contribution_id', r.id, 'contribution_type', r.contribution_type, 'contributor', r.agent_name, 'reason', r.why, 'requires_tier', 'strong'),
+      3, 1, 'open', 'auto_dispute', 'auto-strong', v_hints);
+    -- 待指認的件進了強模型待辦就不再留在驗證池（池子只派 pending）：轉 disputed，由強模型裁決（20261111170000）
+    UPDATE contributions SET status = 'disputed' WHERE id = r.id AND needs_identity_pick AND status = 'pending';
+    v_n := v_n + 1;
+  END LOOP;
+  RETURN v_n;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_dup()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT)
 LANGUAGE sql STABLE AS $fn$

@@ -88,4 +88,3 @@ export async function checkIdentityPick(supabase: SupabaseLike, contributionType
 export const IDENTITY_PICK_MESSAGE =
   "這一筆站上有同名的人，系統判不出是哪一位，同意票必須指認：請在 resolved_politician_id 指認是哪一位（candidates 裡的 id），都不是填 \"new\"。" +
   "補上再送一次，這次不算退件、不扣分、也還沒記為已投。";
-export { identityCandidateOf } from "./identity-candidate.ts";
