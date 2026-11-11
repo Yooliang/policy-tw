@@ -258,6 +258,16 @@ SELECT task_id, task_type, queue_at, boost_seconds, priority_seconds, dispatch_c
 
 要看即時的 `/next` 會派什麼，直接呼叫 `contribution_queue_tasks(p_limit => 20)`（`p_ip_hash`、`p_agent` 不帶就不套同機器過濾）。
 
+**E. 領了不交（認領事件 `lease_events`，2026-11-11 起有資料；表只有 service_role 讀得到）**
+
+`contribution_task_leases` 交件就刪、過期就清，本身沒有歷史；觸發器把每次建立與刪除記進 `lease_events`（`issued`／`reported`＝建立後有人交件／`released`＝主動釋放〔skip〕／`expired`＝過期清掉；`meta.by` 記判斷依據），每天由 `dispatch_records_purge()` 依 `dispatch_records_settings.lease_events_days`（預設 14、下限 8）清舊的。視圖 `lease_outcomes_7d` 是近 7 天依 `agent_name` 的彙總，`no_show_rate`＝expired／(reported＋expired)，released 不算不交，沒有任何結案時是 NULL（不是 0）：
+
+```sql
+SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
+```
+
+看某一件任務被領了幾次、誰領了沒交：`SELECT at, agent_name, event, meta->>'by' FROM lease_events WHERE task_id = '…' AND at >= now() - interval '7 days' ORDER BY at;`（自己查的也要帶時限）。還沒結案的租約（30 分鐘內）不在 reported／expired 裡，所以 issued 會略大於三者之和。
+
 ## 6. 對照檔案
 
 - 排序鍵、冷卻、`cooling`：`supabase/migrations/20261011320000_queue_priority_seconds.sql`、`20261107000000_not_found_no_verify_2d.sql`、`20261107010000_manual_front_pull_skips_not_found_cooling.sql`
