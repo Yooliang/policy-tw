@@ -60,6 +60,22 @@ export function identityCandidateOf(contributionType: string, payload: Obj, task
 export interface IdentityPickCheck {
   required: boolean;
   candidates: PickCandidate[];
+  /** 比對拋例外、閘門放行（fail-open）：呼叫端要留可觀察的紀錄 */
+  error?: boolean;
+}
+
+/**
+ * 這一筆已經有一張同意票帶了指認（consensus／auto-apply 目前一票指認即採用）：之後的同意票不必再帶（過嚴，主線裁示）。
+ * 修訂自己那張票時排除自己（自己改掉指認就不算數）。查不到不當作有（照常檢查）。
+ */
+export async function hasExistingPick(supabase: SupabaseLike, contributionId: string, excludeVoteId?: string | null): Promise<boolean> {
+  try {
+    const { data } = await supabase.from("contribution_votes").select("id, verdict, resolved_politician_id").eq("contribution_id", contributionId).limit(200);
+    return ((data ?? []) as Obj[]).some((v) => v.verdict === "agree" && str(v.resolved_politician_id) !== null && v.id !== excludeVoteId);
+  } catch (e) {
+    console.error("identity pick gate existing votes:", e instanceof Error ? e.message : String(e));
+    return false;
+  }
 }
 
 /** 這一件要不要指認、候選有誰。比對失敗不擋（回 required:false）——系統的問題不該讓代理白做，落庫端仍是最後防線 */
@@ -73,14 +89,15 @@ export async function checkIdentityPick(supabase: SupabaseLike, contributionType
     // 候選＝比對命中的人，加上站上同名的人（比對沒命中任何 key 的同名者，也要讓驗證者看得到、能指認）
     const scored = resolution.candidates.map((c) => c.politician_id);
     const { data: sameName } = resolution.names.length > 0
-      ? await supabase.from("politicians").select("id, name, birth_year, region, party").in("name", resolution.names).limit(MAX_CANDIDATES)
+      ? await supabase.from("politicians").select("id, name, birth_year, region, party, merged_into").in("name", resolution.names).limit(MAX_CANDIDATES)
       : { data: [] };
     const { data: scoredRows } = scored.length > 0
-      ? await supabase.from("politicians").select("id, name, birth_year, region, party").in("id", scored)
+      ? await supabase.from("politicians").select("id, name, birth_year, region, party, merged_into").in("id", scored)
       : { data: [] };
-    const rows = [...((scoredRows ?? []) as Obj[]), ...((sameName ?? []) as Obj[])];
+    // 已併入別人的人物殼不列（指認要指保留的那一位）；落庫端 followMergedInto 本來就會轉過去
+    const rows = [...((scoredRows ?? []) as Obj[]), ...((sameName ?? []) as Obj[])].filter((p) => !p.merged_into);
     const byId = new Map(rows.map((p) => [String(p.id), p]));
-    const ids = [...new Set([...scored, ...rows.map((p) => String(p.id))])].slice(0, MAX_CANDIDATES);
+    const ids = [...new Set([...scored, ...rows.map((p) => String(p.id))])].filter((id) => byId.has(id)).slice(0, MAX_CANDIDATES);
     return {
       required: true,
       candidates: ids.map((id) => {
@@ -90,7 +107,7 @@ export async function checkIdentityPick(supabase: SupabaseLike, contributionType
     };
   } catch (e) {
     console.error("identity pick gate:", e instanceof Error ? e.message : String(e));
-    return none;
+    return { ...none, error: true };
   }
 }
 
