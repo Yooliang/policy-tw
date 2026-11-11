@@ -184,6 +184,7 @@ Deno.test("每一種貢獻型別的風險等級：SQL 與 TypeScript 要一致",
     if (risk === "normal") {
       // normal 是 ELSE 的結果，所以型別名不該出現在任何分支裡
       for (const [r, text] of branches) {
+        if (r === "bulletin_policy") continue; // 公報來源的 policy 看 source_urls，不是型別名（2026-11-11，bulletin-target-two.test.ts 另守）
         assert(!quoted.test(text), `SQL 把 ${type} 分到 ${r}，TS 說是 normal`);
       }
     } else {

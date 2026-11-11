@@ -175,8 +175,11 @@ Deno.test("只有網域的首頁降到最低等級，具體那一頁才算官方
   assertEquals(sourceKind("https://www.cna.com.tw/"), "other");
   assertEquals(sourceKind("https://www.cna.com.tw/news/aipl/202609045002.aspx"), "media");
   // 門檻跟著變：一般資料官方 2 票，降成 other 要 3 票
-  assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/"]), 3);
-  assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/?dir=x"]), 3);
+  // 2026-11-11 起 policy 型別有公報站的具體網址（?dir= 或 PDF）就是目標 2，只有首頁不算（見 bulletin-target-two.test.ts）
+  assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/"]), 3, "只有首頁不算公報來源");
+  assertEquals(requiredAgree("policy", {}, ["https://bulletin.cec.gov.tw/?dir=x"]), 2);
+  assertEquals(requiredAgree("policy", {}, ["https://eebulletin.cec.gov.tw/111/06臺南市/05村里長/36安南/四草里.pdf"]), 2);
+  assertEquals(requiredAgree("policy", {}, ["https://db.cec.gov.tw"]), 3);
 });
 
 // ---- 系統來源票（Jev）：4 票變 3+1，2026-09-19 使用者裁決 ----

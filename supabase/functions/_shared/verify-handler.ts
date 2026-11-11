@@ -11,7 +11,7 @@ import { type Actor } from "./actor.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
 import { QUOTA_DEFAULTS, resolveIdentity } from "./contribute-handler.ts";
 import { loadQuotaLimits, type QuotaLimits } from "./quota-settings.ts";
-import { isSelfVote, voterKey, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted } from "./consensus.ts";
+import { isSelfVote, voterKey, requiredAgree, BLIND_DISAGREE_NOTE, isBlindDisagree, isRubberStampAgree, isRepeatedNote, isCopiedNote, voteWeight, weightReason, rejectFloor, sameSiteAsSubmitted, isBulletinPolicy } from "./consensus.ts";
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
 import { cecCountName, checkCecCount, fetchCecNameHits } from "./identity-cec-count.ts";
@@ -386,7 +386,8 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
       weight,
       weight_reason: weightReason(finalVerdict, judgeBacked, Boolean(input.evidence_url), finalVerdict === "unsure" ? (after?.unsure_count ?? 0) : 0),
       // 2026-09-23：evidence_url 跟提交者同網域的票當天有 229 張，全都只記 +1——當場講，不要等排程核完才發現
-      ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? [])
+      // 公報來源的政見（2026-11-11）不要求第二來源：核對公報 PDF 即可，不回這句警告
+      ...(sameSiteAsSubmitted(input.evidence_url, contribution.source_urls ?? []) && !isBulletinPolicy(contribution.contribution_type, contribution.source_urls ?? [])
         ? { evidence_warning: "evidence_url 跟提交者附的來源是同一個網站，不算第二來源，這票會維持 ±1。要 ±2 請換一個不同網域、直接寫到這件事的來源，可以帶 revise:true 重送覆寫這票（帶派工憑證投的，憑證過期了也一樣帶原本那張憑證加 revise:true 就能改）" }
         : {}),
       score: { before: scoreBefore, after: scoreAfter, target: targetScore },

@@ -5,6 +5,8 @@
  */
 
 import { bestSourceKind, type SourceKind } from "./source-priority.ts";
+import { docKindOf } from "./source-archive.ts";
+import { isSiteRoot } from "./source-priority.ts";
 import { correctionTouches, correctionOnlyFromRumor } from "./correction.ts";
 
 export const VOTE_WEIGHT = 1;
@@ -19,10 +21,10 @@ export const VERIFIED_MAX_DISAGREE = 1;
 
 /**
  * 風險等級：normal＝一般資料；high＝加減參選人；light＝不動正式資料（提議任務／無異動）；
- * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；regional_stat＝地方基本統計（2026-10-27，目標 1）；cand_no＝補號次的參選紀錄（2026-10-29，目標 1）；
+ * past_result＝補一場已投票選舉的結果；batch_result＝整批補已投票選舉的結果（election_results，2026-10-06）；regional_stat＝地方基本統計（2026-10-27，目標 1）；cand_no＝補號次的參選紀錄（2026-10-29，目標 1）；bulletin_policy＝公報來源的政見（2026-11-11，目標 2）；
  * removal＝移除既有資料；adjudication＝裁決
  */
-export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "regional_stat" | "cand_no" | "removal" | "adjudication";
+export type RiskLevel = "normal" | "high" | "light" | "past_result" | "batch_result" | "regional_stat" | "cand_no" | "bulletin_policy" | "removal" | "adjudication";
 
 /**
  * 門檻矩陣（鏡射 SQL contribution_required_agree；migration 000009 與 consensus.test.ts 的一致性測試會比對這張表）
@@ -45,6 +47,10 @@ export const AGREE_THRESHOLDS: Record<RiskLevel, Record<SourceKind, number>> = {
   // 號次交件（維護者 2026-10-29）：candidacy 帶正整數 cand_no 的目標固定 1，一張同意即過。2026-10-29 同日維護者指示也拿掉兩台機器（見 needsTwoIps）；
   // 號次重複的系統票 not_supported 仍 +1（重複時要 2 張）、一張反對照舊擋得住。SQL：contribution_required_agree（20261029020000）
   cand_no: { official: 1, media: 1, social: 1, other: 1 },
+  // 公報來源的政見（維護者 2026-11-11）：policy 交件、source_urls 任一個是中選會選舉公報站（BULLETIN_HOSTS）→ 目標 2，不看來源等級。
+  // 公報只有 PDF、系統不解析所以拿不到系統票與 +2，每票只 +1 硬要 3 個代理；驗證者核對公報 PDF 即可，不用找第二來源。
+  // 退件門檻（−3）、一張反對擋得住、系統票規則都不動。SQL：contribution_required_agree（20261111130000）
+  bulletin_policy: { official: 2, media: 2, social: 2, other: 2 },
   removal: { official: 3, media: 3, social: 3, other: 3 },
   adjudication: { official: 3, media: 3, social: 3, other: 3 },
 };
@@ -71,7 +77,29 @@ export function hasCandNo(payload: unknown): boolean {
   return typeof n === "string" && /^0*[1-9][0-9]{0,5}$/.test(n);
 }
 
-export function riskLevel(contributionType: string, payload: unknown): RiskLevel {
+/**
+ * 公報來源的政見：`policy` 型別，source_urls 任一個的主機是中選會選舉公報站（source-archive.ts 的 BULLETIN_HOSTS：
+ * bulletin.cec.gov.tw、eebulletin.cec.gov.tw；跟 SQL source_doc_kind() = 'election_bulletin' 同一份規則）。
+ * 只有首頁（路徑是 / 或空、沒有查詢字串）不算：附個首頁就拿目標 2 不行（SQL 同一條路徑檢查）。
+ */
+export function isBulletinPolicy(contributionType: string, sourceUrls: readonly string[] | null | undefined): boolean {
+  return bulletinSourceUrl(contributionType, sourceUrls) !== null;
+}
+
+/** 公報來源的政見裡第一條公報網址（給驗證提示指出要開哪一條）；不是公報來源的政見回 null */
+export function bulletinSourceUrl(contributionType: string, sourceUrls: readonly string[] | null | undefined): string | null {
+  if (contributionType !== "policy") return null;
+  return (sourceUrls ?? []).find((u) => typeof u === "string" && docKindOf(u) === "election_bulletin" && !isSiteRoot(u.trim()))?.trim() ?? null;
+}
+
+/** 公報來源政見的目標下限：系統票 supported 或多個獨立來源核得過都不再往下減（2026-11-11；SQL contribution_effective_agree 同步） */
+export const BULLETIN_POLICY_FLOOR = 2;
+/** 這筆的目標下限：公報來源的政見 2，其餘 1（effectiveRequiredAgree 的 floor 參數） */
+export function targetFloor(contributionType: string, sourceUrls: readonly string[] | null | undefined): number {
+  return isBulletinPolicy(contributionType, sourceUrls) ? BULLETIN_POLICY_FLOOR : 1;
+}
+
+export function riskLevel(contributionType: string, payload: unknown, sourceUrls: readonly string[] | null = null): RiskLevel {
   if (contributionType === "adjudication") return "adjudication";
   if (contributionType === "removal") return "removal";
   // 同名人物合併走 high（官方 4／媒體 6／社群 8）：誤併沒有便宜的回頭路（2026-09-20 審查建議 6；前一天訂 3 票）
@@ -83,6 +111,8 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
   if (isPastElectionResult(contributionType, payload)) return "past_result";
   // 補號次（2026-10-29）：放在 past_result 之後、candidacy 一般級之前
   if (contributionType === "candidacy" && hasCandNo(payload)) return "cand_no";
+  // 公報來源的政見（2026-11-11）：放在 cand_no 之後、其餘一般級之前；只有 policy 型別
+  if (isBulletinPolicy(contributionType, sourceUrls)) return "bulletin_policy";
   if (contributionType === "candidacy") return "high";
   // correction 多欄位時取最高風險：任一欄是 candidate_status 就走加減參選人的級距
   if (contributionType === "correction" && correctionTouches(payload, "candidate_status")) {
@@ -100,7 +130,7 @@ export function riskLevel(contributionType: string, payload: unknown): RiskLevel
 
 /** 依型別／欄位／來源等級決定需要幾票同意；source_urls 沒給視為 other */
 export function requiredAgree(contributionType: string, payload: unknown, sourceUrls: readonly string[] = []): number {
-  return AGREE_THRESHOLDS[riskLevel(contributionType, payload)][bestSourceKind(sourceUrls)];
+  return AGREE_THRESHOLDS[riskLevel(contributionType, payload, sourceUrls)][bestSourceKind(sourceUrls)];
 }
 /** disagree ≥ 2 → disputed（兩張帶反證的反對才是爭議） */
 export const DISPUTED_MIN_DISAGREE = 2;
@@ -254,10 +284,11 @@ export function isRosterMatchModel(model: string | null | undefined): boolean {
   return typeof model === "string" && model.startsWith(ROSTER_MATCH_MODEL_PREFIX);
 }
 /** rosterMatched：最新那張有效系統票是名冊逐位核對、而且 supported */
-export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false, supportedSources = 1): number {
-  if (systemVote === "supported" && rosterMatched) return Math.min(required, ROSTER_MATCHED_TARGET);
+export function effectiveRequiredAgree(required: number, systemVote: SystemVote, rosterMatched = false, supportedSources = 1, floor = 1): number {
+  if (systemVote === "supported" && rosterMatched) return Math.min(required, ROSTER_MATCHED_TARGET); // 名冊吻合（只有參選紀錄）目標 1，floor 不生效
   // 兩個以上獨立來源核得過再多降 1，上限 −2、最少 1（2026-10-09，policy-ops#39；SQL contribution_system_vote_sources）
-  if (systemVote === "supported") return Math.max(1, required - Math.min(2, Math.max(1, Math.floor(supportedSources))));
+  // floor：公報來源的政見下限 2（targetFloor；2026-11-11），避免「公報網址＋一個新聞網址被 Jev 核過」單票上線
+  if (systemVote === "supported") return Math.max(floor, 1, required - Math.min(2, Math.max(1, Math.floor(supportedSources))));
   if (systemVote === "not_supported") return required + 1;
   return required;
 }

@@ -16,6 +16,7 @@ type SupabaseLike = any;
 type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, MULTI_PERSON_HINT, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { isMultiPersonTarget } from "./task-fulfilment.ts";
+import { bulletinSourceUrl, isBulletinPolicy } from "./consensus.ts";
 import { shapeAvatarChoiceCurrent } from "./avatar-choice.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
@@ -1328,9 +1329,15 @@ export function submittedDomains(sourceUrls: readonly string[] | null | undefine
 export const SECOND_SOURCE_TYPES: readonly string[] = ["policy", "candidacy", "politician", "correction", "policy_progress"];
 export const secondSourceCounts = (contributionType?: string) => !contributionType || SECOND_SOURCE_TYPES.includes(contributionType);
 
-export function scoringHint(score: number, target: number, contributionType?: string): { points_short: number; hint: string } {
+/** 公報來源的政見（2026-11-11）：目標 2、不找第二來源——公報只有 PDF，系統不解析，核對 PDF 投 +1 就是正常的一票 */
+export const BULLETIN_POLICY_VERIFY_NOTE = "公報來源：打開公報 PDF 逐條核對即可投票，不用找第二來源";
+
+export function scoringHint(score: number, target: number, contributionType?: string, sourceUrls?: readonly string[] | null): { points_short: number; hint: string } {
   const short = Math.max(0, target - score);
   if (short === 0) return { points_short: 0, hint: "已達目標分數，等系統落庫" };
+  if (contributionType && isBulletinPolicy(contributionType, sourceUrls)) {
+    return { points_short: short, hint: `這筆差 ${short} 分。${BULLETIN_POLICY_VERIFY_NOTE}（公報網址：${bulletinSourceUrl(contributionType, sourceUrls)}）；核對無誤投 agree（+1）就是正常的一票` };
+  }
   if (!secondSourceCounts(contributionType)) {
     return { points_short: short, hint: `這筆差 ${short} 分。這種型別系統不核第二來源，附 evidence_url 也只算 +1——核對無誤投 +1 就是正常的一票，不用另外找來源` };
   }
@@ -1373,11 +1380,13 @@ export function shapeVerifyCurrent(contributionType: string, payload: Obj, data:
       scoring: {
         target_score: data.target_score,
         current_score: data.score,
-        ...scoringHint(data.score, data.target_score, contributionType),
+        ...scoringHint(data.score, data.target_score, contributionType, data.source_urls),
         // 把系統知道、代理不知道的事先講出來（2026-09-23 leatherback-ec）：這些網域是提交者的，放進 evidence_url 會被判 same_source、不加分
-        ...(submittedDomains(data.source_urls).length > 0 && secondSourceCounts(contributionType) ? { not_a_second_source: submittedDomains(data.source_urls) } : {}),
-        second_source_counts: secondSourceCounts(contributionType),
-        your_vote_could_be: secondSourceCounts(contributionType) ? VOTE_SCORE_GUIDE : { max: 1, how: "這種型別系統不核第二來源：打開提交者附的來源逐欄核對過、投 agree 就是 +1（附 evidence_url 也不會變 +2）" },
+        ...(submittedDomains(data.source_urls).length > 0 && secondSourceCounts(contributionType) && !isBulletinPolicy(contributionType, data.source_urls) ? { not_a_second_source: submittedDomains(data.source_urls) } : {}),
+        second_source_counts: secondSourceCounts(contributionType) && !isBulletinPolicy(contributionType, data.source_urls),
+        your_vote_could_be: isBulletinPolicy(contributionType, data.source_urls)
+          ? { max: 1, how: `${BULLETIN_POLICY_VERIFY_NOTE}：核對無誤投 agree 就是 +1（附 evidence_url 也不會變 +2）` }
+          : secondSourceCounts(contributionType) ? VOTE_SCORE_GUIDE : { max: 1, how: "這種型別系統不核第二來源：打開提交者附的來源逐欄核對過、投 agree 就是 +1（附 evidence_url 也不會變 +2）" },
       },
     };
   }
