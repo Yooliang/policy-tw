@@ -1,115 +1,143 @@
-// /trace 流程圖的版面：節點位置與直角連線。純計算，不碰 DOM；寬度不同版面等比縮放，手機寬度（320）也排得下。
+// /trace 流程圖的版面（維護者 2026-11-11 定案）：16 個節點、22 條全直角的線。
+// 基準畫布 697×820，節點一律 126×36，寬度不同時等比縮放。純計算，不碰 DOM。
+// 連接點：左右兩側各 3 個（index 0 上、1 中、2 下），上下兩側各 5 個（index 0 左 … 4 右）。
 import type { NodeId } from './trace'
+
+export const BASE_W = 697
+export const BASE_H = 820
+export const NODE_W = 126
+export const NODE_H = 36
+
+export type Side = 't' | 'b' | 'l' | 'r'
+export type Pt = [number, number]
+
+export interface NodeDef {
+  id: NodeId
+  label: string
+  cx: number
+  cy: number
+}
+
+/** 節點中心座標（基準畫布） */
+export const NODE_DEFS: readonly NodeDef[] = [
+  { id: 'official', label: '官方資料', cx: 87, cy: 41 },
+  { id: 'detector', label: '資料缺口偵測（44 支臂）', cx: 87, cy: 123 },
+  { id: 'card', label: '工作卡（人×事）', cx: 87, cy: 205 },
+  { id: 'queue', label: '一條佇列', cx: 87, cy: 287 },
+  { id: 'dispatcher', label: '派工分配器', cx: 87, cy: 369 },
+  { id: 'vote', label: '別的代理投票', cx: 87, cy: 451 },
+  { id: 'applied', label: '落庫上線', cx: 87, cy: 697 },
+  { id: 'visitor', label: '訪客請求', cx: 261, cy: 41 },
+  { id: 'suggest', label: '代理提議', cx: 436, cy: 41 },
+  { id: 'jev', label: 'Jev', cx: 261, cy: 287 },
+  { id: 'submit', label: '代理交件', cx: 436, cy: 451 },
+  { id: 'notfound', label: '查無', cx: 610, cy: 533 },
+  { id: 'cooldown', label: '冷卻 5／10／20 天', cx: 610, cy: 615 },
+  { id: 'dispute', label: '爭議', cx: 261, cy: 451 },
+  { id: 'strongLane', label: '強模型通道', cx: 261, cy: 533 },
+  { id: 'rejected', label: '退件／結案', cx: 436, cy: 615 },
+]
+
+export type LinkStyle = 'solid' | 'return' | 'propose' | 'system'
+
+export interface LinkDef {
+  from: NodeId
+  fromSide: Side
+  fromIdx: number
+  to: NodeId
+  toSide: Side
+  toIdx: number
+  /** 起點與終點之間的轉折點（基準畫布座標），全部是直角 */
+  via: readonly Pt[]
+  style: LinkStyle
+  label?: string
+  labelAt?: Pt
+  labelAlign?: 'left' | 'right' | 'center'
+}
+
+/** 22 條線：from → to，side／index 是連接點 */
+export const LINKS: readonly LinkDef[] = [
+  { from: 'official', fromSide: 'b', fromIdx: 2, to: 'detector', toSide: 'r', toIdx: 1, via: [[87, 82], [170, 82], [170, 123]], style: 'solid' },
+  { from: 'detector', fromSide: 'b', fromIdx: 2, to: 'card', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'card', fromSide: 'b', fromIdx: 2, to: 'queue', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'queue', fromSide: 'b', fromIdx: 2, to: 'dispatcher', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'dispatcher', fromSide: 'b', fromIdx: 2, to: 'vote', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'vote', fromSide: 'b', fromIdx: 2, to: 'applied', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'visitor', fromSide: 'b', fromIdx: 2, to: 'card', toSide: 'r', toIdx: 0, via: [[261, 195]], style: 'solid' },
+  { from: 'suggest', fromSide: 'b', fromIdx: 1, to: 'card', toSide: 'r', toIdx: 1, via: [[412, 205]], style: 'solid' },
+  { from: 'jev', fromSide: 'r', fromIdx: 0, to: 'suggest', toSide: 'b', toIdx: 3, via: [[460, 277]], style: 'propose', label: '順手提議', labelAt: [466, 160], labelAlign: 'left' },
+  { from: 'submit', fromSide: 't', fromIdx: 3, to: 'jev', toSide: 'r', toIdx: 2, via: [[460, 297]], style: 'solid' },
+  { from: 'dispatcher', fromSide: 'r', fromIdx: 1, to: 'submit', toSide: 't', toIdx: 1, via: [[412, 369]], style: 'solid' },
+  { from: 'jev', fromSide: 't', fromIdx: 2, to: 'queue', toSide: 't', toIdx: 4, via: [[261, 250], [135, 250]], style: 'return', label: '驗證票回隊', labelAt: [198, 243], labelAlign: 'center' },
+  { from: 'jev', fromSide: 'l', fromIdx: 2, to: 'vote', toSide: 'r', toIdx: 0, via: [[175, 297], [175, 441]], style: 'system', label: '系統票', labelAt: [181, 322], labelAlign: 'left' },
+  { from: 'vote', fromSide: 'b', fromIdx: 4, to: 'dispute', toSide: 'l', toIdx: 2, via: [[135, 485], [180, 485], [180, 461]], style: 'solid' },
+  { from: 'dispute', fromSide: 'b', fromIdx: 2, to: 'strongLane', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'strongLane', fromSide: 'b', fromIdx: 1, to: 'applied', toSide: 'r', toIdx: 1, via: [[237, 697]], style: 'solid' },
+  { from: 'strongLane', fromSide: 'b', fromIdx: 3, to: 'rejected', toSide: 't', toIdx: 2, via: [[285, 574], [436, 574]], style: 'solid' },
+  { from: 'vote', fromSide: 'b', fromIdx: 3, to: 'rejected', toSide: 'l', toIdx: 1, via: [[111, 615]], style: 'solid' },
+  { from: 'submit', fromSide: 'r', fromIdx: 1, to: 'notfound', toSide: 't', toIdx: 2, via: [[610, 451]], style: 'solid' },
+  { from: 'notfound', fromSide: 'b', fromIdx: 2, to: 'cooldown', toSide: 't', toIdx: 2, via: [], style: 'solid' },
+  { from: 'cooldown', fromSide: 'l', fromIdx: 1, to: 'rejected', toSide: 'r', toIdx: 1, via: [], style: 'solid' },
+  { from: 'cooldown', fromSide: 'r', fromIdx: 1, to: 'card', toSide: 'r', toIdx: 2, via: [[690, 615], [690, 215]], style: 'return', label: '冷卻完回卡', labelAt: [560, 207], labelAlign: 'center' },
+]
+
+const SIDE_STEP_LR = 10 // 左右側連接點上下間距
+const SIDE_STEP_TB = 24 // 上下側連接點左右間距
+
+const DEF = Object.fromEntries(NODE_DEFS.map((n) => [n.id, n])) as Record<NodeId, NodeDef>
+
+/** 基準畫布上的連接點 */
+export function anchorPoint(id: NodeId, side: Side, idx: number): Pt {
+  const n = DEF[id]
+  if (side === 't') return [n.cx + (idx - 2) * SIDE_STEP_TB, n.cy - NODE_H / 2]
+  if (side === 'b') return [n.cx + (idx - 2) * SIDE_STEP_TB, n.cy + NODE_H / 2]
+  if (side === 'l') return [n.cx - NODE_W / 2, n.cy + (idx - 1) * SIDE_STEP_LR]
+  return [n.cx + NODE_W / 2, n.cy + (idx - 1) * SIDE_STEP_LR]
+}
 
 export interface NodeBox {
   id: NodeId
   label: string
-  sub?: string
   cx: number
   cy: number
   w: number
   h: number
-  big?: boolean
 }
-
-export type Pt = [number, number]
 
 export interface Route {
   from: NodeId
   to: NodeId
   pts: Pt[]
-  /** 虛線（回流線） */
-  dashed?: boolean
-  /** 線上的小標 */
+  style: LinkStyle
   label?: string
   labelAt?: Pt
   labelAlign?: 'left' | 'right' | 'center'
-  /** 畫布寬度不到這個值就不畫小標（窄畫面放不下） */
-  labelMinWidth?: number
 }
 
 export interface Layout {
   width: number
   height: number
+  scale: number
   nodes: Record<NodeId, NodeBox>
   routes: Route[]
 }
 
-interface Spec {
-  id: NodeId
-  label: string
-  sub?: string
-  x: number
-  y: number
-  big?: boolean
-}
-
-const SPECS: Spec[] = [
-  { id: 'a1', label: '官方資料', x: 0.2, y: 0.05 },
-  { id: 'a2', label: '訪客請求', x: 0.5, y: 0.05 },
-  { id: 'a3', label: '代理提議', x: 0.83, y: 0.05 },
-  { id: 'b', label: '44 支臂', x: 0.2, y: 0.2 },
-  { id: 'c', label: '一條佇列', x: 0.5, y: 0.37, big: true },
-  { id: 'd', label: '派工', x: 0.5, y: 0.52 },
-  { id: 'e', label: '代理交件', x: 0.76, y: 0.66 },
-  { id: 'v', label: '別的代理投票', x: 0.24, y: 0.66 },
-  { id: 'l', label: '落庫上線', x: 0.24, y: 0.8 },
-  { id: 'r', label: '退件', x: 0.54, y: 0.8 },
-  { id: 'n', label: '查無', x: 0.83, y: 0.8 },
-  { id: 'k', label: '冷卻', sub: '5／10／20 天', x: 0.83, y: 0.94 },
-]
-
-const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v))
-
-/** 依畫布寬度算出版面；高度跟著寬度走（窄畫面較高） */
+/** 依畫布寬度等比縮放基準畫布 */
 export function computeLayout(width: number): Layout {
-  const W = Math.max(280, Math.round(width))
-  const H = Math.round(clamp(W * 1.4, 520, 700))
-  const nw = Math.min(112, W * 0.26)
+  const s = Math.max(1, width) / BASE_W
+  const sc = (p: Pt): Pt => [p[0] * s, p[1] * s]
   const nodes = {} as Record<NodeId, NodeBox>
-  for (const s of SPECS) {
-    nodes[s.id] = {
-      id: s.id,
-      label: s.label,
-      sub: s.sub,
-      cx: Math.round(s.x * W),
-      cy: Math.round(24 + s.y * (H - 48)),
-      w: s.big ? Math.min(nw * 1.3, W * 0.36) : nw,
-      h: s.big ? 50 : 40,
-      big: s.big,
-    }
-  }
-  const { a2, a3, b, c, d, e, v, l, r, n, k } = nodes
-  const top = (x: NodeBox): number => x.cy - x.h / 2
-  const bot = (x: NodeBox): number => x.cy + x.h / 2
-  const left = (x: NodeBox): number => x.cx - x.w / 2
-  const right = (x: NodeBox): number => x.cx + x.w / 2
-  const midDV = Math.round((bot(d) + top(v)) / 2)
-  const midEN = Math.round((bot(e) + top(n)) / 2)
-  const midVL = Math.round((bot(v) + top(r)) / 2)
-  const upA3 = Math.round(top(c) - 16)
-  const propX = Math.min(Math.max(right(e) + 10, a3.cx + 14), W - 6)
-  const routes: Route[] = [
-    { from: 'a1', to: 'b', pts: [[nodes.a1.cx, bot(nodes.a1)], [b.cx, top(b)]] },
-    { from: 'b', to: 'c', pts: [[right(b), b.cy], [c.cx - 30, b.cy], [c.cx - 30, top(c)]] },
-    { from: 'a2', to: 'c', pts: [[a2.cx, bot(a2)], [c.cx, top(c)]] },
-    { from: 'a3', to: 'c', pts: [[a3.cx - 14, bot(a3)], [a3.cx - 14, upA3], [c.cx + 30, upA3], [c.cx + 30, top(c)]] },
-    { from: 'c', to: 'd', pts: [[c.cx, bot(c)], [d.cx, top(d)]] },
-    { from: 'd', to: 'e', pts: [[d.cx + 22, bot(d)], [d.cx + 22, midDV], [e.cx - 24, midDV], [e.cx - 24, top(e)]] },
-    { from: 'd', to: 'v', pts: [[d.cx - 22, bot(d)], [d.cx - 22, midDV], [v.cx, midDV], [v.cx, top(v)]] },
-    { from: 'e', to: 'c', dashed: true, label: '交一件，回隊一張票', labelAt: [e.cx + 6, Math.round((top(e) + c.cy) / 2)], labelAlign: 'left', labelMinWidth: 560,
-      pts: [[e.cx, top(e)], [e.cx, c.cy], [right(c), c.cy]] },
-    { from: 'e', to: 'a3', dashed: true, label: '順手提議', labelAt: [propX - 6, Math.round((e.cy + a3.cy) / 2)], labelAlign: 'right', labelMinWidth: 560,
-      pts: [[right(e), e.cy - 8], [propX, e.cy - 8], [propX, bot(a3)]] },
-    { from: 'e', to: 'n', pts: [[e.cx + 10, bot(e)], [e.cx + 10, midEN], [n.cx, midEN], [n.cx, top(n)]] },
-    { from: 'n', to: 'k', pts: [[n.cx, bot(n)], [k.cx, top(k)]] },
-    { from: 'k', to: 'c', dashed: true, label: '冷卻完再派', labelAt: [Math.round((10 + left(k)) / 2), k.cy - 9], labelAlign: 'center',
-      pts: [[left(k), k.cy], [10, k.cy], [10, c.cy], [left(c), c.cy]] },
-    { from: 'v', to: 'l', label: '上線', labelAt: [v.cx - 6, Math.round((bot(v) + top(l)) / 2)], labelAlign: 'right', pts: [[v.cx, bot(v)], [l.cx, top(l)]] },
-    { from: 'v', to: 'r', label: '反對累積就退件', labelAt: [Math.round((v.cx + 22 + r.cx) / 2), midVL - 6], labelAlign: 'center', labelMinWidth: 400,
-      pts: [[v.cx + 22, bot(v)], [v.cx + 22, midVL], [r.cx, midVL], [r.cx, top(r)]] },
-  ]
-  return { width: W, height: H, nodes, routes }
+  for (const d of NODE_DEFS) nodes[d.id] = { id: d.id, label: d.label, cx: d.cx * s, cy: d.cy * s, w: NODE_W * s, h: NODE_H * s }
+  const routes: Route[] = LINKS.map((l) => ({
+    from: l.from,
+    to: l.to,
+    style: l.style,
+    label: l.label,
+    labelAt: l.labelAt ? sc(l.labelAt) : undefined,
+    labelAlign: l.labelAlign,
+    pts: [sc(anchorPoint(l.from, l.fromSide, l.fromIdx)), ...l.via.map(sc), sc(anchorPoint(l.to, l.toSide, l.toIdx))],
+  }))
+  return { width: BASE_W * s, height: BASE_H * s, scale: s, nodes, routes }
 }
 
 const reverse = (r: Route): Pt[] => [...r.pts].reverse()
@@ -149,6 +177,8 @@ export function polylineLength(pts: readonly Pt[]): number {
   for (let i = 0; i < pts.length - 1; i++) len += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
   return len
 }
+
+const clamp = (v: number, a: number, b: number): number => Math.max(a, Math.min(b, v))
 
 /** 沿折線走 t（0～1）的位置 */
 export function pointAlong(pts: readonly Pt[], t: number): Pt {

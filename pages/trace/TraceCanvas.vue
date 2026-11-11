@@ -30,10 +30,12 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const DOT_LIFE = 1.4 // 秒（真實時間）
 const EVENT_SEC = 1.2 // events 模式一件事走多久（speed 1）
 const MAX_DOTS = 160
+// 流程圖是 697×820 等比縮放；手機太窄時字會小到看不清，所以最窄畫 520，超出的用左右捲動看
+const MIN_WIDTH = 520
 
 interface Dot { path: Pt[]; len: number; color: string; born: number; flash: NodeId | null; end: NodeId; arrived: boolean }
 
-let layout: Layout = computeLayout(360)
+let layout: Layout = computeLayout(MIN_WIDTH)
 let ctx: CanvasRenderingContext2D | null = null
 let dpr = 1
 let raf = 0
@@ -59,7 +61,7 @@ function setupCanvas(): void {
   const el = canvas.value
   const box = wrap.value
   if (!el || !box) return
-  const w = Math.max(280, box.clientWidth)
+  const w = Math.max(MIN_WIDTH, box.clientWidth)
   layout = computeLayout(w)
   dpr = Math.min(window.devicePixelRatio || 1, 3)
   el.width = Math.round(layout.width * dpr)
@@ -160,7 +162,7 @@ function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number,
   c.closePath()
 }
 
-function arrow(c: CanvasRenderingContext2D, a: Pt, b: Pt, color: string): void {
+function arrow(c: CanvasRenderingContext2D, a: Pt, b: Pt, color: string, k = 1): void {
   const ang = Math.atan2(b[1] - a[1], b[0] - a[0])
   c.save()
   c.translate(b[0], b[1])
@@ -168,8 +170,8 @@ function arrow(c: CanvasRenderingContext2D, a: Pt, b: Pt, color: string): void {
   c.fillStyle = color
   c.beginPath()
   c.moveTo(0, 0)
-  c.lineTo(-7, -3.5)
-  c.lineTo(-7, 3.5)
+  c.lineTo(-7 * k, -3.5 * k)
+  c.lineTo(-7 * k, 3.5 * k)
   c.closePath()
   c.fill()
   c.restore()
@@ -184,27 +186,46 @@ function activeEdgeKeys(): Set<string> {
   return out
 }
 
+const STYLE: Record<string, { color: string; dash: number[]; text: string }> = {
+  solid: { color: '#cbd5e1', dash: [], text: '#64748b' },
+  return: { color: '#d97706', dash: [6, 4], text: '#b45309' },
+  propose: { color: '#2563eb', dash: [2, 4], text: '#1d4ed8' },
+  system: { color: '#16a34a', dash: [], text: '#15803d' },
+}
+
+/** 文字塞得進寬度才用；太寬就一路縮小字，最小 7px */
+function fitFont(c: CanvasRenderingContext2D, text: string, base: number, maxW: number, bold: boolean): void {
+  let size = base
+  for (;;) {
+    c.font = `${bold ? 'bold ' : ''}${size}px ${fontFamily}`
+    if (size <= 7 || c.measureText(text).width <= maxW) return
+    size -= 0.5
+  }
+}
+
 function draw(): void {
   const c = ctx
   if (!c) return
   refreshCounts()
+  const s = layout.scale
   c.clearRect(0, 0, layout.width, layout.height)
   const hot = activeEdgeKeys()
   // 連線
   for (const r of layout.routes) {
     const on = hot.has(`${r.from}>${r.to}`)
-    const col = on ? '#334155' : r.dashed ? '#d97706' : '#cbd5e1'
+    const st = STYLE[r.style] ?? STYLE.solid
+    const col = on ? '#334155' : st.color
     c.strokeStyle = col
-    c.lineWidth = on ? 2.4 : r.dashed ? 1.8 : 1.4
-    c.setLineDash(r.dashed ? [6, 4] : [])
+    c.lineWidth = Math.max(1, (on ? 2.4 : r.style === 'solid' ? 1.4 : 1.8) * Math.max(0.8, s))
+    c.setLineDash(st.dash.map((d) => d * Math.max(0.8, s)))
     c.beginPath()
     r.pts.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])))
     c.stroke()
     c.setLineDash([])
-    arrow(c, r.pts[r.pts.length - 2], r.pts[r.pts.length - 1], col)
-    if (r.label && r.labelAt && layout.width >= (r.labelMinWidth ?? 0)) {
-      c.font = `11px ${fontFamily}`
-      c.fillStyle = r.dashed ? '#b45309' : '#64748b'
+    arrow(c, r.pts[r.pts.length - 2], r.pts[r.pts.length - 1], col, Math.max(0.8, s))
+    if (r.label && r.labelAt) {
+      c.font = `${Math.max(8, 10 * s)}px ${fontFamily}`
+      c.fillStyle = st.text
       c.textAlign = r.labelAlign ?? 'left'
       c.textBaseline = 'middle'
       c.fillText(r.label, r.labelAt[0], r.labelAt[1])
@@ -213,24 +234,24 @@ function draw(): void {
   // 節點
   for (const n of Object.values(layout.nodes)) {
     const g = glow[n.id] ?? 0
-    roundRect(c, n.cx - n.w / 2, n.cy - n.h / 2, n.w, n.h, 8)
+    roundRect(c, n.cx - n.w / 2, n.cy - n.h / 2, n.w, n.h, 6 * s)
     c.fillStyle = g > 0 ? `rgba(251,191,36,${0.15 + g * 0.35})` : '#ffffff'
     c.fill()
     c.strokeStyle = g > 0 ? '#f59e0b' : '#94a3b8'
-    c.lineWidth = n.big ? 2 : 1.4
+    c.lineWidth = Math.max(1, 1.4 * s)
     c.stroke()
     const cl = COUNT_LABEL[n.id]
     const num = counts[n.id]
-    const second = cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : (n.sub ?? '')
+    const second = cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : ''
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillStyle = '#0f172a'
-    c.font = `bold ${n.big ? 13 : 12}px ${fontFamily}`
-    c.fillText(n.label, n.cx, second ? n.cy - 8 : n.cy)
+    fitFont(c, n.label, 10 * s, n.w - 8 * s, true)
+    c.fillText(n.label, n.cx, second ? n.cy - 6 * s : n.cy)
     if (second) {
-      c.font = `11px ${fontFamily}`
-      c.fillStyle = cl && num ? '#0369a1' : '#64748b'
-      c.fillText(second, n.cx, n.cy + 9)
+      fitFont(c, second, 9 * s, n.w - 8 * s, false)
+      c.fillStyle = num ? '#0369a1' : '#64748b'
+      c.fillText(second, n.cx, n.cy + 8 * s)
     }
   }
   drawDots(c)
@@ -243,7 +264,7 @@ function drawDot(c: CanvasRenderingContext2D, d: Dot, t: number, alpha: number):
     c.globalAlpha = alpha * (1 - t)
     c.lineWidth = 2
     c.beginPath()
-    c.arc(n.cx, n.cy, 8 + t * 16, 0, Math.PI * 2)
+    c.arc(n.cx, n.cy, (8 + t * 16) * Math.max(0.8, layout.scale), 0, Math.PI * 2)
     c.stroke()
     c.globalAlpha = 1
     return
@@ -252,7 +273,7 @@ function drawDot(c: CanvasRenderingContext2D, d: Dot, t: number, alpha: number):
   c.globalAlpha = alpha
   c.fillStyle = d.color
   c.beginPath()
-  c.arc(x, y, 5, 0, Math.PI * 2)
+  c.arc(x, y, 5 * Math.max(0.8, layout.scale), 0, Math.PI * 2)
   c.fill()
   c.strokeStyle = '#ffffff'
   c.lineWidth = 1.5
@@ -332,7 +353,7 @@ watch(() => [props.items, props.mode, props.reduced], () => {
 </script>
 
 <template>
-  <div ref="wrap" class="w-full">
-    <canvas ref="canvas" role="img" :aria-label="label" class="block mx-auto max-w-full" style="touch-action: manipulation" />
+  <div ref="wrap" class="w-full overflow-x-auto">
+    <canvas ref="canvas" role="img" :aria-label="label" class="block mx-auto" style="touch-action: pan-x pan-y" />
   </div>
 </template>

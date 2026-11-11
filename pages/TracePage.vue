@@ -58,7 +58,7 @@ const currentIndex = computed(() => {
 })
 const totals = computed(() => nodeCounts(items.value))
 const totalChips = computed(() => (Object.keys(COUNT_LABEL) as NodeId[])
-  .filter((n) => n !== 'c')
+  .filter((n) => n !== 'queue')
   .map((n) => ({ key: n, label: COUNT_LABEL[n] as string, n: totals.value[n] ?? 0 })))
 const top = computed(() => (mode.value === 'window' ? topActive(items.value, 10) : []))
 

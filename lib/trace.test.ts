@@ -3,7 +3,7 @@ import {
   dedupe, eventRoute, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
   type NodeId, type TraceEvent,
 } from './trace.ts'
-import { computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
+import { BASE_H, BASE_W, LINKS, NODE_DEFS, NODE_H, NODE_W, anchorPoint, computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
 
 const ev = (over: Partial<TraceEvent>): TraceEvent => ({
   at: '2026-11-11T02:00:00Z', kind: 'vote', task_id: null, work_key: null, contribution_id: null, politician_id: null, agent_name: null, detail: {}, ...over,
@@ -28,15 +28,21 @@ Deno.test('dedupe：交界重複的去掉，不同人的票留著', () => {
   assertEquals(dedupe([a, { ...a }, ev({ agent_name: 'b', detail: { verdict: 'agree' } })]).length, 2)
 })
 
-Deno.test('eventRoute：交件依型別、查核依結果', () => {
-  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'policy' } })), ['d', 'e', 'c'])
-  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'task_suggestion' } })), ['d', 'e', 'a3'])
-  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'no_change' } })), ['d', 'e'])
-  assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'not_found' } })), ['e', 'n', 'k'])
-  assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'confirmed' } })), ['e'])
-  assertEquals(eventRoute(ev({ kind: 'applied' })), ['v', 'l'])
-  assertEquals(eventRoute(ev({ kind: 'rejected' })), ['v', 'r'])
-  assertEquals(eventRoute(ev({ kind: '沒見過的' })), ['c'])
+Deno.test('eventRoute：交件依型別、查核依結果、系統票走 Jev', () => {
+  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'policy' } })), ['dispatcher', 'submit', 'jev', 'queue'])
+  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'task_suggestion' } })), ['dispatcher', 'submit', 'jev', 'suggest', 'card'])
+  assertEquals(eventRoute(ev({ kind: 'submitted', detail: { type: 'no_change' } })), ['dispatcher', 'submit'])
+  assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'not_found' } })), ['submit', 'notfound', 'cooldown'])
+  assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'confirmed' } })), ['submit'])
+  assertEquals(eventRoute(ev({ kind: 'verify_dispatched' })), ['dispatcher', 'vote'])
+  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: 'Jev' })), ['jev', 'vote'])
+  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: '小明' })), ['vote'])
+  assertEquals(eventRoute(ev({ kind: 'applied' })), ['vote', 'applied'])
+  assertEquals(eventRoute(ev({ kind: 'rejected' })), ['vote', 'rejected'])
+  assertEquals(eventRoute(ev({ kind: 'gap_opened' })), ['detector', 'card', 'queue'])
+  assertEquals(eventRoute(ev({ kind: 'request_merged' })), ['visitor', 'card'])
+  assertEquals(eventRoute(ev({ kind: 'lease_issued' })), ['queue', 'dispatcher'])
+  assertEquals(eventRoute(ev({ kind: '沒見過的' })), ['queue'])
 })
 
 Deno.test('eventText：純中文、不帶編號與表名', () => {
@@ -58,8 +64,8 @@ Deno.test('nodeCounts／indexAtOrBefore', () => {
     ev({ at: '2026-11-11T05:00:00Z', kind: 'check', detail: { outcome: 'confirmed' } }),
     ev({ at: '2026-11-11T06:00:00Z', kind: 'applied' }),
   ])
-  assertEquals(nodeCounts(items), { d: 2, v: 1, n: 1, l: 1 })
-  assertEquals(nodeCounts(items, 1), { d: 2 })
+  assertEquals(nodeCounts(items), { dispatcher: 2, vote: 1, notfound: 1, applied: 1 })
+  assertEquals(nodeCounts(items, 1), { dispatcher: 2 })
   assertEquals(indexAtOrBefore(items, Date.parse('2026-11-11T03:30:00Z')), 2)
   assertEquals(indexAtOrBefore(items, Date.parse('2026-11-11T00:00:00Z')), -1)
   assertEquals(indexAtOrBefore(items, Date.parse('2027-01-01T00:00:00Z')), 5)
@@ -88,11 +94,55 @@ Deno.test('gapText／timeSlices', () => {
   assertEquals(timeSlices(0, 10, 4), [[0, 4], [4, 8], [8, 10]])
 })
 
-// ---- 版面 ----
+// ---- 版面（維護者 2026-11-11 定案：16 個節點、22 條線、基準畫布 697×820） ----
 
-const WIDTHS = [320, 360, 390, 768, 1024, 1440]
+const WIDTHS = [520, 697, 768, 1024, 1440]
+const EXPECTED_NODES: Record<string, [number, number]> = {
+  official: [87, 41], detector: [87, 123], card: [87, 205], queue: [87, 287], dispatcher: [87, 369], vote: [87, 451], applied: [87, 697],
+  visitor: [261, 41], suggest: [436, 41], jev: [261, 287], submit: [436, 451], notfound: [610, 533], cooldown: [610, 615],
+  dispute: [261, 451], strongLane: [261, 533], rejected: [436, 615],
+}
+const EXPECTED_LINKS = [
+  'official b2 detector r1', 'detector b2 card t2', 'card b2 queue t2', 'queue b2 dispatcher t2', 'dispatcher b2 vote t2', 'vote b2 applied t2',
+  'visitor b2 card r0', 'suggest b1 card r1', 'jev r0 suggest b3', 'submit t3 jev r2', 'dispatcher r1 submit t1', 'jev t2 queue t4',
+  'jev l2 vote r0', 'vote b4 dispute l2', 'dispute b2 strongLane t2', 'strongLane b1 applied r1', 'strongLane b3 rejected t2',
+  'vote b3 rejected l1', 'submit r1 notfound t2', 'notfound b2 cooldown t2', 'cooldown l1 rejected r1', 'cooldown r1 card r2',
+]
 
-Deno.test('版面：每一段線都是水平或垂直（直角）', () => {
+Deno.test('版面：16 個節點、全 126×36、中心座標照維護者定案、基準畫布 697×820', () => {
+  assertEquals([BASE_W, BASE_H, NODE_W, NODE_H], [697, 820, 126, 36])
+  assertEquals(NODE_DEFS.length, 16)
+  const L = computeLayout(BASE_W)
+  assertEquals(L.width, 697)
+  assertEquals(L.height, 820)
+  for (const [id, [cx, cy]] of Object.entries(EXPECTED_NODES)) {
+    const n = L.nodes[id as NodeId]
+    assertEquals([n.cx, n.cy, n.w, n.h], [cx, cy, 126, 36], id)
+  }
+})
+
+Deno.test('版面：22 條線的起訖與連接點（左右 3 個、上下 5 個）照定案', () => {
+  assertEquals(LINKS.map((l) => `${l.from} ${l.fromSide}${l.fromIdx} ${l.to} ${l.toSide}${l.toIdx}`), EXPECTED_LINKS)
+  for (const l of LINKS) {
+    for (const [side, idx] of [[l.fromSide, l.fromIdx], [l.toSide, l.toIdx]] as const) {
+      assert(idx >= 0 && idx <= (side === 't' || side === 'b' ? 4 : 2), `${l.from}>${l.to} 連接點 ${side}${idx} 超出範圍`)
+    }
+  }
+  const L = computeLayout(BASE_W)
+  // 起點、終點真的落在連接點上
+  for (const [i, l] of LINKS.entries()) {
+    const pts = L.routes[i].pts
+    assertEquals(pts[0], anchorPoint(l.from, l.fromSide, l.fromIdx))
+    assertEquals(pts[pts.length - 1], anchorPoint(l.to, l.toSide, l.toIdx))
+  }
+  // 連接點在節點邊上：上下側 x 差 24 一格、左右側 y 差 10 一格
+  assertEquals(anchorPoint('queue', 't', 0), [39, 269])
+  assertEquals(anchorPoint('queue', 'b', 4), [135, 305])
+  assertEquals(anchorPoint('queue', 'l', 1), [24, 287])
+  assertEquals(anchorPoint('queue', 'r', 2), [150, 297])
+})
+
+Deno.test('版面：每一段線都是水平或垂直（直角），任何寬度都一樣', () => {
   for (const w of WIDTHS) {
     const L = computeLayout(w)
     for (const r of L.routes) {
@@ -104,7 +154,7 @@ Deno.test('版面：每一段線都是水平或垂直（直角）', () => {
   }
 })
 
-Deno.test('版面：節點都在畫布內、彼此不重疊；連線都在畫布內', () => {
+Deno.test('版面：節點與連線都在畫布內、節點彼此不重疊、線不穿過別的節點', () => {
   for (const w of WIDTHS) {
     const L = computeLayout(w)
     const ns = Object.values(L.nodes)
@@ -112,27 +162,50 @@ Deno.test('版面：節點都在畫布內、彼此不重疊；連線都在畫布
     for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++) {
       const a = ns[i]
       const b = ns[j]
-      const overlap = Math.abs(a.cx - b.cx) < (a.w + b.w) / 2 && Math.abs(a.cy - b.cy) < (a.h + b.h) / 2
-      assert(!overlap, `${w}px 節點 ${a.id} 與 ${b.id} 重疊`)
+      assert(!(Math.abs(a.cx - b.cx) < (a.w + b.w) / 2 && Math.abs(a.cy - b.cy) < (a.h + b.h) / 2), `${w}px 節點 ${a.id} 與 ${b.id} 重疊`)
     }
-    for (const r of L.routes) for (const [x, y] of r.pts) assert(x >= 0 && x <= L.width && y >= 0 && y <= L.height, `${w}px ${r.from}>${r.to} 出畫布 (${x}, ${y})`)
+    for (const r of L.routes) {
+      for (const [x, y] of r.pts) assert(x >= 0 && x <= L.width && y >= 0 && y <= L.height, `${w}px ${r.from}>${r.to} 出畫布 (${x}, ${y})`)
+      for (let i = 0; i < r.pts.length - 1; i++) {
+        const [x1, y1] = r.pts[i]
+        const [x2, y2] = r.pts[i + 1]
+        for (const n of ns) {
+          if (n.id === r.from || n.id === r.to) continue
+          const eps = 0.01
+          const inX = Math.max(x1, x2) > n.cx - n.w / 2 + eps && Math.min(x1, x2) < n.cx + n.w / 2 - eps
+          const inY = Math.max(y1, y2) > n.cy - n.h / 2 + eps && Math.min(y1, y2) < n.cy + n.h / 2 - eps
+          assert(!(inX && inY), `${w}px ${r.from}>${r.to} 穿過節點 ${n.id}`)
+        }
+      }
+    }
   }
 })
 
-Deno.test('版面：每個事件會用到的相鄰節點都找得到直角連線', () => {
-  const L = computeLayout(390)
-  const pairs: Array<[NodeId, NodeId]> = [['b', 'c'], ['c', 'd'], ['d', 'e'], ['e', 'c'], ['d', 'v'], ['v', 'l'], ['v', 'r'], ['e', 'n'], ['n', 'k'], ['a2', 'c'], ['e', 'a3'], ['d', 'c']]
+Deno.test('版面：所有事件會用到的相鄰節點都找得到直角連線', () => {
+  const L = computeLayout(697)
+  const pairs: Array<[NodeId, NodeId]> = [
+    ['detector', 'card'], ['card', 'queue'], ['queue', 'dispatcher'], ['dispatcher', 'queue'], ['dispatcher', 'submit'], ['submit', 'jev'], ['jev', 'queue'],
+    ['jev', 'suggest'], ['suggest', 'card'], ['visitor', 'card'], ['dispatcher', 'vote'], ['vote', 'applied'], ['vote', 'rejected'], ['submit', 'notfound'],
+    ['notfound', 'cooldown'], ['jev', 'vote'], ['dispute', 'strongLane'], ['strongLane', 'rejected'],
+  ]
   for (const [a, b] of pairs) {
     const pts = routeBetween(L, a, b)
     assert(pts.length >= 2, `${a}>${b}`)
     for (let i = 0; i < pts.length - 1; i++) assert(pts[i][0] === pts[i + 1][0] || pts[i][1] === pts[i + 1][1], `${a}>${b} 不是直角`)
   }
-  // 反向：d>c 是 c>d 倒過來
-  assertEquals(routeBetween(L, 'd', 'c'), [...routeBetween(L, 'c', 'd')].reverse())
-  // 串接：d→e→c 起點在 d 底、終點在 c 右側，沒有重複接點
-  const p = pathThrough(L, ['d', 'e', 'c'])
-  assertEquals(p[0], routeBetween(L, 'd', 'e')[0])
-  assertEquals(p[p.length - 1], routeBetween(L, 'e', 'c').at(-1))
+  assertEquals(routeBetween(L, 'dispatcher', 'queue'), [...routeBetween(L, 'queue', 'dispatcher')].reverse())
+  // 串接：dispatcher→submit→jev 接點不重複
+  const p = pathThrough(L, ['dispatcher', 'submit', 'jev'])
+  assertEquals(p[0], routeBetween(L, 'dispatcher', 'submit')[0])
+  assertEquals(p[p.length - 1], routeBetween(L, 'submit', 'jev').at(-1))
+})
+
+Deno.test('等比縮放：寬度加倍，座標與尺寸都加倍', () => {
+  const a = computeLayout(697)
+  const b = computeLayout(1394)
+  assertEquals(b.scale, 2)
+  assertEquals(b.nodes.queue.w, a.nodes.queue.w * 2)
+  assertEquals(b.routes[0].pts[1], [a.routes[0].pts[1][0] * 2, a.routes[0].pts[1][1] * 2])
 })
 
 Deno.test('pointAlong：起點、終點、中點', () => {

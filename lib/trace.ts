@@ -2,7 +2,9 @@
 // 資料來自 SQL 函式 trace_events()（migration 20261111140000）；這裡不碰網路、不碰 DOM，方便測試。
 
 /** 流程圖上的節點代號（版面在 lib/trace-layout.ts） */
-export type NodeId = 'a1' | 'a2' | 'a3' | 'b' | 'c' | 'd' | 'e' | 'v' | 'l' | 'r' | 'n' | 'k'
+export type NodeId =
+  | 'official' | 'detector' | 'card' | 'queue' | 'dispatcher' | 'vote' | 'applied' | 'visitor'
+  | 'suggest' | 'jev' | 'submit' | 'notfound' | 'cooldown' | 'dispute' | 'strongLane' | 'rejected'
 
 export interface TraceEvent {
   at: string
@@ -31,23 +33,23 @@ interface KindInfo {
 }
 
 const KINDS: Record<string, KindInfo> = {
-  gap_opened: { group: 'gap', route: ['b', 'c'] },
-  gap_reopened: { group: 'gap', route: ['b', 'c'] },
-  gap_closed: { group: 'gap', route: ['c'] },
-  lease_issued: { group: 'lease', route: ['c', 'd'] },
-  lease_reported: { group: 'lease', route: ['d', 'e'] },
-  lease_released: { group: 'lease', route: ['d', 'c'] },
-  lease_expired: { group: 'lease', route: ['d', 'c'] },
-  task_created: { group: 'request', route: ['c'] },
-  task_closed: { group: 'request', route: ['c'] },
-  request_merged: { group: 'request', route: ['a2', 'c'] },
-  submitted: { group: 'submit', route: ['d', 'e', 'c'] },
-  verify_dispatched: { group: 'verify', route: ['d', 'v'] },
-  vote: { group: 'verify', route: ['v'] },
-  verified: { group: 'verify', route: ['v'] },
-  applied: { group: 'apply', route: ['v', 'l'] },
-  rejected: { group: 'reject', route: ['v', 'r'] },
-  check: { group: 'check', route: ['e', 'n', 'k'] },
+  gap_opened: { group: 'gap', route: ['detector', 'card', 'queue'] },
+  gap_reopened: { group: 'gap', route: ['detector', 'card', 'queue'] },
+  gap_closed: { group: 'gap', route: ['queue'] },
+  lease_issued: { group: 'lease', route: ['queue', 'dispatcher'] },
+  lease_reported: { group: 'lease', route: ['dispatcher', 'submit'] },
+  lease_released: { group: 'lease', route: ['dispatcher', 'queue'] },
+  lease_expired: { group: 'lease', route: ['dispatcher', 'queue'] },
+  task_created: { group: 'request', route: ['queue'] },
+  task_closed: { group: 'request', route: ['queue'] },
+  request_merged: { group: 'request', route: ['visitor', 'card'] },
+  submitted: { group: 'submit', route: ['dispatcher', 'submit', 'jev', 'queue'] },
+  verify_dispatched: { group: 'verify', route: ['dispatcher', 'vote'] },
+  vote: { group: 'verify', route: ['vote'] },
+  verified: { group: 'verify', route: ['vote'] },
+  applied: { group: 'apply', route: ['vote', 'applied'] },
+  rejected: { group: 'reject', route: ['vote', 'rejected'] },
+  check: { group: 'check', route: ['submit', 'notfound', 'cooldown'] },
 }
 
 export const GROUP_COLOR: Record<KindGroup, string> = {
@@ -85,13 +87,15 @@ export function groupOf(kind: string): KindGroup {
 export function eventRoute(e: TraceEvent): NodeId[] {
   if (e.kind === 'submitted') {
     const type = detailText(e, 'type')
-    if (type === 'task_suggestion') return ['d', 'e', 'a3']
-    if (type === 'no_change') return ['d', 'e']
-    return ['d', 'e', 'c']
+    if (type === 'task_suggestion') return ['dispatcher', 'submit', 'jev', 'suggest', 'card']
+    if (type === 'no_change') return ['dispatcher', 'submit']
+    return ['dispatcher', 'submit', 'jev', 'queue']
   }
-  if (e.kind === 'task_created') return detailText(e, 'source') === 'web_request' ? ['a2', 'c'] : ['c']
-  if (e.kind === 'check') return detailText(e, 'outcome') === 'not_found' ? ['e', 'n', 'k'] : ['e']
-  return KINDS[e.kind]?.route ?? ['c']
+  if (e.kind === 'task_created') return detailText(e, 'source') === 'web_request' ? ['visitor', 'card', 'queue'] : ['queue']
+  if (e.kind === 'check') return detailText(e, 'outcome') === 'not_found' ? ['submit', 'notfound', 'cooldown'] : ['submit']
+  // 系統票（Jev）：從 Jev 走到投票
+  if (e.kind === 'vote' && /^(jev|系統)/i.test(e.agent_name ?? '')) return ['jev', 'vote']
+  return KINDS[e.kind]?.route ?? ['queue']
 }
 
 const GAP_REASON: Record<string, string> = { filled: '缺口已補完', window: '不在開放期間' }
@@ -173,22 +177,22 @@ export function dedupe(rows: readonly TraceEvent[]): TraceEvent[] {
 // ---- 節點計數 ----
 
 export const COUNT_LABEL: Partial<Record<NodeId, string>> = {
-  b: '新缺口', c: '收回', d: '派出', e: '交件', v: '投票', l: '落庫', r: '退件', n: '查無', a2: '請求', a3: '提議',
+  detector: '新缺口', queue: '收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', notfound: '查無', visitor: '請求', suggest: '提議',
 }
 
 /** 這個事件算在哪個節點的計數上；不計數回 null */
 export function countNode(e: TraceEvent): NodeId | null {
   switch (e.kind) {
-    case 'gap_opened': case 'gap_reopened': return 'b'
-    case 'gap_closed': return 'c'
-    case 'lease_issued': case 'verify_dispatched': return 'd'
-    case 'submitted': return detailText(e, 'type') === 'task_suggestion' ? 'a3' : 'e'
-    case 'vote': return 'v'
-    case 'applied': return 'l'
-    case 'rejected': return 'r'
-    case 'check': return detailText(e, 'outcome') === 'not_found' ? 'n' : null
-    case 'request_merged': return 'a2'
-    case 'task_created': return detailText(e, 'source') === 'web_request' ? 'a2' : null
+    case 'gap_opened': case 'gap_reopened': return 'detector'
+    case 'gap_closed': return 'queue'
+    case 'lease_issued': case 'verify_dispatched': return 'dispatcher'
+    case 'submitted': return detailText(e, 'type') === 'task_suggestion' ? 'suggest' : 'submit'
+    case 'vote': return 'vote'
+    case 'applied': return 'applied'
+    case 'rejected': return 'rejected'
+    case 'check': return detailText(e, 'outcome') === 'not_found' ? 'notfound' : null
+    case 'request_merged': return 'visitor'
+    case 'task_created': return detailText(e, 'source') === 'web_request' ? 'visitor' : null
     default: return null
   }
 }
