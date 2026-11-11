@@ -11,7 +11,9 @@
 -- 不回填歷史（歷史紀錄不回頭改）：這次修之前的 expired 數字偏高，之後的才準。
 
 CREATE OR REPLACE FUNCTION lease_release(p_task_ids TEXT[], p_reason TEXT DEFAULT 'reported') RETURNS INTEGER
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
 DECLARE n INTEGER;
 BEGIN
   IF p_reason NOT IN ('reported', 'released', 'expired') THEN
@@ -34,6 +36,8 @@ DECLARE
   v_forced TEXT := nullif(current_setting('app.lease_release_reason', true), '');
   v_event  TEXT;
   v_by     TEXT;
+  -- 租約 task_id 不一定是 uuid（auto:／verify: 開頭的也有）：先守住格式再轉型，讓 contribution_tasks 主鍵索引用得到
+  v_tid    UUID := CASE WHEN OLD.task_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN OLD.task_id::uuid END;
 BEGIN
   IF v_forced IN ('reported', 'released', 'expired') THEN
     v_event := v_forced; v_by := 'setting';
@@ -43,7 +47,7 @@ BEGIN
      -- 裁決（adjudication）：task_id 與 payload.task_id 都沒有，只帶 payload.contribution_id，要從 adjudicate 任務的 target 對回去
      OR EXISTS (SELECT 1 FROM contribution_tasks t
                   JOIN contributions c ON c.contribution_type = 'adjudication' AND c.payload->>'contribution_id' = t.target->>'contribution_id'
-                 WHERE t.id::text = OLD.task_id AND t.task_type = 'adjudicate' AND c.created_at >= OLD.created_at) THEN
+                 WHERE t.id = v_tid AND t.task_type = 'adjudicate' AND c.created_at >= OLD.created_at) THEN
     v_event := 'reported'; v_by := 'contribution_after_lease';
   ELSIF OLD.leased_until < now() THEN
     v_event := 'expired'; v_by := 'leased_until_passed';
