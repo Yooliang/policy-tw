@@ -190,3 +190,66 @@ Deno.test("7 work_key_recompute：只動鍵變了的列；UPDATE OF task_id 直�
   await db.query(`UPDATE task_checks SET task_id = 'auto:profile_gap:${P1}'`);
   assertEquals((await db.query<{ work_key: string }>("SELECT work_key FROM task_checks")).rows[0].work_key, `politician:${P1}:profile`);
 });
+
+// ------------------------------------------------------------
+// 8. contribution_queue_tasks 新版的租約段（認領中）：真的執行新版函式
+// ------------------------------------------------------------
+async function buildQueueDb(): Promise<PGlite> {
+  const db = new PGlite();
+  await db.exec(`
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, work_key text, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[],
+      reward integer, region text, queue_at timestamptz NOT NULL DEFAULT now(), blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false,
+      opened_at timestamptz NOT NULL DEFAULT now(), last_dispatched_at timestamptz);
+    CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_id text, contribution_type text, status text, payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+      contributor_ip_hash text, agent_name text);
+    CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, target_key text, leased_until timestamptz, agent_name text, work_key text);
+    CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
+    CREATE TABLE question_answers (question_id uuid, agent_name text);
+    CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);
+    ${await latestFn("task_target_multi_person", MIG_NAME)}
+    ${await latestFn("task_target_key", MIG_NAME)}
+    ${await latestFn("uuid_or_null", MIG_NAME)}
+    ${await latestFn("question_answer_cap", MIG_NAME)}
+    ${fnText(MIG, "contribution_queue_tasks")}
+    INSERT INTO task_dispatches (task_id, work_key, task_type) VALUES
+      ('auto:term_policy_missing:${P1}:2026', 'politician:${P1}:policies:2026', 'policy_missing'),
+      ('auto:profile_gap:${P1}', 'politician:${P1}:profile', 'profile_gap'),
+      ('auto:policy_missing:${P2}', 'politician:${P2}:policies:2026', 'policy_missing');
+    INSERT INTO contribution_task_leases VALUES ('auto:policy_missing:${P1}', 'politician:other', now() + interval '10 minutes', 'other', 'politician:${P1}:policies:2026');
+  `);
+  return db;
+}
+const queued = async (db: PGlite, ip: string | null, agent: string | null): Promise<string[]> =>
+  (await db.query<{ task_id: string }>("SELECT task_id FROM contribution_queue_tasks(NULL, NULL, 100, '', $1, $2) ORDER BY task_id", [ip, agent])).rows.map((r) => r.task_id);
+
+Deno.test("8 contribution_queue_tasks 新版的認領中：別人的 work_key 租約擋同卡（p_ip_hash 為 NULL 也擋）、自己的與過期的不擋、別張卡不受影響", async () => {
+  const db = await buildQueueDb();
+  const A = `auto:term_policy_missing:${P1}:2026`;
+  const B = `auto:profile_gap:${P1}`;
+  const C = `auto:policy_missing:${P2}`;
+  // p_ip_hash 為 NULL（不知道是誰）：視為全部是別人的，同卡的 A 被排除；別張卡 B、C 照給
+  assertEquals(await queued(db, null, null), [B, C].sort());
+  assertEquals(await queued(db, null, "me"), [B, C].sort());
+  // 帶 ip_hash 的別人：同樣排除 A
+  assertEquals(await queued(db, "ip-me", "me"), [B, C].sort());
+  // 自己的租約不排除自己（帶自己的 ip_hash 與代號、或只帶代號）
+  assertEquals(await queued(db, "ip-other", "other"), [A, B, C].sort());
+  assertEquals(await queued(db, null, "OTHER"), [A, B, C].sort(), "代號不分大小寫");
+  // 租約過期就不擋
+  await db.query("UPDATE contribution_task_leases SET leased_until = now() - interval '1 minute'");
+  assertEquals(await queued(db, null, null), [A, B, C].sort());
+  // 驗證票的租約沒有 work_key：不擋任何卡
+  await db.query("UPDATE contribution_task_leases SET leased_until = now() + interval '10 minutes', task_id = 'verify:x', work_key = NULL");
+  assertEquals(await queued(db, null, null), [A, B, C].sort());
+});
+
+Deno.test("8b 還原驗證：把新版的 work_key 租約段拿掉，同卡的 A 就又出現（測試真的在咬這一段）", async () => {
+  const sql = fnText(MIG, "contribution_queue_tasks");
+  const a = sql.indexOf("    AND NOT EXISTS (\n      SELECT 1 FROM contribution_task_leases l\n      WHERE l.leased_until > now() AND (p_agent IS NULL OR lower(l.agent_name) <> lower(p_agent))\n        AND d.work_key IS NOT NULL AND l.work_key = d.work_key");
+  assert(a > 0, "找不到 work_key 租約段");
+  const b = sql.indexOf("    -- <<< 合格：認領中");
+  const broken = sql.slice(0, a) + sql.slice(b);
+  const db = await buildQueueDb();
+  await db.exec(broken);
+  assert((await queued(db, null, null)).includes(`auto:term_policy_missing:${P1}:2026`));
+});
