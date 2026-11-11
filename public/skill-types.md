@@ -483,6 +483,8 @@
     5. **把第 1 步的數字寫進票裡**：帶 `resolved_politician_id` 的 `agree` 票（不論指認既有的人或 `"new"`，也包含你主動更正系統比對的情況）要一併帶 `cec_hits`＝中選會 API 查這個姓名回幾筆、`cec_people`＝依出生年收斂成幾個人。伺服器收票當下會自己用同一個姓名查一次：`cec_hits` 對不上會退回 `400 cec_count_mismatch`（回應會告訴你系統查到幾筆），沒帶會退回 `400 cec_count_required`，兩種都**不算你被拒**，補查再送即可。API 是**子字串比對**（查「林淑芬」會連「洪林淑芬」一起回），`cec_hits` 填回傳的全部筆數或姓名完全相同的筆數都算對。中選會 API 當下掛了不會擋你的票。理由：出生年在 `identity_candidates` 裡抄得到，這兩個數字只有真的查過才拿得到；指認一票就採用，兩票讀同一份錯資料就等於一票（金門重複建檔就是這樣來的）。
     登記名冊回答的是「這次誰登記了」，API 回答的是「這個人是誰」。
 
+**生年不同系統自判新人物；模糊時先建新人物掛疑似標記**（1.130.0）：交件帶生年、站上同名者全部有生年且全不同，系統直接判新人物，這一筆不會要你指認；生年相同者照上面的規則比對。只在有同名者缺生年時才真模糊——那時系統先建新人物上線並標「疑似同人，待補生年」（`possible_duplicate_of`），缺生年的那位之後補上生年：相同就開 `merge_politician` 合併任務，不同就清掉標記。另外，若落庫時才發現同名多位判不出身分，這一件不再退件，會回到待驗證並要求同意票帶 `resolved_politician_id`（`item.identity_pick_required`），既有票數保留。
+
 <!-- spec task: policy_missing, term_policy_missing -->
 **這種任務的 `current` 帶什麼**：`policy_missing`／`term_policy_missing` 給人物＋所有參選紀錄＋既有政見（最多 30 筆，超過看 `existing_policies_total`；每筆帶 `election_id`），推得出中選會選舉公報的另給 `bulletins`（每一屆的公報網址 `urls`、號次 `cand_no`、選舉單位 `unit`）與 `bulletins_note`。
 

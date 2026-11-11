@@ -128,6 +128,8 @@ export interface Politician {
   id: string; // Changed from number to UUID string
   /** 軟合併：已併進哪一筆；有值的不進清單，人物頁自動轉向過去 */
   mergedInto?: string;
+  /** 疑似同人，待補生年（2026-11-11）：站上有同名者缺生年，系統先建了這位；補上生年後自動分曉 */
+  possibleDuplicateOf?: string[];
   name: string;
   party: string; // Changed from PoliticalParty to string for flexibility
   status?: PoliticianStatus;
@@ -576,6 +578,7 @@ export interface RawPolitician {
   party: string;
   /** 軟合併：這筆已併進哪一筆（2026-09-19）；清單過濾、人物頁轉向 */
   merged_into?: string | null;
+  possible_duplicate_of?: string[] | null;
   status?: PoliticianStatus;
   election_type?: string;
   position?: string;

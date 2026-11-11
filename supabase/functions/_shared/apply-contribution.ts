@@ -10,7 +10,8 @@
  */
 
 import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape, isRegionalStatAdminCode, REGIONAL_STAT_KEYS, REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from "./contribution-schema.ts";
-import { ensurePolitician, newPoliticianDefaults, upsertParticipation } from "./candidate-import.ts";
+import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
+import { identityFieldsOf } from "./identity-candidate.ts";
 import { changedFields, electionResultLabel } from "./candidacy-result.ts";
 import { CONFIRMED_NARROWED_NOTE, isListPublished, nextCandidacyStatus } from "./candidacy-status.ts";
 import { checkAvatarUrl } from "./avatar-check.ts";
@@ -90,6 +91,8 @@ export interface ApplyOutcome {
   tracking_log_id?: string;
   /** candidacy 落庫寫進／更新的參選紀錄 id；出處掛在它上面（#347 第二階段 A） */
   politician_election_id?: string;
+  /** disputed 的原因是「同名多位判不出身分、驗證者未指認」：auto-apply 改回待指認，不退件（協議 1.130.0） */
+  identity_pick?: true;
   similar_policies?: Array<{ id: string; title: string; similarity: number }>;
   task_id?: string;
   question_id?: string;
@@ -173,7 +176,7 @@ async function recordCreatedPolitician(supabase: SupabaseLike, ctx: EditContext,
   await recordInsert(supabase, ctx, "politicians", politicianId, data ?? { id: politicianId });
 }
 
-type Ensured = { politician_id: string; created: boolean } | { disputed: string };
+type Ensured = { politician_id: string; created: boolean } | { disputed: string; identity_pick?: true };
 
 /**
  * 交件帶的姓名要跟目標人物是同一個人（2026-09-23 agy 審查；2026-10-18 resolved 分支也共用）：id 填錯的話，參選紀錄會掛到別人名下。
@@ -238,7 +241,7 @@ async function ensureOrResolve(supabase: SupabaseLike, row: ContributionRow, can
   const ensured = await ensurePolitician(supabase, candidate, options);
   if (ensured.politician_id === null) {
     const names = ensured.resolution.candidates.map((c) => `${c.name ?? "?"}（${c.politician_id.slice(0, 8)}）`).join("、");
-    return { disputed: `身份判不出（同名多位：${names || "見 politician_identity_reviews"}）且驗證者未指認 resolved_politician_id，交維護者裁決：${ensured.resolution.reason}` };
+    return { identity_pick: true, disputed: `身份判不出（同名多位：${names || "見 politician_identity_reviews"}）且驗證者未指認 resolved_politician_id，交維護者裁決：${ensured.resolution.reason}` };
   }
   return { politician_id: await followMergedInto(supabase, ensured.politician_id), created: ensured.created };
 }
@@ -255,20 +258,8 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
     const problem = await checkAvatarUrl(avatar);
     if (problem) { avatarNote = `；照片沒套用：${problem}`; p.avatar_url = null; }
   }
-  // position／region 在 politicians 是 NOT NULL，交件可以不帶：補預設，補不出來就講清楚缺什麼（不讓落庫撞約束一直重試）
-  const defaults = newPoliticianDefaults({
-    position: str(p.position), region: str(p.region), election_type: str(p.election_type),
-    current_position: str(p.current_position), bio: str(p.bio),
-  });
-  const ensured = await ensureOrResolve(supabase, row, {
-    name: String(p.name),
-    party: str(p.party),
-    region: defaults.region,
-    election_type: str(p.election_type),
-    position: defaults.position,
-    current_position: str(p.current_position),
-    birth_year: int(p.birth_year),
-  }, {
+  // candidate（含 position／region 補預設）與投票閘、派工 dry-run 同一份組法（identity-candidate.ts）
+  const ensured = await ensureOrResolve(supabase, row, identityFieldsOf("politician", p)!, {
     source: sourceTagOf(row),
     extraInsert: {
       sub_region: str(p.sub_region),
@@ -280,7 +271,7 @@ async function applyPolitician(supabase: SupabaseLike, row: ContributionRow): Pr
       experience: Array.isArray(p.experience) ? p.experience : null,
     },
   });
-  if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
+  if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed, ...(ensured.identity_pick ? { identity_pick: true } : {}) };
   // 學經歷的出處由資料庫觸發器在落庫時掛（#346）；這裡只把掛不掛得上講清楚
   const careerNote = careerSourceNote(p, row.source_urls);
   if (ensured.created) {
@@ -667,23 +658,13 @@ async function applyCandidacy(supabase: SupabaseLike, row: ContributionRow): Pro
   const p = row.payload;
   const ctx = ctxOf(row);
   const electionType = normElectionType(str(p.election_type)) ?? "縣市長";
-  const ensured = await ensureOrResolve(supabase, row, {
-    name: String(p.name ?? ""),
-    party: str(p.party),
-    region: str(p.region),
-    election_type: electionType,
-    position: str(p.position) ?? `${electionType}候選人`,
-    current_position: str(p.current_position),
-    birth_year: int(p.birth_year),
-    cec_cand_id: str(p.cec_cand_id) ?? int(p.cec_cand_id),
-    cec_theme_id: str(p.cec_theme_id),
-  }, {
+  const ensured = await ensureOrResolve(supabase, row, identityFieldsOf("candidacy", p)!, {
     source: sourceTagOf(row),
     ...(row.keep_original_name ? { keep_original_name: true } : {}),
     // 建新人物時帶身份的地區（比照 applyPolitician）：前台人物卡讀 politicians.sub_region／village，不帶就是空的
     extraInsert: { sub_region: str(p.sub_region), village: str(p.village) },
   });
-  if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed };
+  if ("disputed" in ensured) return { status: "disputed", message: ensured.disputed, ...(ensured.identity_pick ? { identity_pick: true } : {}) };
   if (ensured.created) await recordCreatedPolitician(supabase, ctx, ensured.politician_id);
 
   const rawStatus = String(p.candidate_status);

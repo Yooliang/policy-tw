@@ -27,7 +27,8 @@ Deno.test("S1 這支是 contribution_verify_pool／candidacy_owner_mismatch_sign
     for (const n of names) if (n > MIG && (await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) later.push(n);
     // 2026-11-04 投票不看 IP（20261104130000）重新定義了驗證池（排除改按代號／帳號）：這是已知的後續版本，再有別的就紅
     // 2026-11-09 驗證票沒人在做的先派（20261109170000）加 p_skip_held／held_count：同樣是已知的後續版本
-    const expected = fn === "contribution_verify_pool" ? ["20261104130000_vote_no_ip.sql", "20261109170000_verify_unheld_first.sql"] : [];
+    // 2026-11-11 待指認的件不被分數達標濾掉（20261111170000）：同樣是已知的後續版本
+    const expected = fn === "contribution_verify_pool" ? ["20261104130000_vote_no_ip.sql", "20261109170000_verify_unheld_first.sql", "20261111170000_identity_auto_resolve.sql"] : [];
     assertEquals(later, expected, `${fn} 在這支之後又有人改了，這裡抄的底就過期`);
   }
   assert(!/DROP\s+FUNCTION/i.test(SQL), "簽名沒變，不必 DROP");

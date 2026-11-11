@@ -541,7 +541,7 @@ CREATE FUNCTION cron.schedule(n text, s text, c text) RETURNS bigint LANGUAGE sq
 CREATE FUNCTION cron.unschedule(n text) RETURNS boolean LANGUAGE sql AS $$ DELETE FROM cron.job WHERE jobname = n RETURNING true $$;
 CREATE TABLE contributions (id uuid PRIMARY KEY, contribution_type text DEFAULT 'candidacy', payload jsonb DEFAULT '{}', source_urls text[], note text, task_id text,
   agent_name text, contributor_ip_hash text, status text DEFAULT 'pending', agree_count int DEFAULT 0, disagree_count int DEFAULT 0, unsure_count int DEFAULT 0,
-  created_at timestamptz DEFAULT now(), score int DEFAULT 0, target_score int, voter_ips int DEFAULT 0, actor_id text);
+  created_at timestamptz DEFAULT now(), score int DEFAULT 0, target_score int, voter_ips int DEFAULT 0, actor_id text, needs_identity_pick boolean NOT NULL DEFAULT false);
 CREATE TABLE contribution_votes (id bigserial PRIMARY KEY, contribution_id uuid, verifier_ip_hash text, agent_name text, actor_id text, created_at timestamptz DEFAULT now());
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, source text);
 CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, agent_name text, ip_hash text, leased_until timestamptz);

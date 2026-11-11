@@ -46,13 +46,28 @@ export function shouldRetry(row: { status: string; retry_count?: number | null; 
 }
 
 // task_id 要撈：上線後拿它判斷所屬任務該不該關（task-fulfilment.ts）；少了它，關任務會默默不做
-const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id, reviewed_by, review_notes";
+const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id, reviewed_by, review_notes, needs_identity_pick";
 const IDENTITY_TYPES = new Set(["politician", "candidacy"]);
 
 async function identityFromVotes(supabase: SupabaseLike, contributionId: string): Promise<ReturnType<typeof resolveIdentityFromVotes>> {
   const { data, error } = await supabase.from("contribution_votes").select("verdict, resolved_politician_id").eq("contribution_id", contributionId);
   if (error) throw new Error(`votes read: ${error.message}`);
   return resolveIdentityFromVotes((data ?? []) as IdentityVote[]);
+}
+
+/** 只有人票驗成的件（沒有別的系統驗證者簽名）才改回待指認 */
+export function canReissueForPick(row: { reviewed_by?: string | null }): boolean {
+  return !row.reviewed_by || row.reviewed_by === "auto-apply";
+}
+
+/**
+ * 重發驗證票：跟觸發器 contribution_queue_row（只在 INSERT 觸發）與 seed 補列同一個做法——插一列 `verify:<id>`，
+ * 排序鍵 queue_at 由 task_dispatches_queue_key 觸發器照母任務的基準算（INSERT 時一律覆蓋），這裡不寫 queue_at。已有票就不動。失敗不丟：seed 每 10 分鐘會補漏。
+ */
+async function reissueVerifyTicket(supabase: SupabaseLike, contributionId: string, nowIso: string): Promise<void> {
+  const { error } = await supabase.from("task_dispatches")
+    .upsert({ task_id: `verify:${contributionId}`, last_dispatched_at: nowIso, dispatch_count: 0 }, { onConflict: "task_id", ignoreDuplicates: true });
+  if (error) console.error("reissue verify ticket:", error.message);
 }
 
 /** 認領的租約：執行中途死掉（逾時、被砍）沒釋放時，超過這麼久別人可以接手；要大於 Edge Function 的最長執行時間 */
@@ -143,6 +158,15 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     }
     if (outcome.status === "failed") throw new Error(outcome.message);
     const status = contributionStatusFor(outcome.status);
+    // 身分原因退件不丟隊尾（協議 1.130.0）：同名多位判不出身分、驗證者沒指認 → 不轉 rejected，改回 pending 並標 needs_identity_pick，
+    // 重發一張驗證票讓之後的驗證者補指認（既有票數與分數保留）。只有人票驗成的件才這樣（系統驗證者先標 verified 的照舊退件），
+    // 而且每件只退回一次（needs_identity_pick 已經是 true 還判不出，就照舊退件，不無限迴圈）。
+    if (status === "rejected" && outcome.identity_pick && !row.needs_identity_pick && canReissueForPick(row)) {
+      const note = `[auto] ${outcome.message}。改回待指認重發驗證票：同意票請在 resolved_politician_id 指認是哪一位（都不是填 "new"）`;
+      const err = await update({ status: "pending", needs_identity_pick: true, needs_identity_pick_at: now, ...mergeReview(row, note), reviewed_at: now });
+      if (!err) await reissueVerifyTicket(supabase, lock.id, now);
+      return { triggered: true, status: "pending", outcome, ...(err ? { error: err } : {}) };
+    }
     if (status === "rejected") {
       // applyFn 判身份判不出（ambiguous）等情況：一樣退件，不硬建
       const err = await update({ status, ...mergeReview(row, `[auto] ${outcome.message}。${GAP_RETURNS}`), reviewed_at: now });
