@@ -26,7 +26,7 @@ function setup(payload: Record<string, unknown>, politicians: Array<Record<strin
     politician_elections: [],
   });
 }
-const payload = { name: "廖文雄", party: "民主進步黨", region: "彰化縣", election_type: "鄉鎮市民代表", candidate_status: "registered", election_id: 2026, birth_year: 1946 };
+const payload = { name: "廖文雄", party: "民主進步黨", region: "彰化縣", election_type: "鄉鎮市民代表", candidate_status: "registered", election_id: 2026 };   // 不帶生年：真模糊才要指認（1.130.0：帶生年且同名者缺生年會先建新人物）
 const vote = { agent_name: "dave", contribution_id: CID, verdict: "agree", note: NOTE };
 const cec = (() => Promise.resolve(new Response(JSON.stringify({ total_pages: 1, cand_data_list: [] })))) as typeof fetch;
 const votes = (db: Record<string, unknown[]>) => (db.contribution_votes ?? []).length;

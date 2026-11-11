@@ -414,6 +414,7 @@ AS $$
     FROM (SELECT * FROM rows_reg UNION ALL SELECT * FROM rows_ours) x
 $$;
 
+-- 以 20261007140000 的定義為底只在尾端多一欄（#345 第二階段：職稱改讀任期表，offices 讀 politician_offices，沒有退回舊視圖）
 CREATE OR REPLACE VIEW politicians_with_elections AS
 SELECT p.id,
     p.name,
