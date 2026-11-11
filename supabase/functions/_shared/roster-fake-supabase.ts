@@ -101,6 +101,7 @@ export function fakeRosterSupabase(tables: FakeTables, opts: FakeOpts = {}) {
       }
       return chain;
     },
+    rpc: () => Promise.resolve({ data: null, error: null }),
   };
   return { client, log };
 }

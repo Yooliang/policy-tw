@@ -338,6 +338,7 @@ function fakeSupabase(tables: Record<string, { data?: unknown[] }>) {
       };
       return chain;
     },
+    rpc: () => Promise.resolve({ data: null, error: null }),
   };
   return { client, inserted };
 }
