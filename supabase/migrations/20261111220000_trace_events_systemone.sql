@@ -191,7 +191,7 @@ BEGIN
        FROM contributions c
       WHERE c.status = 'disputed' AND c.last_activity = 'status:disputed' AND c.contribution_type <> 'adjudication'
         AND c.last_activity_at >= GREATEST(v_since, now() - interval '14 days') AND c.last_activity_at < v_until AND (v_all OR c.id = ANY(v_cids))
-        AND NOT EXISTS (SELECT 1 FROM contribution_tasks t2 WHERE t2.task_type = 'adjudicate' AND t2.target->>'contribution_id' = c.id::text)
+        AND NOT EXISTS (SELECT 1 FROM contribution_tasks t2 WHERE t2.task_type = 'adjudicate' AND trace_uuid(t2.target->>'contribution_id') = c.id)
       ORDER BY c.last_activity_at DESC LIMIT v_lim)
     UNION ALL
     -- 強模型專線認領：強模型任務（requires_tier=strong）被持鑰匙者領走。顯示名來自租約

@@ -87,7 +87,7 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
   const to = /SET statement_timeout = '(\d+)s'/.exec(code);
   if (!to || Number(to[1]) < 5) out.push("函式宣告的 statement_timeout 要 ≥ 5s（匿名呼叫的預設上限很短，3s 在正式庫被砍過）")
   // uuid 欄位不准轉成文字再比（索引用不上、整表掃描）：id::text = … 一律改用 trace_uuid()
-  if (/\b\w+\.id::text\s*=\s+(?!ANY\b)/.test(code)) out.push("uuid 欄位轉文字再比（c.id::text = …）會讓索引失效，請改成 c.id = trace_uuid(…)");
+  if (/\b\w+\.id::text\s*=\s+(?!ANY\b)/.test(code) || /=\s*\w+\.id::text\b/.test(code)) out.push("uuid 欄位轉文字再比（c.id::text = …）會讓索引失效，請改成 c.id = trace_uuid(…)");
   if (!/REVOKE ALL ON FUNCTION trace_events\([^)]*\) FROM PUBLIC;/.test(code)) out.push("沒有 REVOKE ALL FROM PUBLIC");
   const grant = /GRANT EXECUTE ON FUNCTION trace_events\([^)]*\) TO ([A-Za-z_, ]+);/.exec(code);
   if (!grant) out.push("沒有 GRANT EXECUTE");
@@ -315,6 +315,8 @@ Deno.test("還原驗證：timeout 調回 3s、拿掉自訂計畫、又寫回 id:
   assert(problemsOf(plan, leaseDays).some((p) => p.includes("plan_cache_mode")));
   const cast = mutate(REAL, "c.id = trace_uuid(j.subject_id)", "c.id::text = j.subject_id");
   assert(problemsOf(cast, leaseDays).some((p) => p.includes("轉文字")));
+  const rev = mutate(REAL, "trace_uuid(t2.target->>'contribution_id') = c.id)", "t2.target->>'contribution_id' = c.id::text)");
+  assert(problemsOf(rev, leaseDays).some((p) => p.includes("轉文字")), "反向寫法（… = x.id::text）也要抓");
 });
 
 Deno.test("行為：trace_uuid 不是 uuid 格式回 NULL，不讓整支失敗", async () => {
@@ -323,6 +325,8 @@ Deno.test("行為：trace_uuid 不是 uuid 格式回 NULL，不讓整支失敗",
     assertEquals([r.a, r.b], [CID, null]);
     // 其他 subject_type 的非 uuid 識別字（例如新聞編號 '1'）不會讓系統票分支出錯
     await db.exec(`INSERT INTO jev_decisions(subject_type, subject_id, question, choice, probability, model, state) VALUES ('news_item', '1', 'news_relevance', 'unrelated', 0.5, 'm', '{}')`);
-    assert((await kindsOf(db, "p_since => now() - interval '1 hour'")).length >= 0);
+    // 這個庫裡只有一筆新聞判定（subject_type='news_item'、不是交件）：不能誤出系統票或系統判定事件
+    const k = await kindsOf(db, "p_since => now() - interval '1 hour'");
+    assert(!k.includes("system_vote") && !k.includes("system_check"), `新聞判定誤出事件：${k}`);
   });
 });
