@@ -5,7 +5,7 @@
 //   events  指定對象——位置是「第幾件事」（小數＝這件事走到哪），一件一件照真實順序走
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  COUNT_LABEL, GROUP_COLOR, eventRoute, groupOf, indexAtOrBefore, nodeCounts,
+  COUNT_LABEL, GROUP_COLOR, eventRoute, groupOf, indexAtOrBefore, nodeCounts, strongBreakdown,
   type NodeCounts, type NodeId, type TraceItem,
 } from '../../lib/trace'
 import { computeLayout, pathThrough, pointAlong, polylineLength, type Layout, type Pt } from '../../lib/trace-layout'
@@ -44,6 +44,7 @@ let wall = 0
 let localPos = props.position
 let dots: Dot[] = []
 let counts: NodeCounts = {}
+let strong = { claim: 0, finalized: 0, rejected: 0 }
 let countKey = ''
 const glow: Partial<Record<NodeId, number>> = {}
 let hidden = typeof document !== 'undefined' && document.hidden
@@ -90,6 +91,7 @@ function refreshCounts(): void {
   if (key === countKey) return
   countKey = key
   counts = nodeCounts(props.items, idx)
+  strong = strongBreakdown(props.items, idx)
 }
 
 // ---- 前進 ----
@@ -250,7 +252,7 @@ function draw(): void {
     drawBox(c, n, glow[n.id] ?? 0, s)
     const cl = COUNT_LABEL[n.id]
     const num = counts[n.id]
-    const second = cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : ''
+    const second = n.id === 'strongLane' ? `認領 ${strong.claim}／定案 ${strong.finalized}` : n.id === 'dispute' ? `轉裁決 ${(num ?? 0).toLocaleString('zh-TW')}` : cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : ''
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillStyle = '#0f172a'

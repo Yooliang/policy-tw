@@ -24,7 +24,7 @@ export interface TraceItem extends TraceEvent {
   seq: number
 }
 
-export type KindGroup = 'gap' | 'lease' | 'request' | 'submit' | 'verify' | 'apply' | 'reject' | 'check'
+export type KindGroup = 'gap' | 'lease' | 'request' | 'submit' | 'verify' | 'apply' | 'reject' | 'check' | 'dispute'
 
 interface KindInfo {
   group: KindGroup
@@ -48,6 +48,9 @@ const KINDS: Record<string, KindInfo> = {
   vote: { group: 'verify', route: ['vote'] },
   system_vote: { group: 'verify', route: ['jevVote', 'vote'] },
   system_check: { group: 'verify', route: ['jevSort'] },
+  disputed: { group: 'dispute', route: ['vote', 'dispute'] },
+  strong_claim: { group: 'dispute', route: ['dispute', 'strongLane'] },
+  strong_finalized: { group: 'dispute', route: ['strongLane', 'applied'] },
   verified: { group: 'verify', route: ['vote'] },
   applied: { group: 'apply', route: ['vote', 'applied'] },
   rejected: { group: 'reject', route: ['vote', 'rejected'] },
@@ -63,6 +66,7 @@ export const GROUP_COLOR: Record<KindGroup, string> = {
   apply: '#16a34a',
   reject: '#dc2626',
   check: '#d97706',
+  dispute: '#be185d',
 }
 
 export const GROUP_LABEL: Record<KindGroup, string> = {
@@ -74,7 +78,10 @@ export const GROUP_LABEL: Record<KindGroup, string> = {
   apply: '落庫',
   reject: '退件',
   check: '查核',
+  dispute: '爭議',
 }
+
+const detail_bool = (e: TraceEvent, key: string): boolean => e.detail?.[key] === true
 
 const detailText = (e: TraceEvent, key: string): string => {
   const v = e.detail?.[key]
@@ -94,6 +101,8 @@ export function eventRoute(e: TraceEvent): NodeId[] {
     return ['dispatcher', 'submit', 'jevSort', 'queue']
   }
   if (e.kind === 'task_created') return detailText(e, 'source') === 'web_request' ? ['visitor', 'card', 'queue'] : ['queue']
+  // 強模型定案：維持原貢獻（uphold）走落庫，駁回（reject）走退件／結案
+  if (e.kind === 'strong_finalized') return detailText(e, 'verdict') === 'reject' ? ['strongLane', 'rejected'] : ['strongLane', 'applied']
   if (e.kind === 'check') return detailText(e, 'outcome') === 'not_found' ? ['submit', 'notfound', 'cooldown'] : ['submit']
   return KINDS[e.kind]?.route ?? ['queue']
 }
@@ -102,6 +111,7 @@ const GAP_REASON: Record<string, string> = { filled: '缺口已補完', window: 
 const CHECK_OUTCOME: Record<string, string> = { not_found: '查無', confirmed: '確認沒有變動', unreachable: '連不上來源' }
 const CLOSE_REASON: Record<string, string> = { applied: '落庫後結案', expired: '到期結案', manual: '維護者結案', merged: '併入別件', rejected: '退件後結案' }
 const SOURCE_CHOICE: Record<string, string> = { supported: '來源撐得住', not_supported: '來源撐不住', cannot_tell: '無法判斷' }
+const STRONG_VERDICT: Record<string, string> = { uphold: '維持原交件', uphold_with_correction: '維持並更正', reject: '駁回' }
 const CHECK_QUESTION: Record<string, string> = { followup: '追問判定', new_person: '新人物判定', second_source: '第二來源判定', clarify_kind: '釐清分類' }
 const VERDICT: Record<string, string> = { agree: '同意', disagree: '反對', unsure: '不確定', not_supported: '不成立' }
 const CONTRIBUTION_TYPE: Record<string, string> = {
@@ -136,6 +146,9 @@ export function eventText(e: TraceEvent): string {
       return `Jev 系統票：${SOURCE_CHOICE[detailText(e, 'choice')] ?? '已判定'}${typeof n === 'number' ? `（核得過 ${n} 個獨立來源）` : ''}`
     }
     case 'system_check': return `Jev ${CHECK_QUESTION[detailText(e, 'question')] ?? '系統判定'}${SOURCE_CHOICE[detailText(e, 'choice')] ? `：${SOURCE_CHOICE[detailText(e, 'choice')]}` : ''}`
+    case 'disputed': return detail_bool(e, 'strong') ? '轉為爭議，交強模型通道裁決' : detail_bool(e, 'overvoted') ? '投太多輪，停止派驗證、轉為爭議' : '轉為爭議，等待裁決'
+    case 'strong_claim': return `${who || '強模型'}領走強模型裁決`
+    case 'strong_finalized': return `強模型定案：${STRONG_VERDICT[detailText(e, 'verdict')] ?? '已裁決'}`
     case 'applied': return '落庫上線'
     case 'rejected': return '退件，不上線'
     case 'check': {
@@ -184,7 +197,7 @@ export function dedupe(rows: readonly TraceEvent[]): TraceEvent[] {
 // ---- 節點計數 ----
 
 export const COUNT_LABEL: Partial<Record<NodeId, string>> = {
-  detector: '新缺口', queue: '收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
+  detector: '新缺口', dispute: '爭議', strongLane: '認領', queue: '收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
 }
 
 /** 這個事件算在哪個節點的計數上；不計數回 null */
@@ -192,10 +205,13 @@ export function countNode(e: TraceEvent): NodeId | null {
   switch (e.kind) {
     case 'gap_opened': case 'gap_reopened': return 'detector'
     case 'gap_closed': return 'queue'
+    // 強模型專線的認領也是一筆租約事件，所以同時算進一般「派出」；strong_claim 另算在強模型通道格
     case 'lease_issued': case 'verify_dispatched': return 'dispatcher'
     case 'submitted': return detailText(e, 'type') === 'task_suggestion' ? 'suggest' : 'submit'
     case 'vote': return 'vote'
     case 'system_vote': return 'jevVote'
+    case 'disputed': return 'dispute'
+    case 'strong_claim': return 'strongLane'
     case 'applied': return 'applied'
     case 'rejected': return 'rejected'
     case 'check': return detailText(e, 'outcome') === 'not_found' ? 'notfound' : null
@@ -206,6 +222,20 @@ export function countNode(e: TraceEvent): NodeId | null {
 }
 
 export type NodeCounts = Partial<Record<NodeId, number>>
+
+/** 強模型通道：認領與定案各幾件（定案再分維持／駁回） */
+export function strongBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { claim: number; finalized: number; rejected: number } {
+  const out = { claim: 0, finalized: 0, rejected: 0 }
+  const last = Math.min(upTo, items.length - 1)
+  for (let i = 0; i <= last; i++) {
+    if (items[i].kind === 'strong_claim') out.claim++
+    else if (items[i].kind === 'strong_finalized') {
+      out.finalized++
+      if (items[i].detail?.verdict === 'reject') out.rejected++
+    }
+  }
+  return out
+}
 
 /** 前 upTo 筆事件裡系統票各選項的數量（支持／不支持／無法判斷） */
 export function systemVoteBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { supported: number; notSupported: number; other: number } {

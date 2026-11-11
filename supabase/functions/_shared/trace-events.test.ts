@@ -14,7 +14,7 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 // 目前生效的是最後一版（CREATE OR REPLACE 整支）：160000 起多 Jev 系統票與系統判定
-const TRACE_MIG = "20261111160000_trace_events_system_vote.sql";
+const TRACE_MIG = "20261111200000_trace_events_dispute_strong.sql";
 const LEASE_MIG = "20261111120000_lease_events.sql";
 const norm = (s: string) => s.replace(/\r\n/g, "\n");
 const REAL = norm(await Deno.readTextFile(new URL(TRACE_MIG, MIGRATIONS)));
@@ -50,6 +50,12 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
     out.push(`jev_decisions 的 j.${col}${m[2] ?? ""} 不能回（只准 choice、question、asked_at 與 state 的 supported_sources）`);
   }
   if (!/FROM jev_decisions j/.test(code)) out.push("少了 jev_decisions 分支");
+  // strong_adjudications（別名 s）：只准讀 verdict、status、finalized_at、task_id、contribution_id（不回 reasoning、cause_note、報告回應、模型、費用）
+  for (const m of code.matchAll(/\bs\.(\w+)/g)) {
+    if (["verdict", "status", "finalized_at", "task_id", "contribution_id"].includes(m[1])) continue;
+    out.push(`strong_adjudications 的 s.${m[1]} 不能讀（只准 verdict、status、finalized_at、task_id、contribution_id）`);
+  }
+  if (!/FROM strong_adjudications s/.test(code)) out.push("少了 strong_adjudications 分支");
 
   // B. 有界
   const m =/RETURN QUERY([\s\S]*?)\nEND;\n\$\$;/.exec(code);
@@ -61,7 +67,7 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
   if (branches.length < 10) out.push(`UNION 分支只有 ${branches.length} 個，少了來源`);
   for (const b of branches) {
     const label = /FROM\s+([a-z_]+)/i.exec(b)?.[1] ?? b.slice(0, 40);
-    const lim = /(?:created_at|\bat|asked_at|checked_at|requested_at|closed_at|verified_at|applied_at|reviewed_at|dispatched_at)\s*>=\s*GREATEST\(v_since,\s*now\(\)\s*-\s*interval\s*'(\d+) days'\)/.exec(b);
+    const lim = /(?:created_at|\bat|asked_at|last_activity_at|finalized_at|checked_at|requested_at|closed_at|verified_at|applied_at|reviewed_at|dispatched_at)\s*>=\s*GREATEST\(v_since,\s*now\(\)\s*-\s*interval\s*'(\d+) days'\)/.exec(b);
     if (!lim) { out.push(`分支 ${label} 沒有 >= 時限`); continue; }
     const days = Number(lim[1]);
     if (days > MAX_DAYS) out.push(`分支 ${label} 回看 ${days} 天 > ${MAX_DAYS}`);
@@ -155,9 +161,10 @@ CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;
 CREATE TABLE gap_events (id bigserial, task_id text, task_type text, event text, at timestamptz default now(), reason text, detail jsonb default '{}');
 CREATE TABLE task_dispatches (task_id text primary key, work_key text);
 CREATE TABLE lease_events (id bigserial, task_id text, agent_name text, ip_hash text, event text, at timestamptz default now(), meta jsonb default '{}');
-CREATE TABLE contribution_tasks (id uuid primary key default gen_random_uuid(), task_type text, source text, created_at timestamptz default now(), closed_at timestamptz, closed_reason text);
+CREATE TABLE contribution_tasks (id uuid primary key default gen_random_uuid(), task_type text, source text, target jsonb default '{}', created_at timestamptz default now(), closed_at timestamptz, closed_reason text);
 CREATE TABLE web_request_coverage (task_id uuid, politician_id text, requested_at timestamptz, gap_task_id text, gap_arm text);
-CREATE TABLE contributions (id uuid primary key default gen_random_uuid(), contribution_type text, payload jsonb default '{}', task_id text, agent_name text, status text, agree_count int, disagree_count int, unsure_count int, verified_at timestamptz, reviewed_by text, reviewed_at timestamptz, applied_politician_id uuid, created_at timestamptz default now(), applied_at timestamptz);
+CREATE TABLE contributions (id uuid primary key default gen_random_uuid(), contribution_type text, payload jsonb default '{}', task_id text, agent_name text, status text, agree_count int, disagree_count int, unsure_count int, verified_at timestamptz, reviewed_by text, reviewed_at timestamptz, applied_politician_id uuid, created_at timestamptz default now(), applied_at timestamptz, last_activity text, last_activity_at timestamptz);
+CREATE TABLE strong_adjudications (id uuid default gen_random_uuid(), task_id text, contribution_id text, status text, verdict text, finalized_at timestamptz, reasoning text, cause_note text);
 CREATE TABLE contribution_votes (id uuid default gen_random_uuid(), contribution_id uuid, verdict text, evidence_url text, note text, agent_name text, created_at timestamptz default now(), weight smallint);
 CREATE TABLE verify_dispatches (contribution_id uuid, ip_hash text, agent_name text, dispatched_at timestamptz);
 CREATE TABLE jev_decisions (id bigserial, subject_type text, subject_id text, question text, choice text, probability numeric, model text, state jsonb, asked_at timestamptz default now());
@@ -246,4 +253,51 @@ Deno.test("行為：Jev 系統票與系統判定從 jev_decisions 來，只回�
     const late = await kindsOf(db, "p_since => now() - interval '1 hour', p_until => now() + interval '1 minute'");
     assert(!late.includes("system_vote"));
   });
+});
+
+Deno.test("行為：爭議與強模型事件（disputed／strong_claim／strong_finalized），不回理由與備註", async () => {
+  await withDb(async (db) => {
+    const TID = "33333333-3333-3333-3333-333333333333";
+    const AID = "44444444-4444-4444-4444-444444444444";
+    await db.exec(`
+      INSERT INTO contribution_tasks(id, task_type, source, target, created_at) VALUES
+        ('${TID}', 'adjudicate', 'auto_dispute', '{"contribution_id":"${CID}","requires_tier":"strong","reason":"投太多輪"}', now() - interval '40 minutes');
+      INSERT INTO lease_events(task_id, agent_name, ip_hash, event, at) VALUES ('${TID}', '強模型甲', 'secret-hash', 'issued', now() - interval '30 minutes');
+      INSERT INTO contributions(id, contribution_type, payload, agent_name, status, reviewed_by, created_at)
+        VALUES ('${AID}', 'adjudication', '{"contribution_id":"${CID}","verdict":"reject","reason":"私人理由"}', 'opus', 'applied', 'strong-adjudication', now() - interval '20 minutes');
+      INSERT INTO strong_adjudications(task_id, contribution_id, status, verdict, finalized_at, reasoning, cause_note)
+        VALUES ('${TID}', '${CID}', 'finalized', 'reject', now() - interval '19 minutes', '私人推理', '私人原因'),
+               ('${TID}', '99999999-9999-9999-9999-999999999999', 'finalized', 'uphold', now() - interval '5 minutes', '私人推理', '私人原因');`);
+    const rows = (await db.query<{ kind: string; agent_name: string | null; detail: Record<string, unknown> }>(
+      `SELECT kind, agent_name, detail FROM trace_events(p_since => now() - interval '1 hour', p_until => now() + interval '1 minute')`)).rows;
+    const by = (k: string) => rows.filter((r) => r.kind === k);
+    assertEquals(by("disputed").length, 1);
+    assertEquals([by("disputed")[0].detail.overvoted, by("disputed")[0].detail.strong], [true, true]);
+    assertEquals(by("strong_claim").length, 1);
+    assertEquals(by("strong_claim")[0].agent_name, "強模型甲");
+    // 定案：裁決交件那筆＋表裡另一件（第一筆在 30 分鐘內已有裁決交件，不重複）
+    assertEquals(by("strong_finalized").map((r) => r.detail.verdict).sort(), ["reject", "uphold"]);
+    const text = JSON.stringify(rows);
+    for (const bad of ["私人理由", "私人推理", "私人原因", "secret-hash", "strong-adjudication"]) assert(!text.includes(bad), `回了 ${bad}`);
+    const one = await kindsOf(db, `p_contribution_id => '${CID}', p_since => now() - interval '1 hour', p_until => now() + interval '1 minute'`);
+    for (const k of ["disputed", "strong_claim", "strong_finalized"]) assert(one.includes(k), `交件模式缺 ${k}：${one}`);
+    // 仍停在 disputed 且還沒有裁決任務的，用狀態變更時間
+    await db.exec(`UPDATE contributions SET status = 'disputed', last_activity = 'status:disputed', last_activity_at = now() - interval '2 minutes' WHERE id = '${CID}'; DELETE FROM contribution_tasks;`);
+    const d2 = await kindsOf(db, "p_since => now() - interval '1 hour', p_until => now() + interval '1 minute'");
+    assert(d2.includes("disputed"));
+  });
+});
+
+Deno.test("還原驗證：拿掉強模型分支時限 → 紅", () => {
+  const noBound = mutate(REAL, "s.finalized_at >= GREATEST(v_since, now() - interval '14 days')", "s.finalized_at >= v_since");
+  assert(problemsOf(noBound, leaseDays).some((p) => p.includes("沒有 >= 時限")));
+  const noLease = mutate(REAL, "l.at >= GREATEST(v_since, now() - interval '13 days') AND l.at < v_until AND (v_all OR c.id", "l.at < v_until AND (v_all OR c.id");
+  assert(problemsOf(noLease, leaseDays).some((p) => p.includes("沒有 >= 時限")));
+});
+
+Deno.test("還原驗證：strong_adjudications 多讀 reasoning／cause_note／model → 紅", () => {
+  for (const col of ["reasoning", "cause_note", "model", "report_response"]) {
+    const bad = mutate(REAL, "jsonb_build_object('verdict', s.verdict,", `jsonb_build_object('x', s.${col}, 'verdict', s.verdict,`);
+    assert(problemsOf(bad, leaseDays).some((p) => p.includes(`s.${col}`)), `${col} 應該被抓到`);
+  }
 });

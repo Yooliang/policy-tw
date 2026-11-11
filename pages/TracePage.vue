@@ -11,7 +11,7 @@ import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { fetchNames, fetchScoped, fetchWindow, probeUuid, searchPeople, type PersonHit, type Scope, type TraceResult } from '../lib/trace-api'
 import {
-  COUNT_LABEL, nodeCounts, parseTarget, systemVoteBreakdown, personFromTaskId, taipeiFull, taskTypeOfId, toItems, topActive,
+  COUNT_LABEL, nodeCounts, parseTarget, strongBreakdown, systemVoteBreakdown, personFromTaskId, taipeiFull, taskTypeOfId, toItems, topActive,
   type Active, type NodeId, type TraceItem,
 } from '../lib/trace'
 import { taskTypeLabel } from '../lib/task-labels'
@@ -58,8 +58,9 @@ const currentIndex = computed(() => {
 })
 const totals = computed(() => nodeCounts(items.value))
 const totalChips = computed(() => (Object.keys(COUNT_LABEL) as NodeId[])
-  .filter((n) => n !== 'queue' && n !== 'jevVote')
+  .filter((n) => n !== 'queue' && n !== 'jevVote' && n !== 'strongLane')
   .map((n) => ({ key: n, label: COUNT_LABEL[n] as string, n: totals.value[n] ?? 0 })))
+const strongCounts = computed(() => strongBreakdown(items.value))
 const sysVotes = computed(() => systemVoteBreakdown(items.value))
 const top = computed(() => (mode.value === 'window' ? topActive(items.value, 10) : []))
 
@@ -320,6 +321,7 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
         </ul>
         <ul class="flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600" aria-label="這段時間各節點的事件數">
           <li v-for="c in totalChips" :key="c.key" class="tabular-nums">{{ c.label }} <b class="text-slate-900">{{ c.n.toLocaleString('zh-TW') }}</b></li>
+          <li class="tabular-nums">強模型 認領 <b class="text-slate-900">{{ strongCounts.claim.toLocaleString('zh-TW') }}</b>／定案 <b class="text-slate-900">{{ strongCounts.finalized.toLocaleString('zh-TW') }}</b>（駁回 {{ strongCounts.rejected.toLocaleString('zh-TW') }}）；強模型認領也算在「派出」裡</li>
           <li class="tabular-nums">系統票 <b class="text-slate-900">{{ (sysVotes.supported + sysVotes.notSupported + sysVotes.other).toLocaleString('zh-TW') }}</b>（來源撐得住 {{ sysVotes.supported.toLocaleString('zh-TW') }}／撐不住 {{ sysVotes.notSupported.toLocaleString('zh-TW') }}）</li>
         </ul>
       </section>
