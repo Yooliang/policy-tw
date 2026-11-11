@@ -46,6 +46,8 @@ const KINDS: Record<string, KindInfo> = {
   submitted: { group: 'submit', route: ['dispatcher', 'submit', 'jevSort', 'queue'] },
   verify_dispatched: { group: 'verify', route: ['dispatcher', 'vote'] },
   vote: { group: 'verify', route: ['vote'] },
+  system_vote: { group: 'verify', route: ['jevVote', 'vote'] },
+  system_check: { group: 'verify', route: ['jevSort'] },
   verified: { group: 'verify', route: ['vote'] },
   applied: { group: 'apply', route: ['vote', 'applied'] },
   rejected: { group: 'reject', route: ['vote', 'rejected'] },
@@ -74,9 +76,6 @@ export const GROUP_LABEL: Record<KindGroup, string> = {
   check: '查核',
 }
 
-/** 系統票：投票的是 Jev（或顯示名以「系統」開頭） */
-export const isSystemVoter = (e: TraceEvent): boolean => /^(jev|系統)/i.test(e.agent_name ?? '')
-
 const detailText = (e: TraceEvent, key: string): string => {
   const v = e.detail?.[key]
   return typeof v === 'string' ? v : ''
@@ -96,14 +95,14 @@ export function eventRoute(e: TraceEvent): NodeId[] {
   }
   if (e.kind === 'task_created') return detailText(e, 'source') === 'web_request' ? ['visitor', 'card', 'queue'] : ['queue']
   if (e.kind === 'check') return detailText(e, 'outcome') === 'not_found' ? ['submit', 'notfound', 'cooldown'] : ['submit']
-  // 系統票（Jev）：從 Jev 系統票走到投票
-  if (e.kind === 'vote' && isSystemVoter(e)) return ['jevVote', 'vote']
   return KINDS[e.kind]?.route ?? ['queue']
 }
 
 const GAP_REASON: Record<string, string> = { filled: '缺口已補完', window: '不在開放期間' }
 const CHECK_OUTCOME: Record<string, string> = { not_found: '查無', confirmed: '確認沒有變動', unreachable: '連不上來源' }
 const CLOSE_REASON: Record<string, string> = { applied: '落庫後結案', expired: '到期結案', manual: '維護者結案', merged: '併入別件', rejected: '退件後結案' }
+const SOURCE_CHOICE: Record<string, string> = { supported: '來源撐得住', not_supported: '來源撐不住', cannot_tell: '無法判斷' }
+const CHECK_QUESTION: Record<string, string> = { followup: '追問判定', new_person: '新人物判定', second_source: '第二來源判定', clarify_kind: '釐清分類' }
 const VERDICT: Record<string, string> = { agree: '同意', disagree: '反對', unsure: '不確定', not_supported: '不成立' }
 const CONTRIBUTION_TYPE: Record<string, string> = {
   policy: '政見', politician: '人物資料', candidacy: '參選紀錄', no_change: '查無回報', task_suggestion: '任務提議',
@@ -132,6 +131,11 @@ export function eventText(e: TraceEvent): string {
     case 'verified': return '同意票夠了，等待落庫'
     case 'verify_dispatched': return `驗證票派給${who || '一位代理'}`
     case 'vote': return `${who || '有代理'}投了「${VERDICT[detailText(e, 'verdict')] ?? '一票'}」`
+    case 'system_vote': {
+      const n = e.detail?.supported_sources
+      return `Jev 系統票：${SOURCE_CHOICE[detailText(e, 'choice')] ?? '已判定'}${typeof n === 'number' ? `（核得過 ${n} 個獨立來源）` : ''}`
+    }
+    case 'system_check': return `Jev ${CHECK_QUESTION[detailText(e, 'question')] ?? '系統判定'}${SOURCE_CHOICE[detailText(e, 'choice')] ? `：${SOURCE_CHOICE[detailText(e, 'choice')]}` : ''}`
     case 'applied': return '落庫上線'
     case 'rejected': return '退件，不上線'
     case 'check': {
@@ -190,7 +194,8 @@ export function countNode(e: TraceEvent): NodeId | null {
     case 'gap_closed': return 'queue'
     case 'lease_issued': case 'verify_dispatched': return 'dispatcher'
     case 'submitted': return detailText(e, 'type') === 'task_suggestion' ? 'suggest' : 'submit'
-    case 'vote': return isSystemVoter(e) ? 'jevVote' : 'vote'
+    case 'vote': return 'vote'
+    case 'system_vote': return 'jevVote'
     case 'applied': return 'applied'
     case 'rejected': return 'rejected'
     case 'check': return detailText(e, 'outcome') === 'not_found' ? 'notfound' : null
@@ -201,6 +206,20 @@ export function countNode(e: TraceEvent): NodeId | null {
 }
 
 export type NodeCounts = Partial<Record<NodeId, number>>
+
+/** 前 upTo 筆事件裡系統票各選項的數量（支持／不支持／無法判斷） */
+export function systemVoteBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { supported: number; notSupported: number; other: number } {
+  const out = { supported: 0, notSupported: 0, other: 0 }
+  const last = Math.min(upTo, items.length - 1)
+  for (let i = 0; i <= last; i++) {
+    if (items[i].kind !== 'system_vote') continue
+    const c = typeof items[i].detail?.choice === 'string' ? items[i].detail.choice : ''
+    if (c === 'supported') out.supported++
+    else if (c === 'not_supported') out.notSupported++
+    else out.other++
+  }
+  return out
+}
 
 /** 前 upTo 筆事件（含）的各節點計數；items 須已排序 */
 export function nodeCounts(items: readonly TraceItem[], upTo: number = items.length - 1): NodeCounts {

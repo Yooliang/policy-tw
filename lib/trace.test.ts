@@ -1,6 +1,6 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  dedupe, eventRoute, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
+  dedupe, eventRoute, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
   type NodeId, type TraceEvent,
 } from './trace.ts'
 import { BASE_H, BASE_W, LINKS, NODE_DEFS, NODE_H, NODE_W, anchorPoint, computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
@@ -35,8 +35,10 @@ Deno.test('eventRoute：交件依型別、查核依結果、系統票走 Jev', (
   assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'not_found' } })), ['submit', 'notfound', 'cooldown'])
   assertEquals(eventRoute(ev({ kind: 'check', detail: { outcome: 'confirmed' } })), ['submit'])
   assertEquals(eventRoute(ev({ kind: 'verify_dispatched' })), ['dispatcher', 'vote'])
-  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: 'Jev' })), ['jevVote', 'vote'])
-  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: '小明' })), ['vote'])
+  assertEquals(eventRoute(ev({ kind: 'system_vote', agent_name: 'Jev' })), ['jevVote', 'vote'])
+  assertEquals(eventRoute(ev({ kind: 'system_check', agent_name: 'Jev' })), ['jevSort'])
+  // 不再用名稱判系統票：投票表裡叫 Jev 的也只是一般投票
+  assertEquals(eventRoute(ev({ kind: 'vote', agent_name: 'Jev' })), ['vote'])
   assertEquals(eventRoute(ev({ kind: 'applied' })), ['vote', 'applied'])
   assertEquals(eventRoute(ev({ kind: 'rejected' })), ['vote', 'rejected'])
   assertEquals(eventRoute(ev({ kind: 'gap_opened' })), ['detector', 'card', 'queue'])
@@ -46,7 +48,7 @@ Deno.test('eventRoute：交件依型別、查核依結果、系統票走 Jev', (
 })
 
 Deno.test('eventText：純中文、不帶編號與表名', () => {
-  const kinds = ['gap_opened', 'gap_reopened', 'gap_closed', 'lease_issued', 'lease_reported', 'lease_released', 'lease_expired', 'task_created', 'task_closed',
+  const kinds = ['system_vote', 'system_check', 'gap_opened', 'gap_reopened', 'gap_closed', 'lease_issued', 'lease_reported', 'lease_released', 'lease_expired', 'task_created', 'task_closed',
     'request_merged', 'submitted', 'verified', 'verify_dispatched', 'vote', 'applied', 'rejected', 'check']
   for (const kind of kinds) {
     const t = eventText(ev({ kind, task_id: 'auto:x:' + PID, agent_name: '小明', detail: { verdict: 'agree', outcome: 'not_found', type: 'policy' } }))
@@ -65,7 +67,10 @@ Deno.test('nodeCounts／indexAtOrBefore', () => {
     ev({ at: '2026-11-11T06:00:00Z', kind: 'applied' }),
   ])
   assertEquals(nodeCounts(items), { dispatcher: 2, vote: 1, notfound: 1, applied: 1 })
-  assertEquals(nodeCounts(toItems([ev({ kind: 'vote', agent_name: 'Jev' }), ev({ kind: 'vote', agent_name: '小明' })])), { jevVote: 1, vote: 1 })
+  const sys = toItems([ev({ kind: 'system_vote', agent_name: 'Jev', detail: { choice: 'supported', supported_sources: 2 } }), ev({ kind: 'system_vote', agent_name: 'Jev', detail: { choice: 'not_supported' } }), ev({ kind: 'system_vote', detail: { choice: 'cannot_tell' } }), ev({ kind: 'vote', agent_name: 'Jev' }), ev({ kind: 'system_check', detail: { question: 'second_source' } })])
+  assertEquals(nodeCounts(sys), { jevVote: 3, vote: 1 })
+  assertEquals(systemVoteBreakdown(sys), { supported: 1, notSupported: 1, other: 1 })
+  assertEquals(systemVoteBreakdown(sys, 1), { supported: 1, notSupported: 0, other: 0 })
   assertEquals(nodeCounts(items, 1), { dispatcher: 2 })
   assertEquals(indexAtOrBefore(items, Date.parse('2026-11-11T03:30:00Z')), 2)
   assertEquals(indexAtOrBefore(items, Date.parse('2026-11-11T00:00:00Z')), -1)
@@ -213,7 +218,7 @@ Deno.test('版面：所有事件會用到的相鄰節點都找得到直角連線
 Deno.test('事件對應：每個事件走的相鄰節點都有線（不會憑空飛過去）', () => {
   const L = computeLayout(697)
   const kinds = ['gap_opened', 'gap_reopened', 'gap_closed', 'lease_issued', 'lease_reported', 'lease_released', 'lease_expired', 'task_created', 'task_closed',
-    'request_merged', 'submitted', 'verified', 'verify_dispatched', 'vote', 'applied', 'rejected', 'check']
+    'request_merged', 'submitted', 'verified', 'verify_dispatched', 'vote', 'applied', 'rejected', 'check', 'system_vote', 'system_check']
   for (const kind of kinds) for (const detail of [{}, { type: 'task_suggestion' }, { type: 'no_change' }, { outcome: 'not_found' }, { source: 'web_request' }]) for (const agent of [null, 'Jev']) {
     const r = eventRoute(ev({ kind, detail, agent_name: agent }))
     for (let i = 0; i < r.length - 1; i++) {
