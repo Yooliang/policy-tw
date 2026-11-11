@@ -202,6 +202,8 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 ## 5. 怎麼查（唯讀；`npx -y supabase@2 db query --linked -f <檔>`，檔案第一行 `SET default_transaction_read_only = on;`，一檔一句）
 
+**/trace 可重播（2026-11-11）**：不想寫 SQL 時，到 `/trace` 貼任務編號、交件編號、人物編號或人名，就能看缺口開關、認領、交件、驗證票派出、投票、落庫或退件、查無冷卻的真實時間順序；不指定就重播近 4 小時全站。資料來自 SQL 函式 `trace_events()`（`SECURITY DEFINER`，只回事件摘要與代理顯示名；回看最多 14 天，驗證票派出只看近 7 天，認領事件 11-11 起才有），守門 `_shared/trace-events.test.ts`。
+
 **A. 佇列組成與健康度（每臂列數、可派、冷卻、插隊、近期派出）**
 
 ```sql

@@ -191,6 +191,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/Queue.vue'),
   },
   {
+    // 重播派工流動：用流程圖重播派工的真實事件（指定任務／交件／人物，或近 4 小時全站）；瀏覽器渲染、不收錄、不進網站地圖
+    path: '/trace/:id?',
+    name: 'trace',
+    component: () => import('../pages/TracePage.vue'),
+  },
+  {
     // 派工日程（#703）：主控台「派工」頁的公開版，只讀、不自動更新；瀏覽器渲染、不收錄
     path: '/dispatch',
     name: 'dispatch',

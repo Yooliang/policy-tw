@@ -268,6 +268,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
     <div class="flex items-center justify-between gap-2">
       <p class="text-slate-400 tabular-nums">{{ refreshedAt ? `更新於 ${hms(refreshedAt)}` : '' }}</p>
       <div class="flex items-center gap-2">
+      <router-link to="/trace" class="rounded border border-slate-300 px-2.5 py-1 text-xs hover:bg-slate-50">重播流動</router-link>
       <span class="inline-flex overflow-hidden rounded border border-slate-300 text-xs">
         <button type="button" class="px-2.5 py-1" :class="groupBy === 'type' ? 'bg-slate-100' : ''" @click="groupBy = 'type'">依類型</button>
         <button type="button" class="border-l border-slate-300 px-2.5 py-1" :class="groupBy === 'source' ? 'bg-slate-100' : ''" @click="groupBy = 'source'">依來源</button>
