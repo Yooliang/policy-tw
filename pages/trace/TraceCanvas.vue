@@ -30,7 +30,7 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const DOT_LIFE = 1.4 // 秒（真實時間）
 const EVENT_SEC = 1.2 // events 模式一件事走多久（speed 1）
 const MAX_DOTS = 160
-// 流程圖是 697×820 等比縮放；手機太窄時字會小到看不清，所以最窄畫 520，超出的用左右捲動看
+// 流程圖是 697×660 等比縮放；手機太窄時字會小到看不清，所以最窄畫 520，超出的用左右捲動看
 const MIN_WIDTH = 520
 
 interface Dot { path: Pt[]; len: number; color: string; born: number; flash: NodeId | null; end: NodeId; arrived: boolean }

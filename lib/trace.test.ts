@@ -95,7 +95,7 @@ Deno.test('gapText／timeSlices', () => {
   assertEquals(timeSlices(0, 10, 4), [[0, 4], [4, 8], [8, 10]])
 })
 
-// ---- 版面（維護者 2026-11-11 定稿：17 個節點、23 條線、基準畫布 697×820） ----
+// ---- 版面（維護者 2026-11-11 定稿：17 個節點、23 條線、基準畫布 697×660） ----
 
 const WIDTHS = [520, 697, 768, 1024, 1440]
 const EXPECTED_NODES: Record<string, [number, number]> = {
@@ -115,12 +115,12 @@ const EXPECTED_KINDS: Record<string, string> = {
   vote: 'agent', visitor: 'agent', suggest: 'agent', submit: 'agent', jevSort: 'jev', jevVote: 'jev', applied: 'end', rejected: 'end',
 }
 
-Deno.test('版面：17 個節點、全 126×36、中心座標與框型照維護者定稿、基準畫布 697×820', () => {
-  assertEquals([BASE_W, BASE_H, NODE_W, NODE_H], [697, 820, 126, 36])
+Deno.test('版面：17 個節點、全 126×36、中心座標與框型照維護者定稿、基準畫布 697×660', () => {
+  assertEquals([BASE_W, BASE_H, NODE_W, NODE_H], [697, 660, 126, 36])
   assertEquals(NODE_DEFS.length, 17)
   const L = computeLayout(BASE_W)
   assertEquals(L.width, 697)
-  assertEquals(L.height, 820)
+  assertEquals(L.height, 660)
   for (const [id, [cx, cy]] of Object.entries(EXPECTED_NODES)) {
     const n = L.nodes[id as NodeId]
     assertEquals([n.cx, n.cy, n.w, n.h], [cx, cy, 126, 36], id)

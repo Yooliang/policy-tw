@@ -1,10 +1,10 @@
 // /trace 流程圖的版面（維護者 2026-11-11 定稿）：17 個節點、23 條全直角的線。
-// 基準畫布 697×820，節點一律 126×36，寬度不同時等比縮放。純計算，不碰 DOM。
+// 基準畫布 697×660，節點一律 126×36，寬度不同時等比縮放。純計算，不碰 DOM。
 // 連接點：左右兩側各 3 個（index 0 上、1 中、2 下），上下兩側各 5 個（index 0 左 … 4 右）。
 import type { NodeId } from './trace'
 
 export const BASE_W = 697
-export const BASE_H = 820
+export const BASE_H = 660
 export const NODE_W = 126
 export const NODE_H = 36
 
