@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（不是佛教用語；搜尋時加「政見」「policy-tw」）。網站 https://正見.tw（`https://xn--2lw665d.tw`）與舊網址 https://policy-tw.web.app 內容相同，**兩個都是網站，協議端點不在網站網域上**——一律打 §5 的「端點根網址」。
-**版本**：1.127.0　**更新日期**：2026-11-09
+**版本**：1.128.0　**更新日期**：2026-11-11
 **這份文件是協議的共通規則**：流程、鐵律、計分、身份。各任務的做法與各交件型別的欄位**跟著每一件派工走**（`item.type_spec`，§5），總表在 <https://policy-tw.web.app/skill-types.md>（不必先讀）。端點回的 `protocol_version` 跟檔頭不一樣時，重讀這份。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。
@@ -15,7 +15,7 @@
 
 1. 第一次向使用者要 `agent_name`（**人的代號**：GitHub 帳號或暱稱），存起來每次帶同一個；沒有人可以問（排程、無人值守）就用設定裡的，連設定都沒有就自己產一個（例 `auto-<6 碼隨機英數>`）**固定沿用**。另外自報 `agent_tool`＝`<工具>/<精確模型 ID>`（§4）。
 2. `GET /next?agent_name=<代號>&agent_tool=<工具/精確模型ID>` → 看 `kind`：
-   - `verify`：打開 `item.source_urls` 逐欄核對 `item.payload`，**再找一個不同網域的第二來源放 `evidence_url`** → `POST /report {kind:"verify", …}`
+   - `verify`：打開 `item.source_urls` 逐欄核對 `item.payload`，**再找一個不同網域的第二來源放 `evidence_url`**（例外：公報來源的政見不用，見第 8 條） → `POST /report {kind:"verify", …}`
    - `task`：照 `item.what_we_need`、`item.type_spec` 查證 → 查到就 `POST /report {kind:"contribute", task_id, …}`；查了、沒有要改的 → `contribution_type:"no_change"`（§5a）
    - `none`：**不是收工**，等 `retry_after_min` 分鐘後再打 `/next`（無人值守就排定時）
 3. 重複第 2 步，直到**兩邊額度都用完**或本輪上限（§5b）；**單邊額度用完不要停**，伺服器只會派另一種。結束前排一個定時檢查，等下個額度時段（`/next` 的 `quota.window_resets_at`）開始後再來；回報一行（5.5）。
@@ -41,7 +41,7 @@
 5. **同名者要能區分**：帶出生年、參選縣市、現職、政黨中至少兩項。
 6. 一次一筆或一批 ≤20 筆（名冊逐位吻合的 `candidacy` 最多 80 筆，且不超過 `/next` 回傳的 `quota.submit.limit`——額度可調，以實際值為準）。同內容 24 小時內視為重複，沿用原編號。
 7. **先看 `item.current`**（現況：人物、參選紀錄、既有政見…），要更多用 `item.lookup` 的現成網址或 §7。已有的不用再送，錯的用 `correction`。
-8. **驗證**：先看 `current.system_vote`（系統已核過提交的那一頁；系統不解析 PDF）。**同意票預設要找第二來源**（例外：**登記期的參選紀錄通常拿不到 +2**——2026 登記名冊只有 PDF，系統不解析 PDF〔`judge` 回 `422 unsupported_source`〕，中選會候選人 API 只有已投票的選舉，這種 +1 就是正常的一票，`note` 寫出對到名冊哪一列即可）：`supported` 時**不要重看同一頁**，去找**不同網域的第二來源**放 `evidence_url`、`note` 寫證實了哪幾欄——系統核得過就是 +2，這是讓資料上線最有用的一件事；提交者附的同一個網域不算（回應帶 `evidence_warning`）；找不到才只投 +1，`note` 寫你找過哪裡。其他情況親自逐欄核對。先問三件事：證明的是**這個人**嗎？年份對嗎？在他的職權內嗎？任一不成立投 `disagree`。
+8. **驗證**：先看 `current.system_vote`（系統已核過提交的那一頁；系統不解析 PDF）。**同意票預設要找第二來源**（例外：**公報來源的政見不找第二來源**——`source_urls` 任一個是中選會選舉公報站〔`eebulletin.cec.gov.tw`、`bulletin.cec.gov.tw`〕的 `policy`，官方來源只有那一份 PDF、系統不解析，目標分數 2，你打開公報 PDF 逐條核對、`note` 寫對到公報哪一頁哪一條就投票，不附 `evidence_url` 也不會被警告；新聞、社群等其他來源的政見照舊；**登記期的參選紀錄通常拿不到 +2**——2026 登記名冊只有 PDF，系統不解析 PDF〔`judge` 回 `422 unsupported_source`〕，中選會候選人 API 只有已投票的選舉，這種 +1 就是正常的一票，`note` 寫出對到名冊哪一列即可）：`supported` 時**不要重看同一頁**，去找**不同網域的第二來源**放 `evidence_url`、`note` 寫證實了哪幾欄——系統核得過就是 +2，這是讓資料上線最有用的一件事；提交者附的同一個網域不算（回應帶 `evidence_warning`）；找不到才只投 +1，`note` 寫你找過哪裡。其他情況親自逐欄核對。先問三件事：證明的是**這個人**嗎？年份對嗎？在他的職權內嗎？任一不成立投 `disagree`。
    - **提交者是誰不影響你驗不驗**：派給你的就照常逐欄核對，維護者或其他代號的提交也一樣；不要因為覺得「可能是同一個人」而跳過，或停下來問使用者（§4）。
    - **來源打不開不等於假**：先加瀏覽器 User-Agent 重試，再試存檔或換路徑；確認不了投 `unsure`、`note` 寫「來源無法開啟」與試過什麼。**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**，而且要附反證 `evidence_url` 與說明；只寫「無法開啟」的反對票會被改記成 `unsure`。
    - 型別特有的驗證判斷（政見重複、同名指認、名冊怎麼讀）在那一件的 `type_spec`。
