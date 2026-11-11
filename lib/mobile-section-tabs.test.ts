@@ -9,21 +9,22 @@ Deno.test("路由對到頁籤：政見三頁，我的關注看 view=mine", () =>
 });
 
 Deno.test("參與與搜尋兩組", () => {
-  assertEquals(sectionTabsFor("/stats", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "party-flow", "ai", "tasks", "queue", "dispatch"]);
+  assertEquals(sectionTabsFor("/stats", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "party-flow", "ai", "tasks", "queue", "dispatch", "trace"]);
   assertEquals(sectionTabsFor("/parties", {})?.tabs.map((t) => t.key), ["search", "elections", "politicians", "parties"]);
   assertEquals(sectionTabsFor("/parties/flow", {})?.active, "party-flow");
-  assertEquals(sectionTabsFor("/parties/flow/", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "party-flow", "ai", "tasks", "queue", "dispatch"]);
+  assertEquals(sectionTabsFor("/parties/flow/", {})?.tabs.map((t) => t.key), ["stats", "skill", "community", "contributions", "stats-map", "party-flow", "ai", "tasks", "queue", "dispatch", "trace"]);
   assertEquals(sectionTabsFor("/search/", {})?.active, "search");
+  assertEquals(sectionTabsFor("/trace/auto:x:y", {})?.active, "trace");
 });
 
 Deno.test("左右鄰頁：第一頁沒有左鄰、最後一頁沒有右鄰", () => {
   const first = sectionTabsFor("/tracking", {})!;
-  const last = sectionTabsFor("/dispatch", {})!;
+  const last = sectionTabsFor("/trace", {})!;
   const i = (s: typeof first) => s.tabs.findIndex((t) => t.key === s.active);
   assertEquals(i(first), 0);
   assertEquals(i(last), last.tabs.length - 1);
   assertEquals(first.tabs[i(first) + 1]?.to, "/analysis");
-  assertEquals(last.tabs[i(last) - 1]?.to, "/queue");
+  assertEquals(last.tabs[i(last) - 1]?.to, "/dispatch");
 });
 
 Deno.test("詳情頁與其他頁不顯示頁籤", () => {

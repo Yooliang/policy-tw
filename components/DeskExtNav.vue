@@ -39,7 +39,7 @@ const POLICY: DeskGroup[] = [
 const JOIN: DeskGroup[] = [
   { key: 'join', title: '參與', blocks: [[link('stats', '貢獻統計', '/stats'), link('skill', '參與協議', '/skill'), link('community', '公民提問', '/community')]] },
   { key: 'board', title: '看板', blocks: [[link('contributions', 'AI 協作動態牆', '/contributions'), link('map', '參選地圖', '/stats/map'), link('party-flow', '政黨分流圖', '/parties/flow'), link('ai', 'AI 表現統計', '/ai')]] },
-  { key: 'work', title: '工作', blocks: [[link('tasks', '任務清單', '/tasks'), link('queue', '派工隊列', '/queue'), link('dispatch', '任務排派日程', '/dispatch')]] },
+  { key: 'work', title: '工作', blocks: [[link('tasks', '任務清單', '/tasks'), link('queue', '派工隊列', '/queue'), link('dispatch', '任務排派日程', '/dispatch'), link('trace', '重播', '/trace')]] },
 ]
 // 首頁區（首頁與「關於」合併，2026-10-31 小良哥）：首頁＋關於區各頁，分三組；名稱用頁面現有名稱（使用條款的頁面標題就是「使用條款」）
 const ABOUT: DeskGroup[] = [

@@ -109,6 +109,7 @@ const linkClass = 'block rounded-lg px-3 py-2.5 text-[15px] font-bold text-navy-
         <RouterLink to="/tasks" :class="linkClass">任務清單</RouterLink>
         <RouterLink to="/queue" :class="linkClass">派工隊列</RouterLink>
         <RouterLink to="/dispatch" :class="linkClass">任務排派日程</RouterLink>
+        <RouterLink to="/trace" :class="linkClass">重播</RouterLink>
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">正見</p>
         <RouterLink to="/vision" :class="linkClass">關於正見</RouterLink>
         <p class="px-3 pt-3 pb-1 text-xs font-black text-slate-400">支持</p>
