@@ -6,7 +6,7 @@
  * 「退件原因」只有退件才有：其餘路徑在這一層歸到灰色的「非退件」節點，每條線都走滿所有層，層與層之間加總永遠一致。
  * 線寬不用件數：每個模型各自正規化成 100（量大的模型不會把小模型擠沒）；件數另存在 raw，數量模式與提示用。
  */
-import { CONTRIBUTION_TYPE_LABEL, type ContribStatsRow, type VoteStatsRow } from './model-quality.ts'
+import { CONTRIBUTION_TYPE_LABEL, isSystemVoteModel, type ContribStatsRow, type VoteStatsRow } from './model-quality.ts'
 
 /** key3＝退件原因（交件、且只有退件才有）；舊資料或退路沒有時為 null／缺 */
 export interface FlowRow { layer: 'contrib' | 'vote'; model: string | null; key1: string | null; key2: string | null; key3?: string | null; n: number }
@@ -148,7 +148,7 @@ const OUTCOME: Record<string, { label: string; tone: Tone }> = {
 
 export function buildVoteFlow(rows: FlowRow[], order: readonly string[] = DEFAULT_VOTE_ORDER): FlowGraph {
   const v = rows.filter((r) => r.layer === 'vote' && r.model && r.key1 && VERDICT[r.key1])
-  const models = topKeys(sumBy(v, (r) => r.model, (r) => r.n), MAX_MODELS, (k) => k === '系統票（Jev）')
+  const models = topKeys(sumBy(v, (r) => r.model, (r) => r.n), MAX_MODELS, (k) => isSystemVoteModel(k))
   const tuples: Tuple[] = v.map((r) => {
     const model = models.has(r.model!) ? r.model! : OTHER_MODEL
     const ver = VERDICT[r.key1!]

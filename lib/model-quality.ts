@@ -159,7 +159,11 @@ export interface VoteModelSummary {
   rawTools: RawTool[]
 }
 
-export const SYSTEM_VOTE_MODEL = '系統票（Jev）'
+export const SYSTEM_VOTE_MODEL = '系統票（SystemOne）'
+/** 舊標籤（migration 20261111240000 之前後端回的值）；新舊都認，部署先後不影響顯示 */
+const LEGACY_SYSTEM_VOTE_MODEL = '系統票（Jev）'
+export const isSystemVoteModel = (model: string | null | undefined): boolean =>
+  model === SYSTEM_VOTE_MODEL || model === LEGACY_SYSTEM_VOTE_MODEL
 
 export function summarizeVotes(rows: readonly VoteStatsRow[]): { models: VoteModelSummary[]; system: VoteModelSummary | null } {
   const all = rows.map((r): VoteModelSummary => ({
@@ -171,8 +175,8 @@ export function summarizeVotes(rows: readonly VoteStatsRow[]): { models: VoteMod
     rawTools: (r.raw_tools ?? []).map((t) => ({ tool: t.tool, n: n(t.n) })),
   }))
   return {
-    models: all.filter((m) => m.model !== SYSTEM_VOTE_MODEL).sort(byVolume((m) => m.votes)),
-    system: all.find((m) => m.model === SYSTEM_VOTE_MODEL) ?? null,
+    models: all.filter((m) => !isSystemVoteModel(m.model)).sort(byVolume((m) => m.votes)),
+    system: all.find((m) => isSystemVoteModel(m.model)) ?? null,
   }
 }
 
