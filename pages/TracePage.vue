@@ -33,6 +33,7 @@ const loading = ref(false)
 const failed = ref(false)
 const unavailable = ref(false)
 const truncated = ref(false)
+const partial = ref(false)
 const notice = ref('')
 const candidates = ref<PersonHit[]>([])
 
@@ -92,6 +93,7 @@ function reset(next: Scope, result: TraceResult, label: string): void {
   windowStart.value = result.since
   windowMs.value = Math.max(1, result.until - result.since)
   truncated.value = result.truncated
+  partial.value = result.partial
   unavailable.value = result.unavailable
   subject.value = label
   position.value = 0
@@ -110,7 +112,13 @@ async function loadNames(ids: string[]): Promise<void> {
 }
 
 async function loadAll(my: number): Promise<void> {
-  const r = await fetchWindow()
+  let shown = false
+  const r = await fetchWindow(4, Date.now(), (part) => {
+    // 最近的時段先到：第一批就先畫，其餘補上後再整段重播
+    if (my !== seq || shown || part.rows.length === 0) return
+    shown = true
+    reset({ by: 'all' }, part, '全站近 4 小時')
+  })
   if (my !== seq) return
   reset({ by: 'all' }, r, '全站近 4 小時')
   void loadNames(topActive(items.value, 10).filter((a) => a.kind === 'person').map((a) => a.id))
@@ -274,6 +282,7 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
       </ul>
 
       <p v-if="notice" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">{{ notice }}</p>
+      <p v-if="partial" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">部分時段讀不到，畫面上的事件可能不完整。</p>
       <p v-if="unavailable" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">重播功能正在更新，請幾分鐘後再試。</p>
       <LoadError v-if="failed" inline message="暫時讀不到資料，請稍後重試" @retry="run(route.params.id as string | undefined)" />
 
