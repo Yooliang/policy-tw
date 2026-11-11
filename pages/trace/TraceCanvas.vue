@@ -30,12 +30,11 @@ const canvas = ref<HTMLCanvasElement | null>(null)
 const DOT_LIFE = 1.4 // 秒（真實時間）
 const EVENT_SEC = 1.2 // events 模式一件事走多久（speed 1）
 const MAX_DOTS = 160
-// 流程圖是 697×660 等比縮放；手機太窄時字會小到看不清，所以最窄畫 520，超出的用左右捲動看
-const MIN_WIDTH = 520
+// 流程圖是固定 1640×504、不縮放；容器放不下（含手機）就左右捲動
 
 interface Dot { path: Pt[]; len: number; color: string; born: number; flash: NodeId | null; end: NodeId; arrived: boolean }
 
-let layout: Layout = computeLayout(MIN_WIDTH)
+const layout: Layout = computeLayout()
 let ctx: CanvasRenderingContext2D | null = null
 let dpr = 1
 let raf = 0
@@ -60,10 +59,7 @@ function makeDot(e: TraceItem): Dot {
 
 function setupCanvas(): void {
   const el = canvas.value
-  const box = wrap.value
-  if (!el || !box) return
-  const w = Math.max(MIN_WIDTH, box.clientWidth)
-  layout = computeLayout(w)
+  if (!el) return
   dpr = Math.min(window.devicePixelRatio || 1, 3)
   el.width = Math.round(layout.width * dpr)
   el.height = Math.round(layout.height * dpr)
@@ -195,7 +191,7 @@ function fitFont(c: CanvasRenderingContext2D, text: string, base: number, maxW: 
   let size = base
   for (;;) {
     c.font = `${bold ? 'bold ' : ''}${size}px ${fontFamily}`
-    if (size <= 7 || c.measureText(text).width <= maxW) return
+    if (size <= 8 || c.measureText(text).width <= maxW) return
     size -= 0.5
   }
 }
@@ -221,7 +217,7 @@ function drawBox(c: CanvasRenderingContext2D, n: { kind: string; cx: number; cy:
   c.strokeStyle = stroke
   c.lineWidth = Math.max(1, (n.kind === 'end' ? 3.2 : 1.4) * s)
   c.stroke()
-  if (n.kind === 'jev') {
+  if (n.kind === 'systemone') {
     path(Math.max(3, 4 * s))
     c.lineWidth = Math.max(1, 1.2 * s)
     c.stroke()
@@ -232,36 +228,36 @@ function draw(): void {
   const c = ctx
   if (!c) return
   refreshCounts()
-  const s = layout.scale
+  const s = 1
   c.clearRect(0, 0, layout.width, layout.height)
   const hot = activeEdgeKeys()
   // 連線：不放文字
   for (const r of layout.routes) {
     const on = hot.has(`${r.from}>${r.to}`)
     c.strokeStyle = on ? '#0f172a' : LINE_COLOR
-    c.lineWidth = Math.max(1, (on ? 2.6 : 1.5) * Math.max(0.8, s))
-    c.setLineDash(r.style === 'dashed' ? [6 * Math.max(0.8, s), 4 * Math.max(0.8, s)] : [])
+    c.lineWidth = Math.max(1, (on ? 2.6 : 1.5) * 1)
+    c.setLineDash(r.style === 'dashed' ? [6 * 1, 4 * 1] : [])
     c.beginPath()
     r.pts.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])))
     c.stroke()
     c.setLineDash([])
-    arrow(c, r.pts[r.pts.length - 2], r.pts[r.pts.length - 1], on ? '#0f172a' : LINE_COLOR, Math.max(0.8, s))
+    arrow(c, r.pts[r.pts.length - 2], r.pts[r.pts.length - 1], on ? '#0f172a' : LINE_COLOR, 1)
   }
   // 節點
   for (const n of Object.values(layout.nodes)) {
     drawBox(c, n, glow[n.id] ?? 0, s)
     const cl = COUNT_LABEL[n.id]
     const num = counts[n.id]
-    const second = n.id === 'strongLane' ? `認領 ${strong.claim}／定案 ${strong.finalized}` : n.id === 'dispute' ? `轉裁決 ${(num ?? 0).toLocaleString('zh-TW')}` : cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : ''
+    const second = n.id === 'strongLane' ? `認領 ${strong.claim}／定案 ${strong.finalized}` : n.id === 'dispute' ? `轉裁決 ${(num ?? 0).toLocaleString('zh-TW')}` : cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : (n.sub ?? '')
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillStyle = '#0f172a'
-    fitFont(c, n.label, 10 * s, n.w - 12 * s, true)
-    c.fillText(n.label, n.cx, second ? n.cy - 6 * s : n.cy)
+    fitFont(c, n.label, 13 * s, n.w - 8 * s, true)
+    c.fillText(n.label, n.cx, second ? n.cy - 7 * s : n.cy)
     if (second) {
-      fitFont(c, second, 9 * s, n.w - 12 * s, false)
+      fitFont(c, second, 10 * s, n.w - 8 * s, false)
       c.fillStyle = num ? '#0369a1' : '#64748b'
-      c.fillText(second, n.cx, n.cy + 8 * s)
+      c.fillText(second, n.cx, n.cy + 9 * s)
     }
   }
   drawDots(c)
@@ -274,7 +270,7 @@ function drawDot(c: CanvasRenderingContext2D, d: Dot, t: number, alpha: number):
     c.globalAlpha = alpha * (1 - t)
     c.lineWidth = 2
     c.beginPath()
-    c.arc(n.cx, n.cy, (8 + t * 16) * Math.max(0.8, layout.scale), 0, Math.PI * 2)
+    c.arc(n.cx, n.cy, (8 + t * 16) * 1, 0, Math.PI * 2)
     c.stroke()
     c.globalAlpha = 1
     return
@@ -283,7 +279,7 @@ function drawDot(c: CanvasRenderingContext2D, d: Dot, t: number, alpha: number):
   c.globalAlpha = alpha
   c.fillStyle = d.color
   c.beginPath()
-  c.arc(x, y, 5 * Math.max(0.8, layout.scale), 0, Math.PI * 2)
+  c.arc(x, y, 5 * 1, 0, Math.PI * 2)
   c.fill()
   c.strokeStyle = '#ffffff'
   c.lineWidth = 1.5
@@ -319,7 +315,6 @@ function drawDots(c: CanvasRenderingContext2D): void {
 
 // ---- 生命週期 ----
 
-let ro: ResizeObserver | null = null
 const onVisibility = (): void => {
   hidden = document.hidden
   if (hidden) {
@@ -331,15 +326,10 @@ const onVisibility = (): void => {
 
 onMounted(() => {
   setupCanvas()
-  if (wrap.value && typeof ResizeObserver !== 'undefined') {
-    ro = new ResizeObserver(() => setupCanvas())
-    ro.observe(wrap.value)
-  }
   document.addEventListener('visibilitychange', onVisibility)
 })
 onBeforeUnmount(() => {
   if (raf) cancelAnimationFrame(raf)
-  ro?.disconnect()
   document.removeEventListener('visibilitychange', onVisibility)
 })
 
@@ -364,6 +354,6 @@ watch(() => [props.items, props.mode, props.reduced], () => {
 
 <template>
   <div ref="wrap" class="w-full overflow-x-auto">
-    <canvas ref="canvas" role="img" :aria-label="label" class="block mx-auto" style="touch-action: pan-x pan-y" />
+    <canvas ref="canvas" role="img" :aria-label="label" class="block" style="touch-action: pan-x pan-y" />
   </div>
 </template>
