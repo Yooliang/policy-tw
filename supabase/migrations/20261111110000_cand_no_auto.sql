@@ -80,7 +80,7 @@ RETURNS TABLE (politician_election_id INTEGER, politician_id UUID, election_type
 LANGUAGE sql STABLE SET enable_nestloop = off AS $fn$
   WITH
   en AS MATERIALIZED (SELECT (p_ignore_enabled OR COALESCE((SELECT s.enabled FROM cand_no_auto_settings s WHERE s.id = 1), false)) AS on_),
-  -- fresh 定義同 cec_roster_diff：近 3 天內抓成功的單位
+  -- fresh 定義同 cec_roster_diff：近 3 天內抓成功的單位（跟下面 cand_no_auto_mismatch 視圖各自一份，刻意不共用）
   fresh AS MATERIALIZED (
     SELECT u.election_type, replace(u.county, '臺', '台') AS county, replace(u.town, '臺', '台') AS town
       FROM cec_roster_units u WHERE u.status = 'ok' AND u.fetched_at > now() - INTERVAL '3 days'
@@ -252,6 +252,8 @@ DECLARE
   r RECORD;
   v_reverted INTEGER := 0; v_blocked INTEGER := 0; v_n INTEGER;
 BEGIN
+  -- 跟 apply 同一把鎖（阻塞等待；還原是人手動、可以等）：不跟寫入同時進行
+  PERFORM pg_advisory_xact_lock(hashtext('cand_no_auto_apply'));
   SELECT * INTO run FROM cand_no_auto_runs WHERE id = p_run_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'cand_no_auto_runs % 不存在', p_run_id; END IF;
   IF run.reverted_at IS NOT NULL THEN RAISE EXCEPTION 'run % 已經在 % 還原過', p_run_id, run.reverted_at; END IF;
@@ -291,6 +293,7 @@ GRANT EXECUTE ON FUNCTION cand_no_auto_plan(BOOLEAN) TO service_role;
 
 -- ── 5. 站上號次跟鏡像不一致（唯讀，只列不寫） ──────────────────
 -- 我方已有號次、鏡像同單位同名唯一對上（我們這邊也只有一列）、鏡像有號次而且跟站上不同的 filed 列。
+-- fresh 條件（近 3 天抓成功）在計畫函式與這個視圖各自寫一份，刻意不抽共用函式（同 cec_roster_diff 也是各自一份；抽出去要動 cec_roster_diff 的計畫，改動不小）；改 fresh 定義時三處一起看，cand-no-auto.test.ts 的還原驗證兩份都會抓。
 -- 實例（2026-11-11 乾跑對照）：站上三筆錯、鏡像對（中選會 JSON 核過）。系統不寫已有的號次（只補空白），這裡只讓人看得到，改正走更正流程。
 CREATE OR REPLACE VIEW cand_no_auto_mismatch AS
   WITH fresh AS MATERIALIZED (
@@ -328,6 +331,7 @@ CREATE OR REPLACE VIEW cand_no_auto_mismatch AS
    WHERE o.status = 'filed' AND o.cand_no IS NOT NULL AND rc.cand_no IS NOT NULL AND rc.cand_no <> o.cand_no;
 COMMENT ON VIEW cand_no_auto_mismatch IS
   '站上已有號次、但名冊鏡像（近 3 天抓成功的單位）同單位同名唯一對上且號次不同的 filed 參選紀錄：只列不寫（系統只補空白）。2026-11-11 乾跑實例三筆，中選會 JSON 核過都是站上錯、鏡像對；改正走更正流程';
+REVOKE ALL ON cand_no_auto_mismatch FROM PUBLIC, anon, authenticated;  -- 內部錯誤清單，不公開（主線裁，2026-11-11）
 GRANT SELECT ON cand_no_auto_mismatch TO service_role;
 
 -- ── 6. 現況視圖與排程 ──────────────────────────────────────────
@@ -346,6 +350,7 @@ CREATE OR REPLACE VIEW cand_no_auto_status AS
    WHERE s.id = 1;
 COMMENT ON VIEW cand_no_auto_status IS
   '號次系統寫入的現況（一列）：還有多少位等著寫（pending，排程跑完應歸零）、已寫（written）、已還原（reverted）、留給代理的（unresolved，依原因分）、站上號次跟鏡像不一致的（mismatch，視圖 cand_no_auto_mismatch，只列不寫）。不看開關（2026-11-11）';
+REVOKE ALL ON cand_no_auto_status FROM PUBLIC, anon, authenticated;  -- 內部清單，不公開（主線裁，2026-11-11）
 GRANT SELECT ON cand_no_auto_status TO service_role;
 
 DO $$

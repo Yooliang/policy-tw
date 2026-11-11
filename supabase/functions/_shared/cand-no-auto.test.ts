@@ -12,6 +12,7 @@
  *   7. revert：只還原現值仍是它寫的（被改過的算 blocked）、還原自動關開關、被還原的之後不再寫
  *   8. migration 本身不改任何參選紀錄
  *   9. 不一致視圖 cand_no_auto_mismatch：站上已有號次、鏡像唯一對上但不同的只列不寫
+ *      視圖不公開、revert 與 apply 同一把鎖；村里長：同鄉鎮不同里同名不寫、沒村里不寫、按村里單位查重複
  *  10. 還原驗證：拿掉單位 fresh 判斷、拿掉同名多筆判斷、拿掉重複號次判斷都要紅
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
@@ -35,7 +36,7 @@ CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, r
   contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
 `;
 
-interface Pe { id: number; name: string; county: string; type?: string; sub?: string; status?: string; no?: number | null; merged?: boolean }
+interface Pe { id: number; name: string; county: string; type?: string; sub?: string; village?: string; status?: string; no?: number | null; merged?: boolean }
 const PES: Pe[] = [];
 const pe = (id: number, name: string, county: string, o: Omit<Pe, "id" | "name" | "county"> = {}) => PES.push({ id, name, county, ...o });
 interface Ro { type: string; county: string; town?: string; unit: string; name: string; no: number | null; url: string }
@@ -73,7 +74,22 @@ pe(16, "辰O", "苗栗縣", { status: "filed", type: "鄉鎮市長" });
 // K 彰化縣：之後測還原用的兩位（寫了 1、2 號）
 unit("u-ch", "彰化縣"); ro("u-ch", "彰化縣", "巳P", 1); ro("u-ch", "彰化縣", "午Q", 2); pe(17, "巳P", "彰化縣", { status: "filed" }); pe(18, "午Q", "彰化縣", { status: "filed" });
 
-const WRITABLE = [1, 12, 17, 18]; // A、H、K 兩位
+// 村里長（鏡像只到鄉鎮，單位 縣市|鄉鎮；我們的號次單位到村里）
+const V = { type: "村里長" };
+// V1 桃園市平鎮區：同鄉鎮兩個里各一位同名（子V）→ ambiguous_ours，兩位都不寫（兩個里的號次單位不同，同輪重複那道備援蓋不到）
+unit("u-v1", "桃園市", { ...V, town: "平鎮區" }); ro("u-v1", "桃園市", "子V", 1, { ...V, town: "平鎮區", unit: "桃園市|平鎮區" });
+pe(20, "子V", "桃園市", { ...V, status: "filed", sub: "平鎮區", village: "里甲" }); pe(21, "子V", "桃園市", { ...V, status: "filed", sub: "平鎮區", village: "里乙" });
+// V2 宜蘭縣：我方沒記村里（也沒記鄉鎮）→ no_unit
+unit("u-v2", "宜蘭縣", { ...V, town: "宜蘭市" }); ro("u-v2", "宜蘭縣", "丑V", 1, { ...V, town: "宜蘭市", unit: "宜蘭縣|宜蘭市" });
+pe(22, "丑V", "宜蘭縣", { ...V, status: "filed" });
+// V3 台北市中山區：不同里各自從 1 起，寅V（里甲）與卯V（里乙）都是 1 號 → 都寫；
+//    己V（里丙）鏡像也是 1 號，但里丙已有庚V 用 1 號 → duplicate_in_unit（按村里單位檢查）
+unit("u-v3", "台北市", { ...V, town: "中山區" });
+for (const [n, no] of [["寅V", 1], ["卯V", 1], ["己V", 1]] as const) ro("u-v3", "台北市", n, no, { ...V, town: "中山區", unit: "台北市|中山區" });
+pe(23, "寅V", "台北市", { ...V, status: "filed", sub: "中山區", village: "里甲" }); pe(24, "卯V", "台北市", { ...V, status: "filed", sub: "中山區", village: "里乙" });
+pe(26, "庚V", "台北市", { ...V, status: "filed", sub: "中山區", village: "里丙", no: 1 }); pe(27, "己V", "台北市", { ...V, status: "filed", sub: "中山區", village: "里丙" });
+
+const WRITABLE = [1, 12, 17, 18, 23, 24]; // A、H、K 兩位、V3 兩位
 const seedSql = (): string => {
   const out: string[] = [];
   for (const u of UNITS) {
@@ -86,7 +102,7 @@ const seedSql = (): string => {
   }
   for (const p of PES) {
     out.push(`INSERT INTO politicians (id, name, region, merged_into) VALUES ('${U(p.id)}', '${p.name}', '${p.county}', ${p.merged ? `'${U(999)}'` : "NULL"});`);
-    out.push(`INSERT INTO regions VALUES (${p.id}, '${p.county}', ${p.sub ? `'${p.sub}'` : "NULL"}, NULL);`);
+    out.push(`INSERT INTO regions VALUES (${p.id}, '${p.county}', ${p.sub ? `'${p.sub}'` : "NULL"}, ${p.village ? `'${p.village}'` : "NULL"});`);
     out.push(`INSERT INTO politician_elections (id, politician_id, election_id, election_type, region_id, candidacy_status, cand_no)
       VALUES (${p.id}, '${U(p.id)}', 2026, '${p.type ?? "縣市長"}', ${p.id}, '${p.status ?? "filed"}', ${p.no ?? "NULL"});`);
   }
@@ -133,7 +149,12 @@ Deno.test("計畫：唯一對上才寫，其餘各有原因碼；不該碰的人
   assertEquals(reasonOf(p, 9), "roster_no_cand_no");
   assertEquals([reasonOf(p, 10), reasonOf(p, 11)], ["duplicate_in_unit", "duplicate_in_unit"], "同一輪兩位要寫同號次：都不寫");
   assertEquals(reasonOf(p, 16), "no_unit");
-  for (const id of [7, 13, 14, 15]) assert(!p.some((x) => Number(x.politician_election_id) === id), `pe${id} 不在計畫裡（有號次／退選／人物被併走）`);
+  // 村里長：同鄉鎮兩個里同名兩人不寫；我方沒村里不寫；不同里各自從 1 起都寫；同一個里已有人用這個號次不寫
+  assertEquals([reasonOf(p, 20), reasonOf(p, 21)], ["ambiguous_ours", "ambiguous_ours"]);
+  assertEquals(reasonOf(p, 22), "no_unit");
+  assertEquals(p.filter((x) => [23, 24].includes(Number(x.politician_election_id))).map((x) => [x.action, x.cand_no]), [["write", 1], ["write", 1]]);
+  assertEquals(reasonOf(p, 27), "duplicate_in_unit");
+  for (const id of [7, 13, 14, 15, 26]) assert(!p.some((x) => Number(x.politician_election_id) === id), `pe${id} 不在計畫裡（有號次／退選／人物被併走）`);
   await db.close();
 });
 
@@ -143,8 +164,8 @@ Deno.test("寫入：只補空白、每筆進 edit_history、留證據、一個 r
   assertEquals(res.written, WRITABLE.length);
   const st = await rows<{ id: number; cand_no: number | null; candidacy_status: string }>(db, `SELECT id, cand_no, candidacy_status FROM politician_elections ORDER BY id`);
   const by = (id: number) => st.find((s) => Number(s.id) === id)!;
-  assertEquals([by(1).cand_no, by(12).cand_no, by(17).cand_no, by(18).cand_no], [3, 2, 1, 2]);
-  for (const id of [2, 3, 4, 5, 6, 8, 9, 10, 11, 16]) assertEquals(by(id).cand_no, null, `pe${id} 不該被寫`);
+  assertEquals([by(1).cand_no, by(12).cand_no, by(17).cand_no, by(18).cand_no, by(23).cand_no, by(24).cand_no], [3, 2, 1, 2, 1, 1]);
+  for (const id of [2, 3, 4, 5, 6, 8, 9, 10, 11, 16, 20, 21, 22, 27]) assertEquals(by(id).cand_no, null, `pe${id} 不該被寫`);
   assertEquals([by(7).cand_no, by(14).cand_no], [2, 9], "已有號次的不動");
   assertEquals(by(13).cand_no, null, "退選的不寫");
   const eh = await rows<{ record_id: string; field: string; old_value: unknown; new_value: unknown; agent_name: string; contribution_id: string | null }>(db,
@@ -155,7 +176,7 @@ Deno.test("寫入：只補空白、每筆進 edit_history、留證據、一個 r
   const log = await rows<{ politician_election_id: number; result: string; reason: string | null; roster_name: string; cand_no: number }>(db,
     `SELECT politician_election_id, result, reason, roster_name, cand_no FROM cand_no_auto_log ORDER BY 1`);
   assertEquals(log.filter((l) => l.result === "written").map((l) => Number(l.politician_election_id)), WRITABLE);
-  assertEquals(log.filter((l) => l.result === "skipped").map((l) => [Number(l.politician_election_id), l.reason]), [[6, "duplicate_in_unit"], [10, "duplicate_in_unit"], [11, "duplicate_in_unit"]]);
+  assertEquals(log.filter((l) => l.result === "skipped").map((l) => [Number(l.politician_election_id), l.reason]), [[6, "duplicate_in_unit"], [10, "duplicate_in_unit"], [11, "duplicate_in_unit"], [27, "duplicate_in_unit"]]);
   assertEquals(log.find((l) => Number(l.politician_election_id) === 1)!.roster_name, "甲A");
   assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_runs`)).length, 1);
   // 再跑一次：沒有東西可寫、不留空 run、不重複寫履歷
@@ -166,7 +187,7 @@ Deno.test("寫入：只補空白、每筆進 edit_history、留證據、一個 r
   // 狀態視圖
   const s = (await rows<{ pending: number; written: number; unresolved: number }>(db, `SELECT pending, written, unresolved FROM cand_no_auto_status`))[0];
   assertEquals([Number(s.pending), Number(s.written)], [0, WRITABLE.length]);
-  assertEquals(Number(s.unresolved), 10);
+  assertEquals(Number(s.unresolved), 14);
   await db.close();
 });
 
@@ -179,7 +200,7 @@ Deno.test("batch_limit：一輪最多寫這麼多位，分幾輪寫完", async (
     const r = (await rows<{ r: Record<string, unknown> }>(db, `SELECT cand_no_auto_apply(2) AS r`))[0].r;
     if (r.written === 0) break;
   }
-  assertEquals((await rows(db, `SELECT 1 FROM politician_elections WHERE id IN (1,12,17,18) AND cand_no IS NOT NULL`)).length, 4);
+  assertEquals((await rows(db, `SELECT 1 FROM politician_elections WHERE id IN (1,12,17,18,23,24) AND cand_no IS NOT NULL`)).length, 6);
   await db.close();
 });
 
@@ -188,13 +209,13 @@ Deno.test("開關：預設關；關著 plan 一列都不回、apply 不做事、
   assertEquals(defaultEnabled, false, "上線時預設關");
   assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_plan()`)).length, 0);
   assertEquals((await rows<{ r: Record<string, unknown> }>(db, `SELECT cand_no_auto_apply() AS r`))[0].r.skipped, "disabled");
-  assertEquals((await rows(db, `SELECT 1 FROM politician_elections WHERE cand_no IS NOT NULL AND id <> 7 AND id <> 14`)).length, 0);
+  assertEquals((await rows(db, `SELECT 1 FROM politician_elections WHERE cand_no IS NOT NULL AND id NOT IN (7, 14, 26)`)).length, 0);
   const dry = (await rows<{ r: { dry_run: boolean; would_write: number; unresolved: Record<string, number>; by_type: Array<{ election_type: string; write: number }> } }>(db,
     `SELECT cand_no_auto_apply(NULL, true) AS r`))[0].r;
   assertEquals(dry.dry_run, true);
   assertEquals(Number(dry.would_write), WRITABLE.length);
-  assertEquals(dry.unresolved.ambiguous_ours, 2);
-  assertEquals(dry.unresolved.duplicate_in_unit, 3);
+  assertEquals(dry.unresolved.ambiguous_ours, 4);
+  assertEquals(dry.unresolved.duplicate_in_unit, 4);
   assertEquals(dry.by_type.find((t) => t.election_type === "鄉鎮市長")!.write, 1);
   assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_runs`)).length, 0, "乾跑不留 run");
   assertEquals((await rows(db, `SELECT pending FROM cand_no_auto_status`))[0].pending, WRITABLE.length, "狀態視圖不看開關");
@@ -209,19 +230,19 @@ Deno.test("還原：只還原現值仍是它寫的（被改過的算 blocked）�
   // 有人把 pe18 的號次改成 5（之後別人改過的不動）
   await db.exec(`UPDATE politician_elections SET cand_no = 5 WHERE id = 18`);
   const out = (await rows<{ r: { reverted: number; blocked: number; auto_disabled: boolean } }>(db, `SELECT cand_no_auto_revert(${run}, 'tester') AS r`))[0].r;
-  assertEquals([out.reverted, out.blocked, out.auto_disabled], [3, 1, true]);
-  const st = await rows<{ id: number; cand_no: number | null }>(db, `SELECT id, cand_no FROM politician_elections WHERE id IN (1, 12, 17, 18) ORDER BY id`);
-  assertEquals(st.map((s) => s.cand_no), [null, null, null, 5], "別人改過的 pe18 不動");
+  assertEquals([out.reverted, out.blocked, out.auto_disabled], [5, 1, true]);
+  const st = await rows<{ id: number; cand_no: number | null }>(db, `SELECT id, cand_no FROM politician_elections WHERE id IN (1, 12, 17, 18, 23, 24) ORDER BY id`);
+  assertEquals(st.map((s) => s.cand_no), [null, null, null, 5, null, null], "別人改過的 pe18 不動");
   assertEquals((await rows<{ enabled: boolean }>(db, `SELECT enabled FROM cand_no_auto_settings`))[0].enabled, false);
-  assertEquals((await rows(db, `SELECT 1 FROM edit_history WHERE agent_name = 'cand-no-auto' AND reverted_at IS NOT NULL AND reverted_by = 'tester'`)).length, 3);
-  assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_log WHERE result = 'reverted'`)).length, 3);
+  assertEquals((await rows(db, `SELECT 1 FROM edit_history WHERE agent_name = 'cand-no-auto' AND reverted_at IS NOT NULL AND reverted_by = 'tester'`)).length, 5);
+  assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_log WHERE result = 'reverted'`)).length, 5);
   let again = false;
   try { await db.query(`SELECT cand_no_auto_revert(${run})`); } catch { again = true; }
   assert(again, "同一個 run 不能還原兩次");
   // 重新打開：被還原的三位系統不再寫
   await db.exec(`UPDATE cand_no_auto_settings SET enabled = true WHERE id = 1`);
   const p = await planOf(db);
-  for (const id of [1, 12, 17]) assert(!p.some((x) => Number(x.politician_election_id) === id), `pe${id} 被還原後系統不再寫`);
+  for (const id of [1, 12, 17, 23, 24]) assert(!p.some((x) => Number(x.politician_election_id) === id), `pe${id} 被還原後系統不再寫`);
   await db.close();
 });
 
@@ -243,10 +264,11 @@ Deno.test("還原驗證：拿掉任一道守門，對應情境要紅", async () 
   }
   // 我們同名多筆
   {
-    // 同名兩筆另有「同輪同號次」那道備援，所以兩道都拿掉才會寫出去
-    const { db } = await build((s) => mutate(mutate(s, "WHEN oc.n > 1 THEN 'ambiguous_ours'", "WHEN false THEN 'ambiguous_ours'"), "CASE WHEN count(*) OVER (PARTITION BY j.fu, j.rno) > 1 THEN 'duplicate_in_unit' END", "NULL"));
+    // 只拿掉這一道：縣市長那案被「同輪同號次」備援蓋住（仍不寫，但原因碼變了）；村里長兩個里的號次單位不同，備援蓋不到，會寫出去
+    const { db } = await build((s) => mutate(s, "WHEN oc.n > 1 THEN 'ambiguous_ours'", "WHEN false THEN 'ambiguous_ours'"));
     const p = await planOf(db);
-    assert(p.find((x) => Number(x.politician_election_id) === 2)!.action === "write");
+    assert(p.find((x) => Number(x.politician_election_id) === 20)!.action === "write", "村里長同名兩人只靠 ambiguous_ours 守住");
+    assert(reasonOf(p, 2) !== "ambiguous_ours");
     await db.close();
   }
   // 鏡像同名多筆
@@ -288,5 +310,18 @@ Deno.test("不一致視圖：站上已有號次、鏡像唯一對上但號次不
   // 單位超過 3 天沒抓成功就不列
   await db.exec(`UPDATE cec_roster_units SET fetched_at = now() - interval '5 days' WHERE url = 'u-hc'`);
   assertEquals((await rows(db, `SELECT 1 FROM cand_no_auto_mismatch`)).length, 0);
+  await db.close();
+});
+
+Deno.test("兩個視圖不公開（anon／authenticated 讀不到）；還原與寫入搶同一把鎖", async () => {
+  const { db } = await build();
+  for (const v of ["cand_no_auto_mismatch", "cand_no_auto_status"]) {
+    for (const role of ["anon", "authenticated", "service_role"]) {
+      const ok = (await rows<{ ok: boolean }>(db, `SELECT has_table_privilege('${role}', '${v}', 'SELECT') AS ok`))[0].ok;
+      assertEquals(ok, role === "service_role", `${v} 對 ${role}`);
+    }
+  }
+  const src = fnText(await readMig(MIG), "cand_no_auto_revert");
+  assert(src.includes("pg_advisory_xact_lock(hashtext('cand_no_auto_apply'))"), "revert 開頭拿 apply 同一把 advisory lock");
   await db.close();
 });
