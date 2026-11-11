@@ -38,6 +38,7 @@ function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
     oldestQueued: async () => rows.filter((r) => r.status === "queued").sort((a, b) => a.created_at.localeCompare(b.created_at))[0] ?? null,
     jobsSince: async (s) => rows.filter((r) => r.created_at >= s),
     logUsage: async (u) => { usage.push(u); },
+    contributionTypes: async (ids) => Object.fromEntries(ids.filter((i) => i === "c1").map((i) => [i, "policy"])),
   };
   const usage: unknown[] = [];
   return { repo, rows, usage };
@@ -305,4 +306,18 @@ Deno.test("finalize：回應 scrub（/report 回的 ip 雜湊、派工憑證不�
   assert(!/LEAK/.test(text) && !text.includes(KEY));
   assertEquals(JSON.parse(text).job.report_response.nested, { ok: 1 });
   assert(!JSON.stringify(s.rows[0].report_response).includes("LEAK"));
+});
+
+Deno.test("summary／status／list：每件帶 contribution_type（join contributions），查不到＝null", async () => {
+  const s = await previewed();
+  const sum = await (await handleStrongAdjudicate(maint({ action: "summary", since: "2026-11-01" }), s.deps)).json();
+  assertEquals(sum.items[0].contribution_type, "policy");
+  const st = await (await handleStrongAdjudicate(maint({ action: "status", adjudication_id: s.rows[0].id }), s.deps)).json();
+  assertEquals(st.job.contribution_type, "policy");
+  const byTask = await (await handleStrongAdjudicate(maint({ action: "status", task_id: "t1" }), s.deps)).json();
+  assertEquals(byTask.jobs[0].contribution_type, "policy");
+  const list = await (await handleStrongAdjudicate(maint({ action: "list" }), s.deps)).json();
+  assertEquals(list.items[0].contribution_type, "policy");
+  s.rows[0].contribution_id = "gone";
+  assertEquals((await (await handleStrongAdjudicate(maint({ action: "summary", since: "2026-11-01" }), s.deps)).json()).items[0].contribution_type, null);
 });

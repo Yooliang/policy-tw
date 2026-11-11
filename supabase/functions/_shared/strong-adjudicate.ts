@@ -64,6 +64,8 @@ export interface Repo {
   oldestQueued(): Promise<JobRow | null>;
   jobsSince(sinceIso: string, limit: number): Promise<JobRow[]>;
   logUsage(u: UsageLog): Promise<void>;
+  /** 貢獻 id → contribution_type（查不到的不在結果裡） */
+  contributionTypes(ids: string[]): Promise<Record<string, string>>;
 }
 
 export interface StrongAdjudicateDeps {
@@ -111,6 +113,13 @@ export function scrub<T>(v: T): T {
 }
 
 /** 對外的 job 形狀 */
+/** 一批 job 加上 contribution_type（join contributions；查不到＝null） */
+export async function withTypes(repo: Repo, jobs: JobRow[]): Promise<Obj[]> {
+  const ids = [...new Set(jobs.map((j) => j.contribution_id).filter((x): x is string => !!x))];
+  const types = ids.length ? await repo.contributionTypes(ids) : {};
+  return jobs.map((j) => ({ ...publicJob(j), contribution_type: (j.contribution_id && types[j.contribution_id]) || null }));
+}
+
 export function publicJob(j: JobRow): Obj {
   return {
     id: j.id, task_id: j.task_id, contribution_id: j.contribution_id, status: j.status, requested_by: j.requested_by,
@@ -253,9 +262,9 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
   if (action === "status") {
     if (nonEmpty(b.adjudication_id)) {
       const j = await repo.getJob(b.adjudication_id.trim());
-      return j ? json({ success: true, job: publicJob(j) }) : fail("找不到這筆裁決", 404);
+      return j ? json({ success: true, job: (await withTypes(repo, [j]))[0] }) : fail("找不到這筆裁決", 404);
     }
-    if (nonEmpty(b.task_id)) return json({ success: true, jobs: (await repo.jobsForTask(b.task_id.trim(), 20)).map(publicJob) });
+    if (nonEmpty(b.task_id)) return json({ success: true, jobs: await withTypes(repo, await repo.jobsForTask(b.task_id.trim(), 20)) });
     return fail("要帶 adjudication_id 或 task_id", 400);
   }
 
@@ -273,7 +282,7 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
       by_cause: tally((j) => j.cause_category), by_verdict: tally((j) => j.verdict), by_status: tally((j) => j.status),
       cost_total: rows.reduce((s, j) => s + Number(j.cost ?? 0), 0),
       tokens_total: rows.reduce((s, j) => s + (j.prompt_tokens ?? 0) + (j.completion_tokens ?? 0), 0),
-      items: rows.map(publicJob),
+      items: await withTypes(repo, rows),
     });
   }
 

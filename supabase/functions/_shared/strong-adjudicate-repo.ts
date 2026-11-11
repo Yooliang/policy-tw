@@ -59,6 +59,15 @@ export function supabaseRepo(supabase: SupabaseLike): Repo {
     async jobsSince(sinceIso, limit) {
       return (must(await supabase.from("strong_adjudications").select("*").gte("created_at", sinceIso).order("created_at", { ascending: false }).limit(limit), "jobsSince") ?? []) as JobRow[];
     },
+    async contributionTypes(ids) {
+      if (ids.length === 0) return {};
+      // query-bounds: ok — ids 來自這一批 job（summary 最多 500 件），變數 in()
+      const { data, error } = await supabase.from("contributions").select("id, contribution_type").in("id", ids);
+      if (error) throw new Error(`contributionTypes: ${error.message}`);
+      const out: Record<string, string> = {};
+      for (const r of (data ?? []) as Array<{ id: string; contribution_type: string }>) out[String(r.id)] = r.contribution_type;
+      return out;
+    },
     async logUsage(u: UsageLog) {
       // ai_usage_logs.function_type 有 CHECK（verify／contribute／search／update），裁決算「驗證」；執行者回報的用量，端點不呼叫模型
       const { error } = await supabase.from("ai_usage_logs").insert({
