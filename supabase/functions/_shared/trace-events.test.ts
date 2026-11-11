@@ -56,7 +56,7 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
     const days = Number(lim[1]);
     if (days > MAX_DAYS) out.push(`分支 ${label} 回看 ${days} 天 > ${MAX_DAYS}`);
     if (/FROM\s+verify_dispatches/i.test(b) && days > VERIFY_DISPATCH_MAX_DAYS) out.push(`verify_dispatches 回看 ${days} 天 > ${VERIFY_DISPATCH_MAX_DAYS}`);
-    if (/FROM\s+lease_events/i.test(b) && days > leaseRetentionDays) out.push(`lease_events 回看 ${days} 天 > 保留 ${leaseRetentionDays} 天`);
+    if (/FROM\s+lease_events/i.test(b) && (days + 1) > leaseRetentionDays) out.push(`lease_events 回看 ${days} 天（加一天邊際）> 保留 ${leaseRetentionDays} 天`);
     if (!/ORDER BY[^\n]*DESC LIMIT v_lim\)/.test(b)) out.push(`分支 ${label} 沒有 ORDER BY … DESC LIMIT v_lim`);
   }
   if (!/FROM\s+lease_events/i.test(inner[1])) out.push("少了 lease_events 分支");

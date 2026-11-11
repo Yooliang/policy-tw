@@ -112,11 +112,11 @@ BEGIN
       WHERE g.at >= GREATEST(v_since, now() - interval '14 days') AND g.at < v_until AND (v_all OR g.task_id = ANY(v_tasks))
       ORDER BY g.at DESC LIMIT v_lim)
     UNION ALL
-    -- 認領（lease_events 只保留 14 天，回看期不超過）
+    -- 認領（lease_events 保留 14 天；回看 13 天＝保留天數減一天邊際，守門 lease-events.test.ts E2）
     (SELECT l.at, 'lease_' || l.event, l.task_id, NULL::text, NULL::uuid, NULL::uuid, l.agent_name,
             jsonb_strip_nulls(jsonb_build_object('by', l.meta->>'by', 'leased_until', l.meta->>'leased_until'))
        FROM lease_events l
-      WHERE l.at >= GREATEST(v_since, now() - interval '14 days') AND l.at < v_until AND (v_all OR l.task_id = ANY(v_tasks))
+      WHERE l.at >= GREATEST(v_since, now() - interval '13 days') AND l.at < v_until AND (v_all OR l.task_id = ANY(v_tasks))
       ORDER BY l.at DESC LIMIT v_lim)
     UNION ALL
     -- 手動任務建立

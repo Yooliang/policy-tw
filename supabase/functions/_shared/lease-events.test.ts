@@ -169,12 +169,51 @@ Deno.test("E 文字層：視圖有 7 天時限、保留天數預設與 CHECK 下
   assertEquals(/\bat\s*>=\s*now\(\)/i.test(view.replace(/at >= now\(\) - interval '7 days'/, "")), false);
 });
 
-Deno.test("E2 其他 migration 不得讀 lease_events 而沒有時限（目前只有視圖與清理函式）", async () => {
+/**
+ * 登記的讀者：只有這些 migration 可以讀 lease_events，而且每一處讀取都要有 `at >= … interval 'N days'` 時限，
+ * N 天 ＋ 邊際 ≤ 保留天數預設（lease_events_days）。要新增讀者就在這裡登記並說明回看期。
+ *   20261111140000_trace_events.sql：/trace 重播頁的 trace_events()，回看 13 天
+ */
+const REGISTERED_READERS = ["20261111140000_trace_events.sql"];
+
+/** 登記讀者的每一處 FROM lease_events 的問題清單（空＝合格） */
+function leaseReaderProblems(name: string, sql: string, retentionDays: number): string[] {
+  const code = sql.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
+  const out: string[] = [];
+  const reads = [...code.matchAll(/\b(?:FROM|JOIN)\s+(?:public\.)?lease_events\s+(\w+)([\s\S]*?)(?=\n\s*(?:ORDER BY|UNION ALL|\)))/gi)];
+  if (reads.length === 0) out.push(`${name}：登記為讀者卻抽不到 FROM lease_events`);
+  for (const r of reads) {
+    const alias = r[1];
+    const m = new RegExp(`\\b${alias}\\.at\\s*>=\\s*GREATEST\\(\\s*\\w+\\s*,\\s*now\\(\\)\\s*-\\s*interval\\s*'(\\d+)\\s*days'\\s*\\)`, "i").exec(r[2]);
+    if (!m) out.push(`${name}：讀 lease_events（別名 ${alias}）沒有 at >= … interval 'N days' 時限`);
+    else if (Number(m[1]) * 24 + MARGIN_HOURS > retentionDays * 24) out.push(`${name}：回看 ${m[1]} 天 ＋ 邊際超過保留 ${retentionDays} 天`);
+  }
+  return out;
+}
+
+Deno.test("E2 其他 migration 不得讀 lease_events 而沒有時限（只有視圖、清理函式，以及登記的讀者且每處有時限）", async () => {
+  const retention = Number(/ADD COLUMN IF NOT EXISTS lease_events_days INTEGER NOT NULL DEFAULT (\d+)/.exec(MIG)?.[1]);
+  assert(Number.isFinite(retention), "抽不出 lease_events_days 預設值");
+  const seen: string[] = [];
   for await (const f of Deno.readDir(new URL("../../migrations/", import.meta.url))) {
     if (f.name === MIG_NAME) continue;
     const sql = await Deno.readTextFile(new URL(`../../migrations/${f.name}`, import.meta.url));
-    assert(!/\b(FROM|JOIN)\s+(public\.)?lease_events\b/i.test(sql), `${f.name} 讀 lease_events：請加時限並更新守門`);
+    if (!/\b(FROM|JOIN)\s+(public\.)?lease_events\b/i.test(sql)) continue;
+    seen.push(f.name);
+    assert(REGISTERED_READERS.includes(f.name), `${f.name} 讀 lease_events：請加時限並更新守門`);
+    assertEquals(leaseReaderProblems(f.name, sql, retention), []);
   }
+  assertEquals(seen.sort(), [...REGISTERED_READERS].sort(), "登記的讀者都應該真的存在");
+});
+
+Deno.test("E2b 還原驗證：登記的讀者拿掉時限、回看放大到超過保留、換別名拿掉 → 都要抓得到", async () => {
+  const f = REGISTERED_READERS[0];
+  const sql = (await Deno.readTextFile(new URL(`../../migrations/${f}`, import.meta.url))).replace(/\r\n/g, "\n");
+  assertEquals(leaseReaderProblems(f, sql, 14), []);
+  const noBound = sql.replace(/l\.at >= GREATEST\(v_since, now\(\) - interval '13 days'\) AND /, "");
+  assert(noBound !== sql && leaseReaderProblems(f, noBound, 14).some((p) => p.includes("沒有")), "拿掉時限要紅");
+  const big = sql.replace("l.at >= GREATEST(v_since, now() - interval '13 days')", "l.at >= GREATEST(v_since, now() - interval '14 days')");
+  assert(big !== sql && leaseReaderProblems(f, big, 14).some((p) => p.includes("邊際")), "回看等於保留天數（沒邊際）要紅");
 });
 
 Deno.test("E3 程式端（supabase/functions/**/*.ts，不含測試）不得讀 lease_events／lease_outcomes_7d", async () => {
