@@ -127,13 +127,14 @@ function stripBody(sql: string, marker: string): string {
 
 const SCHEMA = `
 CREATE TABLE task_dispatches (
+  work_key text,
   task_id text PRIMARY KEY, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
   queue_at timestamptz NOT NULL, blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false,
   opened_at timestamptz NOT NULL DEFAULT now(), last_dispatched_at timestamptz);
 CREATE TABLE contributions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_id text, contribution_type text, status text, payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   contributor_ip_hash text, agent_name text);
-CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text, work_key text);
 CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
 CREATE TABLE question_answers (question_id uuid, agent_name text);
 CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);
@@ -142,6 +143,7 @@ CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);
 async function buildDb(queueSql: string): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(SCHEMA);
+  await db.exec(await latestFn("task_target_multi_person"));  // 現行的 contribution_queue_tasks 用到（20261107030000 起）
   for (const fn of ["task_target_key", "uuid_or_null", "question_answer_cap"]) await db.exec(await latestFn(fn));
   await db.exec(queueSql);
   return db;

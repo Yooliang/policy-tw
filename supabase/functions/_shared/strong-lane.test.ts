@@ -69,7 +69,7 @@ async function patchedQueueFn(): Promise<string> {
   const sql = await readMig(MIG);
   const m = /v_old CONSTANT TEXT := \$s\$(.*?)\$s\$;\s*v_new CONSTANT TEXT := \$s\$(.*?)\$s\$;/s.exec(sql);
   assert(m, "找不到 DO 區塊的 v_old／v_new");
-  const fn = await latestFn("contribution_queue_tasks");
+  const fn = await latestFn("contribution_queue_tasks", "20261111100000_work_key.sql");
   assertEquals(fn.split(m[1]).length - 1, 1, "現行定義裡 v_old 要剛好一次");
   return fn.replace(m[1], m[2]);
 }
@@ -77,10 +77,10 @@ async function patchedQueueFn(): Promise<string> {
 async function queueDb(): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`
-    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, work_key text, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
       queue_at timestamptz NOT NULL, blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false, opened_at timestamptz NOT NULL DEFAULT now(), last_dispatched_at timestamptz);
     CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_id text, contribution_type text, status text, payload jsonb NOT NULL DEFAULT '{}'::jsonb, contributor_ip_hash text, agent_name text);
-    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text, work_key text);
     CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
     CREATE TABLE question_answers (question_id uuid, agent_name text);
     CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);`);
@@ -103,15 +103,15 @@ Deno.test("C1 一般派工排除強模型任務（不分誰來領、有無 ip）
 Deno.test("C1b migration 的 DO 區塊真的對線上定義動手：替換後排除；重跑不再動（冪等）", async () => {
   const db = new PGlite();
   await db.exec(`
-    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, work_key text, task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
       queue_at timestamptz NOT NULL, blocked boolean NOT NULL DEFAULT false, cooling boolean NOT NULL DEFAULT false, opened_at timestamptz NOT NULL DEFAULT now(), last_dispatched_at timestamptz);
     CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_id text, contribution_type text, status text, payload jsonb NOT NULL DEFAULT '{}'::jsonb, contributor_ip_hash text, agent_name text);
-    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text);
+    CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text, work_key text);
     CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
     CREATE TABLE question_answers (question_id uuid, agent_name text);
     CREATE TABLE contribution_votes (contribution_id uuid, verifier_ip_hash text);`);
   for (const fn of ["task_target_key", "uuid_or_null", "question_answer_cap"]) await db.exec(await latestFn(fn));
-  await db.exec(await latestFn("contribution_queue_tasks"));
+  await db.exec(await latestFn("contribution_queue_tasks", "20261111100000_work_key.sql"));
   const sql = await readMig(MIG);
   const i = sql.indexOf("DO $do$");
   const j = sql.indexOf("$do$;", i + 5) + 5;

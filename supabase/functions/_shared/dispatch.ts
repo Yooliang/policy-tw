@@ -113,11 +113,15 @@ export const LEASE_MINUTES = 30;
 export interface TaskLike {
   task_id: string;
   target?: unknown;
+  /** 工作卡鍵（SQL task_work_key，20261111100000）；佇列函式沒回這欄時為空，租約只靠 SQL 與 target_key 擋 */
+  work_key?: string | null;
 }
 
 export interface LeaseLike {
   task_id: string;
   target_key: string;
+  /** 工作卡鍵：寫入時由觸發器 work_key_fill 算（TS 不算，與 SQL 同一份定義）；舊列為空 */
+  work_key?: string | null;
   agent_name: string;
   leased_until: string;
 }
@@ -235,10 +239,12 @@ export function taskTargetKey(task: TaskLike): string {
 /** 排掉「別人」未過期的認領；自己認領中的可以再拿到（會延長） */
 export function filterLeasedTasks<T extends TaskLike>(tasks: readonly T[], leases: readonly LeaseLike[], agentName: string, now: Date = new Date()): T[] {
   const mine = agentName.toLowerCase();
-  const heldByOthers = new Set(
-    leases.filter((l) => new Date(l.leased_until) > now && l.agent_name.toLowerCase() !== mine).map((l) => l.target_key),
-  );
-  return tasks.filter((t) => !heldByOthers.has(taskTargetKey(t)));
+  const live = leases.filter((l) => new Date(l.leased_until) > now && l.agent_name.toLowerCase() !== mine);
+  const heldByOthers = new Set(live.map((l) => l.target_key));
+  // 工作卡鍵（20261111100000）：目前尚未生效的第二道保險——contribution_queue_tasks 的回傳型別沒有 work_key（加欄＝改簽名，要第二次上），
+  // 所以佇列列的 t.work_key 恆空、下面的比對不會命中；同一張卡的租約排除現在只靠 SQL（認領中那一段）。等回傳型別第二次上再接。任務或租約沒帶鍵就只比 target_key
+  const heldWorkKeys = new Set(live.map((l) => l.work_key).filter((k): k is string => typeof k === "string" && k !== ""));
+  return tasks.filter((t) => !heldByOthers.has(taskTargetKey(t)) && !(typeof t.work_key === "string" && heldWorkKeys.has(t.work_key)));
 }
 
 /** 裁決任務不派給：原貢獻的提交者；已有未定案裁決（pending／verified 的 adjudication）的那筆（等它的票就好） */
