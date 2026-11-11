@@ -232,42 +232,36 @@ Deno.test("A8 觸發器：task_dispatches／task_checks／contribution_task_leas
 // ============================================================
 const code = (s: string) => s.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
 
-Deno.test("B1 階梯：task_ladder_closed 的 PARTITION BY work_key（找不到退回 task_id）、冷卻次序按 work_key 累計；欄位與簽名不變", async () => {
+Deno.test("B1 階梯：視圖與冷卻次序按 work_key（行為見 work-key-ladder.test.ts）；欄位與簽名不變", async () => {
   const view = code(MIG.slice(MIG.indexOf("CREATE OR REPLACE VIEW task_ladder_closed"), MIG.indexOf("COMMENT ON VIEW task_ladder_closed")));
-  assertEquals(view.split("PARTITION BY COALESCE(tc.work_key, tc.task_id)").length - 1, 2);
-  assert(!view.includes("PARTITION BY tc.task_id"));
-  // 視圖輸出欄位與 20261109150000 一致
+  assert(view.includes("CROSS JOIN LATERAL work_key_ladder_state(k.work_key) s") && view.includes("WHERE s.closed"), "視圖呼叫可下推的 work_key_ladder_state");
   const prevView = (await readMig("20261109150000_confirmed_no_verify_check_ladder.sql"));
-  assert(/SELECT task_id, max\(checks\) AS checks, min\(checked_at\) AS closed_at, max\(checked_at\) AS last_checked_at,\n\s+CASE WHEN task_id LIKE 'auto:%' THEN split_part\(task_id, ':', 2\) ELSE 'manual' END AS task_kind/.test(prevView));
-  assert(/SELECT m\.task_id, c\.checks, c\.closed_at, c\.last_checked_at,\n\s+CASE WHEN m\.task_id LIKE 'auto:%' THEN split_part\(m\.task_id, ':', 2\) ELSE 'manual' END AS task_kind/.test(view));
+  assert(/SELECT task_id, max\(checks\) AS checks, min\(checked_at\) AS closed_at, max\(checked_at\) AS last_checked_at,\s+CASE WHEN task_id LIKE 'auto:%' THEN split_part\(task_id, ':', 2\) ELSE 'manual' END AS task_kind/.test(prevView));
+  assert(/SELECT m\.task_id, s\.checks, s\.closed_at, s\.last_checked_at,\s+CASE WHEN m\.task_id LIKE 'auto:%' THEN split_part\(m\.task_id, ':', 2\) ELSE 'manual' END AS task_kind/.test(view), "輸出欄位與前一版一致");
   const fn = fnText(MIG, "task_check_cooldown_days_for");
   assert(fn.includes("(p_task_id TEXT, p_outcome TEXT, p_checked_at TIMESTAMPTZ, p_id BIGINT)"));
   assertEquals(fn.split("x.work_key = one.wk").length - 1, 2);
   assert(!/x\.task_id = p_task_id/.test(fn));
-  // 例外判斷仍按 task_id 前綴；其餘分支與 20261109150000 一致
-  const prevFn = fnText(prevView, "task_check_cooldown_days_for");
-  assertEquals(
-    fn.replaceAll("x.work_key = one.wk", "x.task_id = p_task_id").replace(/FROM \(SELECT COALESCE[^\n]*\n/, "FROM (SELECT 1) AS one\n"),
-    prevFn.replace(/\n\s*FROM \(SELECT 1\) AS one LEFT JOIN task_cooldown_settings s ON s\.id = 1/, "\n    FROM (SELECT 1) AS one\n    LEFT JOIN task_cooldown_settings s ON s.id = 1")
-      .replace(/COMMENT ON[\s\S]*$/, "").trimEnd().replace(/\n    FROM \(SELECT 1\) AS one\n    LEFT JOIN task_cooldown_settings s ON s\.id = 1/, "\n    FROM (SELECT 1) AS one\n    LEFT JOIN task_cooldown_settings s ON s.id = 1"),
-  );
+  // task_in_check_cooldown：簽名不變、改問 work_key_ladder_state
+  const tic = fnText(MIG, "task_in_check_cooldown");
+  assert(tic.includes("(p_task_id TEXT) RETURNS BOOLEAN") && tic.includes("work_key_ladder_state("));
+  // 例外判斷仍按 task_id 前綴
+  assert(fn.includes("NOT task_check_ladder_exempt(p_task_id)"));
 });
 
-Deno.test("B2 refresh_dispatch_blocked：cool 按 work_key 取最晚；其餘與正式庫現行（20261109210000 之後）一致、簽名不變", async () => {
+Deno.test("B2 refresh_dispatch_blocked：開頭只關「自己的查核」結案的手動任務、cool 走 work_key_ladder_state；其餘與正式庫現行一致、簽名不變", async () => {
   const neu = fnText(MIG, "refresh_dispatch_blocked");
-  assert(neu.includes("SELECT tc.work_key, max(tc.checked_at"));
-  assert(neu.includes("GROUP BY tc.work_key"));
+  assert(neu.includes("CROSS JOIN LATERAL work_key_ladder_state(k.work_key) s"));
   assert(neu.includes("LEFT JOIN cool c ON c.work_key = COALESCE(d.work_key, 'task:' || d.task_id)"));
-  assert(!neu.includes("GROUP BY tc.task_id"));
-  // 前一版：migration 裡 refresh_dispatch_blocked 的最後一次定義（本檔之前）
+  assert(!/FROM task_ladder_closed lcs+WHERE lc.task_id = t.id/.test(neu), "手動任務不再因同卡結案被關（只看自己的查核）");
+  assert(!MIG.includes("DROP FUNCTION"), "不改簽名、不刪函式");
   const prev = await latestFn("refresh_dispatch_blocked", MIG_NAME);
   const norm = (s: string) => s.replace(/--[^\n]*/g, "").replace(/\s+/g, " ").trim();
-  const back = neu
-    .replace("SELECT tc.work_key, max(tc.checked_at", "SELECT tc.task_id, max(tc.checked_at")
-    .replace("GROUP BY tc.work_key", "GROUP BY tc.task_id")
-    .replace("LEFT JOIN cool c ON c.work_key = COALESCE(d.work_key, 'task:' || d.task_id)", "LEFT JOIN cool c ON c.task_id = d.task_id");
-  assertEquals(norm(back), norm(prev));
-  assert(!MIG.includes("DROP FUNCTION"), "不改簽名、不刪函式");
+  const cut = (s: string, from: string, to: string) => s.slice(0, s.indexOf(from)) + s.slice(s.indexOf(to));
+  const strip = (s: string) => cut(cut(s, "  -- >>> 查核階梯：手動任務", "  -- <<< 查核階梯"), "  , cool AS (", "  -- >>> 多人分組任務");
+  const joinOld = "LEFT JOIN cool c ON c.task_id = d.task_id";
+  const joinNew = "LEFT JOIN cool c ON c.work_key = COALESCE(d.work_key, 'task:' || d.task_id)";
+  assertEquals(norm(strip(neu).replace(joinNew, joinOld)), norm(strip(prev)));
 });
 
 Deno.test("B3 contribution_queue_tasks：認領中多比 work_key，原本的條件全在（基底是正式庫現行定義，含後來用替換補上的強模型與多人任務條件）；簽名不變", async () => {
@@ -295,11 +289,12 @@ Deno.test("B4 只加欄位與改函式本體：不刪欄位／表、不改簽名
     assert(new RegExp(`ALTER TABLE ${t}\\s+ADD COLUMN IF NOT EXISTS work_key TEXT`).test(c), t);
   }
   assert(c.includes("CREATE TRIGGER trg_task_dispatches_work_key BEFORE INSERT OR UPDATE OF task_id, target ON task_dispatches"));
-  assert(c.includes("CREATE TRIGGER trg_task_checks_work_key BEFORE INSERT ON task_checks"));
+  assert(c.includes("CREATE TRIGGER trg_task_checks_work_key BEFORE INSERT OR UPDATE OF task_id ON task_checks"));
   assert(c.includes("CREATE TRIGGER trg_task_leases_work_key BEFORE INSERT OR UPDATE OF task_id ON contribution_task_leases"));
   // 回填：task_dispatches 的 queue_at 觸發器暫停、做完自我檢查
   assert(c.includes("DISABLE TRIGGER trg_task_dispatches_queue_key") && c.includes("ENABLE TRIGGER trg_task_dispatches_queue_key"));
   assert(c.includes("RAISE EXCEPTION 'work_key 回填動到了"));
+  assert(!/^SELECT refresh_dispatch_blocked();/m.test(c), "migration 結尾不呼叫 refresh_dispatch_blocked（交給下一輪 cron）");
 });
 
 Deno.test("B5 檔頭對應表列出 activity_arm_names() 的每一個活動名", () => {

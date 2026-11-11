@@ -75,7 +75,11 @@
 --   · 換號沿用（20261019040000）不用搬資料：新列的 work_key 跟舊列相同，task_checks（鍵是 work_key）自然延續
 --   · 租約：原本的 target_key（整個人／整條政見）比對照舊保留、另加 work_key 相等也算被認領（只多擋、不少擋；
 --     兩張不同的卡〔同一人的缺政見與補基本資料〕仍然不會同時派給兩個代理）
--- 不改的（登記）：manual_front_pull／cand_no_front_pull 等「插隊拉回」仍按自己的 task_id 讀 task_checks（20261109180000），之後要接 work_key 另開。
+--   · 階梯狀態集中在 work_key_ladder_state(p_work_key)（可下推）：視圖 task_ladder_closed、task_in_check_cooldown、refresh_dispatch_blocked 都呼叫它；
+--     manual_front_pull、cand_no_front_pull、手動任務出生觸發器本來就問 task_in_check_cooldown，所以插隊拉回也按工作卡判冷卻
+--   · 階梯結案波及同卡：auto: 任務同卡一起永久 blocked（刻意）；手動任務（網站請求、提議）只在它自己的查核結案時才被關（維持改前行為），卡結案時留 open
+--   · 換屆（campaign_election_id() 變了）後跑 work_key_recompute() 重算三張表
+--   · 不在 migration 裡呼叫 refresh_dispatch_blocked()：blocked／cool_until 交給下一輪 cron
 
 -- ------------------------------------------------------------
 -- 1. 欄位與索引
@@ -219,52 +223,104 @@ LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_TABLE_NAME = 'task_dispatches' THEN
     NEW.work_key := task_work_key(NEW.task_id, NEW.target);
-  ELSE
+  ELSIF TG_TABLE_NAME = 'contribution_task_leases' AND NEW.task_id LIKE 'verify:%' THEN
+    NEW.work_key := NULL;   -- 驗證者領票不該擋母任務那張卡：驗證票的租約不帶工作卡鍵
+  ELSIF TG_OP = 'INSERT' THEN
     -- task_checks、contribution_task_leases：呼叫端自己帶了就用；沒帶就由 task_id 算，算不出來退回 task:<task_id>（階梯永不歸 NULL）
     NEW.work_key := COALESCE(NEW.work_key, task_work_key(NEW.task_id, NULL), 'task:' || NEW.task_id);
+  ELSE
+    -- UPDATE OF task_id：任務代號變了，鍵直接重算（不沿用舊值）
+    NEW.work_key := COALESCE(task_work_key(NEW.task_id, NULL), 'task:' || NEW.task_id);
   END IF;
   RETURN NEW;
 END;
 $$;
-COMMENT ON FUNCTION work_key_fill IS 'task_dispatches／task_checks／contribution_task_leases 寫入時填 work_key（task_work_key）；TS 不算，SQL 同一份定義。2026-11-11';
+COMMENT ON FUNCTION work_key_fill IS 'task_dispatches／task_checks／contribution_task_leases 寫入時填 work_key（task_work_key）；TS 不算，SQL 同一份定義。UPDATE OF task_id 直接重算；驗證票的租約不帶鍵（不擋母任務）。2026-11-11';
 
 DROP TRIGGER IF EXISTS trg_task_dispatches_work_key ON task_dispatches;
 CREATE TRIGGER trg_task_dispatches_work_key BEFORE INSERT OR UPDATE OF task_id, target ON task_dispatches
   FOR EACH ROW EXECUTE FUNCTION work_key_fill();
 DROP TRIGGER IF EXISTS trg_task_checks_work_key ON task_checks;
-CREATE TRIGGER trg_task_checks_work_key BEFORE INSERT ON task_checks
+CREATE TRIGGER trg_task_checks_work_key BEFORE INSERT OR UPDATE OF task_id ON task_checks
   FOR EACH ROW EXECUTE FUNCTION work_key_fill();
 DROP TRIGGER IF EXISTS trg_task_leases_work_key ON contribution_task_leases;
 CREATE TRIGGER trg_task_leases_work_key BEFORE INSERT OR UPDATE OF task_id ON contribution_task_leases
   FOR EACH ROW EXECUTE FUNCTION work_key_fill();
 
+-- 換屆流程要跑它：campaign_election_id() 換屆（例：2028 新增進 elections）後，policy_missing 的鍵會從 policies:2026 變 policies:2028，
+-- 已存在的列不會自己重算。這支把三張表按「現在的定義」重算、只動鍵真的變了的列，回傳各表動了幾列。
+-- 租約的 verify: 列維持 NULL。task_dispatches 的 UPDATE 會觸發 queue_at 觸發器（照目前的設定重算，跟 seed 每 10 分鐘的寫入同一個效果）。
+CREATE OR REPLACE FUNCTION work_key_recompute() RETURNS TABLE (tbl TEXT, changed INTEGER)
+LANGUAGE plpgsql AS $$
+DECLARE n INTEGER;
+BEGIN
+  UPDATE task_dispatches d SET work_key = task_work_key(d.task_id, d.target)
+   WHERE d.work_key IS DISTINCT FROM task_work_key(d.task_id, d.target);
+  GET DIAGNOSTICS n = ROW_COUNT; tbl := 'task_dispatches'; changed := n; RETURN NEXT;
+  UPDATE task_checks c SET work_key = COALESCE(task_work_key(c.task_id, NULL), 'task:' || c.task_id)
+   WHERE c.work_key IS DISTINCT FROM COALESCE(task_work_key(c.task_id, NULL), 'task:' || c.task_id);
+  GET DIAGNOSTICS n = ROW_COUNT; tbl := 'task_checks'; changed := n; RETURN NEXT;
+  UPDATE contribution_task_leases l SET work_key = CASE WHEN l.task_id LIKE 'verify:%' THEN NULL ELSE COALESCE(task_work_key(l.task_id, NULL), 'task:' || l.task_id) END
+   WHERE l.work_key IS DISTINCT FROM CASE WHEN l.task_id LIKE 'verify:%' THEN NULL ELSE COALESCE(task_work_key(l.task_id, NULL), 'task:' || l.task_id) END;
+  GET DIAGNOSTICS n = ROW_COUNT; tbl := 'contribution_task_leases'; changed := n; RETURN NEXT;
+END;
+$$;
+COMMENT ON FUNCTION work_key_recompute IS '重算 task_dispatches／task_checks／contribution_task_leases 的 work_key（只動鍵變了的列）。換屆（campaign_election_id() 換了）後要跑一次；docs/dispatch-arms.md 第 8 節。2026-11-11';
+REVOKE ALL ON FUNCTION work_key_recompute() FROM PUBLIC, anon, authenticated;
+
 -- ------------------------------------------------------------
 -- 4. 查核階梯改 PARTITION BY work_key（20261109150000 的視圖與冷卻函式；簽名、欄位不變）
 -- ------------------------------------------------------------
--- 結案清單：同一張工作卡的 not_found＋confirmed 累計編號超過階梯格數＝結案；輸出「這張卡現在的每一個任務代號」
--- （查核紀錄上出現過的，加派工列上目前掛著這個 work_key 的），所以換號、換臂後的新任務代號一出生就是結案的（找不到 work_key 退回 task_id）
+-- 一張工作卡的階梯與冷卻狀態（可下推：只掃 task_checks_work_key_idx 上這一個鍵）。視圖、task_in_check_cooldown、refresh_dispatch_blocked 都呼叫它。
+--   checks／closed／closed_at／last_checked_at：不套階梯例外的 not_found＋confirmed 累計（兩種合計）、超過階梯格數＝結案
+--   cool_until：所有 outcome 的冷卻結束時間的最大值（過了 now() 的不算；窗口同 task_cooldown_max_days()）；沒有進行中的冷卻＝NULL
+--   check_cool_until：同上但只算 not_found／confirmed（task_in_check_cooldown 與插隊拉回用，同 20261109180000 的範圍）
+CREATE OR REPLACE FUNCTION work_key_ladder_state(p_work_key TEXT)
+RETURNS TABLE (checks BIGINT, closed BOOLEAN, closed_at TIMESTAMPTZ, last_checked_at TIMESTAMPTZ, cool_until TIMESTAMPTZ, check_cool_until TIMESTAMPTZ)
+LANGUAGE sql STABLE AS $$
+  WITH t AS (
+    SELECT tc.id, tc.task_id, tc.outcome, tc.checked_at,
+           (tc.outcome IN ('not_found', 'confirmed') AND NOT task_check_ladder_exempt(tc.task_id)) AS laddered
+      FROM task_checks tc
+     WHERE tc.work_key = p_work_key
+  ), n AS (
+    SELECT t.*, CASE WHEN t.laddered THEN row_number() OVER (PARTITION BY t.laddered ORDER BY t.checked_at, t.id) END AS n,
+           (task_check_cooldown_days_for(t.task_id, t.outcome, t.checked_at, t.id) || ' days')::INTERVAL AS d
+      FROM t
+  )
+  SELECT count(*) FILTER (WHERE n.laddered),
+         COALESCE(bool_or(n.laddered AND task_check_ladder_days(n.outcome, n.n) IS NULL), FALSE),
+         min(n.checked_at) FILTER (WHERE n.laddered AND task_check_ladder_days(n.outcome, n.n) IS NULL),
+         max(n.checked_at) FILTER (WHERE n.laddered),
+         max(n.checked_at + n.d) FILTER (WHERE n.checked_at > now() - n.d AND n.checked_at > now() - make_interval(days => task_cooldown_max_days())),
+         max(n.checked_at + n.d) FILTER (WHERE n.outcome IN ('not_found', 'confirmed') AND n.checked_at > now() - n.d
+                                          AND n.checked_at > now() - make_interval(days => task_cooldown_max_days()))
+    FROM n
+$$;
+COMMENT ON FUNCTION work_key_ladder_state IS '一張工作卡（work_key）的查核階梯與冷卻狀態：結案與否、累計次數、最晚冷卻結束時間。只掃這個鍵的 task_checks（task_checks_work_key_idx）。2026-11-11';
+
+-- 結案清單：每一張結案的卡，輸出它現在的每一個任務代號（查核紀錄上出現過的，加派工列上目前掛著這個 work_key 的），
+-- 所以換號、換臂後的新任務代號一出生就是結案的。要「某個任務現在是不是結案」不要掃這個視圖，用 task_in_check_cooldown 或 work_key_ladder_state（可下推）
 CREATE OR REPLACE VIEW task_ladder_closed AS
-WITH numbered AS (
-  SELECT tc.task_id, COALESCE(tc.work_key, tc.task_id) AS wk, tc.outcome, tc.checked_at, tc.id,
-         row_number() OVER (PARTITION BY COALESCE(tc.work_key, tc.task_id) ORDER BY tc.checked_at, tc.id) AS n,
-         count(*) OVER (PARTITION BY COALESCE(tc.work_key, tc.task_id)) AS checks
-    FROM task_checks tc
-   WHERE tc.outcome IN ('not_found', 'confirmed') AND NOT task_check_ladder_exempt(tc.task_id)
-), closed AS (
-  SELECT wk, max(checks) AS checks, min(checked_at) AS closed_at, max(checked_at) AS last_checked_at
-    FROM numbered
-   WHERE task_check_ladder_days(outcome, n) IS NULL
-   GROUP BY wk
-), members AS (
-  SELECT COALESCE(tc.work_key, tc.task_id) AS wk, tc.task_id FROM task_checks tc
-  UNION
-  SELECT d.work_key, d.task_id FROM task_dispatches d WHERE d.work_key IS NOT NULL AND d.task_id NOT LIKE 'verify:%'
-)
-SELECT m.task_id, c.checks, c.closed_at, c.last_checked_at,
+SELECT m.task_id, s.checks, s.closed_at, s.last_checked_at,
        CASE WHEN m.task_id LIKE 'auto:%' THEN split_part(m.task_id, ':', 2) ELSE 'manual' END AS task_kind
-  FROM closed c
-  JOIN members m ON m.wk = c.wk;
-COMMENT ON VIEW task_ladder_closed IS '被查核階梯結案的任務（同一張工作卡 work_key 的 not_found＋confirmed 累計超過階梯格數，2026-11-11 起；之前按 task_id）：每個掛在這張卡上的任務代號一列。auto: 任務由 refresh_dispatch_blocked 永久 blocked、手動任務被關閉。維護者覆核用；要放回去＝刪掉那幾筆 task_checks（或改設定表 days）';
+  FROM (SELECT DISTINCT tc.work_key FROM task_checks tc WHERE tc.work_key IS NOT NULL) k
+  CROSS JOIN LATERAL work_key_ladder_state(k.work_key) s
+  JOIN (SELECT tc.work_key AS wk, tc.task_id FROM task_checks tc WHERE tc.work_key IS NOT NULL
+        UNION
+        SELECT d.work_key, d.task_id FROM task_dispatches d WHERE d.work_key IS NOT NULL AND d.task_id NOT LIKE 'verify:%') m ON m.wk = k.work_key
+ WHERE s.closed;
+COMMENT ON VIEW task_ladder_closed IS '被查核階梯結案的任務（同一張工作卡 work_key 的 not_found＋confirmed 累計超過階梯格數，2026-11-11 起；之前按 task_id）：每個掛在這張卡上的任務代號一列。auto: 任務由 refresh_dispatch_blocked 永久 blocked。手動任務只在「它自己的查核」超過階梯格數時才被關（refresh_dispatch_blocked 開頭，維持改前行為）。維護者覆核用；要放回去＝刪掉那幾筆 task_checks（或改設定表 days）';
+
+-- 這個任務現在是不是在「查無／確認無誤」的冷卻中，或這張卡已被階梯結案（20261109180000 的函式，改按工作卡）：
+-- manual_front_pull、cand_no_front_pull、手動任務出生觸發器、#912 的請求併入缺口都呼叫它，所以插隊拉回也接上了 work_key
+CREATE OR REPLACE FUNCTION task_in_check_cooldown(p_task_id TEXT) RETURNS BOOLEAN
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE((SELECT s.closed OR COALESCE(s.check_cool_until > now(), FALSE)
+                     FROM work_key_ladder_state(COALESCE((SELECT d.work_key FROM task_dispatches d WHERE d.task_id = p_task_id),
+                                                         task_work_key(p_task_id, NULL), 'task:' || p_task_id)) s), FALSE)
+$$;
+COMMENT ON FUNCTION task_in_check_cooldown IS '這個任務現在是不是在「查無／確認無誤」的冷卻中（依查核階梯算每一筆自己的天數），或它的工作卡已被階梯結案（2026-11-11 起按 work_key，之前按 task_id）。manual_front_pull、cand_no_front_pull 與手動任務出生觸發器用它決定不給插隊';
 
 -- 一筆 task_checks 的冷卻天數：階梯與「進度類第二次起」的次序都按同一張工作卡累計（p_id 那一列的 work_key；找不到就由 task_id 算）
 CREATE OR REPLACE FUNCTION task_check_cooldown_days_for(p_task_id TEXT, p_outcome TEXT, p_checked_at TIMESTAMPTZ, p_id BIGINT)
@@ -321,6 +377,12 @@ LANGUAGE sql STABLE AS $$
              -- 工作卡鍵（20261111100000）：同一張卡（跨臂、跨指紋、手動任務與自動缺口）被別人認領中也不派
              OR (d.work_key IS NOT NULL AND l.work_key = d.work_key))
     ))
+    -- 工作卡鍵的租約：p_ip_hash 為 NULL（不知道是誰）時視為全部是別人的，也排除；驗證票的租約沒有 work_key（不會擋到這裡）
+    AND NOT EXISTS (
+      SELECT 1 FROM contribution_task_leases l
+      WHERE l.leased_until > now() AND (p_agent IS NULL OR lower(l.agent_name) <> lower(p_agent))
+        AND d.work_key IS NOT NULL AND l.work_key = d.work_key
+    )
     -- <<< 合格：認領中
     -- >>> 合格：同機器交過
     AND (p_ip_hash IS NULL OR NOT EXISTS (
@@ -409,10 +471,15 @@ CREATE OR REPLACE FUNCTION refresh_dispatch_blocked() RETURNS INTEGER
 LANGUAGE plpgsql AS $$
 DECLARE n INTEGER;
 BEGIN
-  -- >>> 查核階梯：手動任務（uuid）結案＝關閉（open 的才動）
+  -- >>> 查核階梯：手動任務（uuid）結案＝關閉（open 的才動）。只看「它自己的」查核（按自己的 task_id 累計，維持 work_key 之前的行為）：
+  --     同一張卡（同人同 need）被 auto: 任務的查核結案時，手動任務（網站請求、提議）留 open、不關
   UPDATE contribution_tasks t SET status = 'closed', closed_at = now()
-    FROM task_ladder_closed lc
-   WHERE lc.task_id = t.id::text AND t.status = 'open';
+   WHERE t.status = 'open'
+     AND EXISTS (
+       SELECT 1 FROM (SELECT x.outcome, row_number() OVER (ORDER BY x.checked_at, x.id) AS n
+                        FROM task_checks x
+                       WHERE x.task_id = t.id::text AND x.outcome IN ('not_found', 'confirmed') AND NOT task_check_ladder_exempt(x.task_id)) z
+        WHERE task_check_ladder_days(z.outcome, z.n) IS NULL);
   -- <<< 查核階梯
   WITH saturated AS (
     SELECT c.task_id FROM contributions c
@@ -429,12 +496,12 @@ BEGIN
     -- <<< 查核階梯
   )
   , cool AS (
-    -- 工作卡鍵（20261111100000）：同一張卡的查核一起算，冷卻取最晚的一筆（換號、換臂、手動任務與自動缺口都延續）
-    SELECT tc.work_key, max(tc.checked_at + (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL) AS until
-      FROM task_checks tc
-    WHERE tc.checked_at > now() - (task_check_cooldown_days_for(tc.task_id, tc.outcome, tc.checked_at, tc.id) || ' days')::INTERVAL
-      AND tc.checked_at > now() - make_interval(days => (SELECT task_cooldown_max_days()))
-    GROUP BY tc.work_key
+    -- 工作卡鍵（20261111100000）：同一張卡的查核一起算，冷卻取最晚的一筆（換號、換臂、手動任務與自動缺口都延續）；每個鍵只掃自己的 task_checks
+    SELECT k.work_key, s.cool_until AS until
+      FROM (SELECT DISTINCT tc.work_key FROM task_checks tc
+             WHERE tc.work_key IS NOT NULL AND tc.checked_at > now() - make_interval(days => (SELECT task_cooldown_max_days()))) k
+      CROSS JOIN LATERAL work_key_ladder_state(k.work_key) s
+     WHERE s.cool_until IS NOT NULL
   )
   -- >>> 多人分組任務：逐人冷卻
   , st AS MATERIALIZED (SELECT * FROM roster_group_person_status())
@@ -489,5 +556,5 @@ END $$;
 UPDATE task_checks SET work_key = COALESCE(task_work_key(task_id, NULL), 'task:' || task_id) WHERE work_key IS NULL;
 UPDATE contribution_task_leases SET work_key = COALESCE(task_work_key(task_id, NULL), 'task:' || task_id) WHERE work_key IS NULL;
 
--- 階梯與冷卻改按卡累計後，讓 blocked／cool_until 立刻同步（結案的卡一次收；之後仍由 seed 每 10 分鐘呼叫）
-SELECT refresh_dispatch_blocked();
+-- 不在這裡呼叫 refresh_dispatch_blocked()：階梯與冷卻改按卡累計後的 blocked／cool_until 由下一輪 seed（每 10 分鐘）同步。
+-- 上線前想先看「新視圖會讓幾張卡結案、幾件 auto 列變永久 blocked」：用 docs/dispatch-arms.md 第 8 節的唯讀 SQL（這支 migration 套用後也能跑）。

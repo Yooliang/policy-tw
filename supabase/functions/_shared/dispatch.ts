@@ -241,7 +241,8 @@ export function filterLeasedTasks<T extends TaskLike>(tasks: readonly T[], lease
   const mine = agentName.toLowerCase();
   const live = leases.filter((l) => new Date(l.leased_until) > now && l.agent_name.toLowerCase() !== mine);
   const heldByOthers = new Set(live.map((l) => l.target_key));
-  // 工作卡鍵（20261111100000）：同一張卡（不同任務代號）別人認領中也不派；任務或租約沒帶鍵就只比 target_key
+  // 工作卡鍵（20261111100000）：目前尚未生效的第二道保險——contribution_queue_tasks 的回傳型別沒有 work_key（加欄＝改簽名，要第二次上），
+  // 所以佇列列的 t.work_key 恆空、下面的比對不會命中；同一張卡的租約排除現在只靠 SQL（認領中那一段）。等回傳型別第二次上再接。任務或租約沒帶鍵就只比 target_key
   const heldWorkKeys = new Set(live.map((l) => l.work_key).filter((k): k is string => typeof k === "string" && k !== ""));
   return tasks.filter((t) => !heldByOthers.has(taskTargetKey(t)) && !(typeof t.work_key === "string" && heldWorkKeys.has(t.work_key)));
 }
