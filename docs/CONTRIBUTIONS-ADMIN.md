@@ -185,7 +185,7 @@ Authorization: Bearer <service role key>
 
 **兩種憑證，不能混用**：維護者動作帶 `Authorization: Bearer <Firebase ID token>`（同 `console-admin`，只收主控台擁有者）；執行者動作（`claim`／`complete`／`fail`）帶標頭 `x-strong-lane-key: <STRONG_LANE_KEY>`。沒帶憑證 401、鑰匙或帳號不對 403。`STRONG_LANE_KEY` 只在伺服器端（`finalize` 送 `/report`、`claim` 取 `/next` 都由函式自己帶）與執行者手上，瀏覽器與主控台永遠不經手，回應絕不含鑰匙、ip 雜湊、派工憑證。
 
-狀態：`queued` → `running` → `previewed` → `finalizing` → `finalized`；旁支 `returned`（退回人工）、`failed`（執行者回報或取不到題）、`finalize_failed`（`/report` 沒收下，**不自動重試**）。`running` 超過 30 分鐘沒 `complete` 自動回 `queued`。同一件任務同時只能有一筆 `queued`／`running`（資料庫唯一索引）；已有進行中、或 30 分鐘內才出爐（`previewed`／`finalizing`）的結果時再 `enqueue` 回 409（避免重複燒錢）。成因類別固定八個（資料庫 CHECK 與 TS 常數 `CAUSE_CATEGORIES` 同一份）：`來源難讀`、`前提過時`、`沒判斷型別`、`身分`、`拿錯名冊`、`規格不清`、`來源打不開`、`其他`。
+狀態：`queued` → `running` → `previewed` → `finalizing` → `finalized`；旁支 `returned`（退回人工）、`failed`（執行者回報或取不到題）、`finalize_failed`（`/report` 沒收下，**不自動重試**）。`running` 超過 30 分鐘沒 `complete` 自動回 `queued`；`finalizing` 超過 10 分鐘沒結果（函式中途死掉）回 `previewed` 並記 `last_error`（`/report` 若其實已收下，再 finalize 會被拒收、記 `finalize_failed`）。`claim` 取題遇 5xx／429／連線錯誤放回 `queued` 記 `last_error`，連續 3 次才 `failed`；只有 `/next` 回 `kind:none`（題已不在待辦）才直接 `failed`。同一件任務同時只能有一筆 `queued`／`running`（資料庫唯一索引）；已有進行中、或 30 分鐘內才出爐（`previewed`／`finalizing`，以 `completed_at` 算）的結果時再 `enqueue` 回 409（避免重複燒錢）。成因類別固定八個（資料庫 CHECK 與 TS 常數 `CAUSE_CATEGORIES` 同一份）：`來源難讀`、`前提過時`、`沒判斷型別`、`身分`、`拿錯名冊`、`規格不清`、`來源打不開`、`其他`。
 
 ### 維護者動作
 
@@ -207,7 +207,7 @@ Authorization: Bearer <service role key>
 // finalize：只收 previewed。伺服器端帶鑰匙 POST /report（adjudication，單一裁決即定案）；成功 finalized，失敗 finalize_failed（502，記錯誤、不重試）
 { "action": "finalize", "adjudication_id": "…" }   → { "success": true, "job": { "status": "finalized", "report_response": {…} } }
 
-// return_to_human：reason 必填；queued／running／previewed／finalize_failed／failed 可退，任務本身不動
+// return_to_human：reason 必填；只有 previewed／finalize_failed／failed 可退，任務本身不動
 { "action": "return_to_human", "adjudication_id": "…", "reason": "來源要人看" }
 
 // summary：since 選填（YYYY-MM-DD 或 ISO，預設 7 天），最多 500 件
@@ -245,4 +245,4 @@ POST … x-strong-lane-key: <STRONG_LANE_KEY>
 { "action": "fail", "adjudication_id": "<id>", "error": "原因" }
 ```
 
-`complete` 驗證失敗回 400 並指明欄位（verdict 不在三選一、`cause_category` 不在清單、`uphold_with_correction` 沒帶 `corrected_fields`、`reasoning` 少於 20 字…）；用量會同時寫一筆 `ai_usage_logs`（`function_type='verify'`，寫入失敗不影響結果）。新增 secrets：**無**（沿用既有 `STRONG_LANE_KEY`、`CONSOLE_OWNER_EMAIL`／`CONSOLE_FIREBASE_PROJECT_ID`）。
+`complete` 驗證失敗回 400 並指明欄位（tokens 上限 1000 萬、cost 上限 1000 美元，超過 400；verdict 不在三選一、`cause_category` 不在清單、`uphold_with_correction` 沒帶 `corrected_fields`、`reasoning` 少於 20 字…）；用量會同時寫一筆 `ai_usage_logs`（`function_type='verify'`，寫入失敗不影響結果）。新增 secrets：**無**（沿用既有 `STRONG_LANE_KEY`、`CONSOLE_OWNER_EMAIL`／`CONSOLE_FIREBASE_PROJECT_ID`）。

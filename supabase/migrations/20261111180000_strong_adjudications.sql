@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS strong_adjudications (
   returned_at        TIMESTAMPTZ,
   return_reason      TEXT,
   error              TEXT,
+  last_error         TEXT,
+  claim_failures     INTEGER NOT NULL DEFAULT 0,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );

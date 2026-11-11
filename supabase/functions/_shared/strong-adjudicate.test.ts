@@ -18,7 +18,7 @@ function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
     latestJobsByTask: async (ids) => rows.filter((r) => ids.includes(r.task_id)).sort((a, b) => b.created_at.localeCompare(a.created_at)),
     insertJob: async (r) => {
       if (rows.some((x) => x.task_id === r.task_id && (x.status === "queued" || x.status === "running"))) return { row: null, conflict: true };
-      const row = { id: `j${++n}`, ...r, status: "queued", claimed_by: null, claimed_at: null, completed_at: null, model: null, verdict: null, corrected_fields: null, reasoning: null, checked_urls: null, cause_category: null, cause_note: null, prompt_tokens: null, completion_tokens: null, cost: null, finalized_by: null, finalized_at: null, report_response: null, returned_by: null, returned_at: null, return_reason: null, error: null, created_at: NOW.toISOString(), updated_at: NOW.toISOString() } as JobRow;
+      const row = { id: `j${++n}`, ...r, status: "queued", claimed_by: null, claimed_at: null, completed_at: null, model: null, verdict: null, corrected_fields: null, reasoning: null, checked_urls: null, cause_category: null, cause_note: null, prompt_tokens: null, completion_tokens: null, cost: null, finalized_by: null, finalized_at: null, report_response: null, returned_by: null, returned_at: null, return_reason: null, error: null, last_error: null, claim_failures: 0, created_at: NOW.toISOString(), updated_at: NOW.toISOString() } as JobRow;
       rows.push(row);
       return { row, conflict: false };
     },
@@ -29,7 +29,12 @@ function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
       Object.assign(r, patch);
       return { ...r };
     },
-    requeueStale: async (cutoff) => { for (const r of rows) if (r.status === "running" && r.claimed_at && r.claimed_at < cutoff) Object.assign(r, { status: "queued", claimed_at: null }); },
+    requeueStale: async (c) => {
+      for (const r of rows) {
+        if (r.status === "running" && r.claimed_at && r.claimed_at < c.runningCutoff) Object.assign(r, { status: "queued", claimed_at: null });
+        if (r.status === "finalizing" && r.updated_at < c.finalizingCutoff) Object.assign(r, { status: "previewed", last_error: "finalize 逾時" });
+      }
+    },
     oldestQueued: async () => rows.filter((r) => r.status === "queued").sort((a, b) => a.created_at.localeCompare(b.created_at))[0] ?? null,
     jobsSince: async (s) => rows.filter((r) => r.created_at >= s),
     logUsage: async (u) => { usage.push(u); },
@@ -85,7 +90,7 @@ Deno.test("enqueue：不在待辦 404；已有排隊／執行中 409；剛出爐
   assertEquals((await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps)).status, 409);
   s.rows[0].status = "previewed";
   assertEquals((await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps)).status, 409);
-  s.rows[0].created_at = "2026-11-11T10:00:00Z"; // 兩小時前
+  s.rows[0].completed_at = "2026-11-11T10:00:00Z"; // 出爐在兩小時前（看 completed_at，不是 created_at）
   assertEquals((await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps)).status, 200);
 });
 
@@ -218,4 +223,86 @@ Deno.test("守門：成因類別 TS 常數與 migration CHECK 同一份；原始
   assert(c && /verify_jwt = false/.test(c[1]) && c[1].includes("./functions/strong-adjudicate/index.ts"));
   const idx = await read("../strong-adjudicate/index.ts");
   assert(idx.includes("handleStrongAdjudicate("));
+});
+
+Deno.test("claim：/next 5xx／連線錯誤放回 queued 記 last_error，連續 3 次才 failed；成功後歸零", async () => {
+  let mode: "500" | "throw" | "ok" = "500";
+  const s = setup({ fetchImpl: async () => { if (mode === "throw") throw new Error("boom"); return mode === "500" ? new Response("oops", { status: 503 }) : NEXT_OK(); } });
+  await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
+  assertEquals((await handleStrongAdjudicate(lane({ action: "claim" }), s.deps)).status, 502);
+  assertEquals(s.rows[0].status, "queued");
+  assertEquals(s.rows[0].claim_failures, 1);
+  assert(String(s.rows[0].last_error).includes("503"));
+  mode = "throw";
+  assertEquals((await handleStrongAdjudicate(lane({ action: "claim" }), s.deps)).status, 502);
+  assertEquals(s.rows[0].claim_failures, 2);
+  mode = "ok";
+  assertEquals((await (await handleStrongAdjudicate(lane({ action: "claim" }), s.deps)).json()).job.id, s.rows[0].id);
+  assertEquals(s.rows[0].claim_failures, 0);
+  assertEquals(s.rows[0].status, "running");
+  const s2 = setup({ fetchImpl: async () => new Response("x", { status: 500 }) });
+  await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s2.deps);
+  await handleStrongAdjudicate(lane({ action: "claim" }), s2.deps);
+  await handleStrongAdjudicate(lane({ action: "claim" }), s2.deps);
+  assertEquals(s2.rows[0].status, "queued");
+  await handleStrongAdjudicate(lane({ action: "claim" }), s2.deps);
+  assertEquals(s2.rows[0].status, "failed");
+  assertEquals(s2.rows[0].claim_failures, 3);
+});
+
+Deno.test("claim：kind:none 的 failed.error 只存 kind 與前 80 字原因", async () => {
+  const s = setup({ fetchImpl: async () => new Response(JSON.stringify({ kind: "none", reason: "x".repeat(300) }), { status: 200 }) });
+  await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
+  await handleStrongAdjudicate(lane({ action: "claim" }), s.deps);
+  assertEquals(s.rows[0].status, "failed");
+  assert(String(s.rows[0].error).length < 120 && String(s.rows[0].error).includes("none"));
+});
+
+Deno.test("finalizing 逾時（函式中途死掉）→ 回 previewed 記 last_error，可再 finalize；未逾時不動", async () => {
+  const s = await previewed();
+  s.rows[0].status = "finalizing";
+  s.rows[0].updated_at = "2026-11-11T11:55:00Z";
+  await handleStrongAdjudicate(maint({ action: "status", adjudication_id: s.rows[0].id }), s.deps);
+  assertEquals(s.rows[0].status, "finalizing");
+  s.rows[0].updated_at = "2026-11-11T11:40:00Z";
+  const body = await (await handleStrongAdjudicate(maint({ action: "status", adjudication_id: s.rows[0].id }), s.deps)).json();
+  assertEquals(body.job.status, "previewed");
+  assert(body.job.last_error);
+  assertEquals((await handleStrongAdjudicate(maint({ action: "finalize", adjudication_id: s.rows[0].id }), s.deps)).status, 200);
+});
+
+Deno.test("return_to_human：只收 previewed／failed／finalize_failed；queued／running／finalizing 不行", async () => {
+  const s = await previewed();
+  for (const st of ["running", "finalizing", "queued"] as const) {
+    s.rows[0].status = st;
+    s.rows[0].updated_at = NOW.toISOString();
+    assertEquals((await handleStrongAdjudicate(maint({ action: "return_to_human", adjudication_id: s.rows[0].id, reason: "x" }), s.deps)).status, 409, st);
+  }
+  for (const st of ["failed", "finalize_failed"] as const) {
+    s.rows[0].status = st;
+    assertEquals((await handleStrongAdjudicate(maint({ action: "return_to_human", adjudication_id: s.rows[0].id, reason: "x" }), s.deps)).status, 200, st);
+    s.rows[0].status = "previewed";
+  }
+});
+
+Deno.test("complete：tokens／cost 超上限回 400 不是 500", async () => {
+  const s = setup({ fetchImpl: async () => NEXT_OK() });
+  await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
+  await handleStrongAdjudicate(lane({ action: "claim" }), s.deps);
+  for (const bad of [{ cost: 1e7 }, { prompt_tokens: 2e9 }, { completion_tokens: 1.5 }]) {
+    assertEquals((await handleStrongAdjudicate(lane({ action: "complete", adjudication_id: s.rows[0].id, ...RESULT, ...bad }), s.deps)).status, 400, JSON.stringify(bad));
+  }
+});
+
+Deno.test("finalize：回應 scrub（/report 回的 ip 雜湊、派工憑證不外流）；執行者鑰匙打 finalize 回 401", async () => {
+  const s = await previewed();
+  assertEquals((await handleStrongAdjudicate(lane({ action: "finalize", adjudication_id: s.rows[0].id }), s.deps)).status, 401);
+  assertEquals(s.rows[0].status, "previewed");
+  s.deps.fetchImpl = (async () => new Response(JSON.stringify({ success: true, contributor_ip_hash: "LEAKHASH", dispatch_token: "LEAKTOK", nested: { ip_hash: "LEAK2", ok: 1 } }), { status: 200 })) as typeof fetch;
+  const res = await handleStrongAdjudicate(maint({ action: "finalize", adjudication_id: s.rows[0].id }), s.deps);
+  const text = await res.text();
+  assertEquals(res.status, 200);
+  assert(!/LEAK/.test(text) && !text.includes(KEY));
+  assertEquals(JSON.parse(text).job.report_response.nested, { ok: 1 });
+  assert(!JSON.stringify(s.rows[0].report_response).includes("LEAK"));
 });

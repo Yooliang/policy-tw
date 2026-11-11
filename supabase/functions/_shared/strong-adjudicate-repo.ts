@@ -44,9 +44,12 @@ export function supabaseRepo(supabase: SupabaseLike): Repo {
       if (error) throw new Error(`transition: ${error.message}`);
       return (data ?? null) as JobRow | null;
     },
-    async requeueStale(cutoffIso) {
-      const { error } = await supabase.from("strong_adjudications").update({ status: "queued", claimed_by: null, claimed_at: null }).eq("status", "running").lt("claimed_at", cutoffIso);
+    async requeueStale({ runningCutoff, finalizingCutoff }) {
+      const { error } = await supabase.from("strong_adjudications").update({ status: "queued", claimed_by: null, claimed_at: null }).eq("status", "running").lt("claimed_at", runningCutoff);
       if (error) throw new Error(`requeueStale: ${error.message}`);
+      // finalizing 卡住（函式中途死掉）：回 previewed 讓維護者可再 finalize；若 /report 其實已收下，再送會被拒收、記 finalize_failed
+      const fin = await supabase.from("strong_adjudications").update({ status: "previewed", last_error: "finalize 逾時沒有結果，已回到待送出；若 /report 其實已收下，再送會被拒收" }).eq("status", "finalizing").lt("updated_at", finalizingCutoff);
+      if (fin.error) throw new Error(`requeueStale finalizing: ${fin.error.message}`);
     },
     async oldestQueued() {
       const { data, error } = await supabase.from("strong_adjudications").select("*").eq("status", "queued").order("created_at", { ascending: true }).limit(1);

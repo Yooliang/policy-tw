@@ -25,6 +25,12 @@ export const RUNNER_AGENT_NAME = "console-strong-adjudicate";
 export const RECENT_WINDOW_MIN = 30;
 /** running 超過這麼久沒 complete 就自動退回 queued */
 export const RUNNING_STALE_MIN = 30;
+/** finalizing 超過這麼久沒結果（函式中途死掉）就收回 previewed */
+export const FINALIZING_STALE_MIN = 10;
+/** claim 取題連續暫時性失敗幾次才標 failed */
+export const MAX_CLAIM_FAILURES = 3;
+export const MAX_TOKENS = 10_000_000;
+export const MAX_COST_USD = 1000;
 export const MAX_REASONING = 1000;
 export const MIN_REASONING = 20; // /report 的 reason 至少 20 字
 export const MAX_CAUSE_NOTE = 300;
@@ -32,7 +38,7 @@ export const SUMMARY_LIMIT = 500;
 
 export interface JobRow {
   id: string; task_id: string; contribution_id: string | null; status: JobStatus;
-  requested_by: string; claimed_by: string | null; claimed_at: string | null; completed_at: string | null;
+  requested_by: string; claimed_by: string | null; claimed_at: string | null; completed_at: string | null; last_error: string | null; claim_failures: number;
   model: string | null; verdict: string | null; corrected_fields: Obj | null; reasoning: string | null; checked_urls: string[] | null;
   cause_category: string | null; cause_note: string | null;
   prompt_tokens: number | null; completion_tokens: number | null; cost: number | null;
@@ -53,7 +59,8 @@ export interface Repo {
   getJob(id: string): Promise<JobRow | null>;
   /** 只有現況在 from 裡才改（條件式 UPDATE）；改到回新列，沒改到回 null */
   transition(id: string, from: JobStatus[], patch: Partial<JobRow>): Promise<JobRow | null>;
-  requeueStale(cutoffIso: string): Promise<void>;
+  /** running 的 claimed_at 早於 runningCutoff 回 queued；finalizing 的 updated_at 早於 finalizingCutoff 回 previewed（記 last_error） */
+  requeueStale(cutoffs: { runningCutoff: string; finalizingCutoff: string }): Promise<void>;
   oldestQueued(): Promise<JobRow | null>;
   jobsSince(sinceIso: string, limit: number): Promise<JobRow[]>;
   logUsage(u: UsageLog): Promise<void>;
@@ -107,7 +114,7 @@ export function scrub<T>(v: T): T {
 export function publicJob(j: JobRow): Obj {
   return {
     id: j.id, task_id: j.task_id, contribution_id: j.contribution_id, status: j.status, requested_by: j.requested_by,
-    created_at: j.created_at, claimed_at: j.claimed_at, completed_at: j.completed_at, model: j.model,
+    created_at: j.created_at, claimed_at: j.claimed_at, completed_at: j.completed_at, last_error: j.last_error, model: j.model,
     verdict: j.verdict, corrected_fields: j.corrected_fields, reasoning: j.reasoning, checked_urls: j.checked_urls,
     cause_category: j.cause_category, cause_note: j.cause_note,
     prompt_tokens: j.prompt_tokens, completion_tokens: j.completion_tokens, cost: j.cost,
@@ -149,10 +156,10 @@ export function parseResult(b: Obj): { error: string } | { value: Obj } {
   const num = (k: string, int: boolean): number | null | "bad" => {
     const v = b[k];
     if (v === undefined || v === null) return null;
-    return typeof v === "number" && Number.isFinite(v) && v >= 0 && (!int || Number.isInteger(v)) ? v : "bad";
+    return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= (int ? MAX_TOKENS : MAX_COST_USD) && (!int || Number.isInteger(v)) ? v : "bad";
   };
   const pt = num("prompt_tokens", true), ct = num("completion_tokens", true), cost = num("cost", false);
-  if (pt === "bad" || ct === "bad" || cost === "bad") return { error: "prompt_tokens／completion_tokens 要是非負整數，cost 要是非負數字" };
+  if (pt === "bad" || ct === "bad" || cost === "bad") return { error: `prompt_tokens／completion_tokens 要是 0～${MAX_TOKENS} 的整數，cost 要是 0～${MAX_COST_USD} 的數字` };
   let urls: string[] = [];
   if (b.checked_urls !== undefined && b.checked_urls !== null) {
     if (!Array.isArray(b.checked_urls) || b.checked_urls.length > 30 || !b.checked_urls.every((u) => typeof u === "string" && /^https?:\/\//.test(u))) return { error: "checked_urls 要是最多 30 個 http(s) 網址的陣列" };
@@ -216,6 +223,8 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
   const fetchImpl = deps.fetchImpl ?? fetch;
   const iso = (ms: number) => new Date(now.getTime() + ms).toISOString();
 
+  if (action === "list" || action === "status") await repo.requeueStale({ runningCutoff: iso(-RUNNING_STALE_MIN * 60_000), finalizingCutoff: iso(-FINALIZING_STALE_MIN * 60_000) });
+
   if (action === "list") {
     const raw = await repo.strongLaneList();
     const items = Array.isArray(raw.items) ? (raw.items as Obj[]) : [];
@@ -231,10 +240,10 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
     const items = ((await repo.strongLaneList()).items ?? []) as Obj[];
     const open = items.find((i) => String(i.task_id) === taskId);
     if (!open) return fail("這件不在強模型待辦（已結案或不是強模型任務）", 404);
-    await repo.requeueStale(iso(-RUNNING_STALE_MIN * 60_000));
+    await repo.requeueStale({ runningCutoff: iso(-RUNNING_STALE_MIN * 60_000), finalizingCutoff: iso(-FINALIZING_STALE_MIN * 60_000) });
     const since = iso(-RECENT_WINDOW_MIN * 60_000);
     const blocking = (await repo.jobsForTask(taskId, 20)).find((j) =>
-      j.status === "queued" || j.status === "running" || ((j.status === "previewed" || j.status === "finalizing") && j.created_at >= since));
+      j.status === "queued" || j.status === "running" || ((j.status === "previewed" || j.status === "finalizing") && (j.completed_at ?? j.created_at) >= since));
     if (blocking) return fail("這件已有進行中或剛出爐的裁決，先處理它（避免重複燒錢）", 409, { job: publicJob(blocking) });
     const { row, conflict } = await repo.insertJob({ task_id: taskId, contribution_id: open.contribution_id ? String(open.contribution_id) : null, requested_by: actor });
     if (conflict || !row) return fail("這件已有排隊或執行中的裁決", 409);
@@ -269,26 +278,44 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
   }
 
   if (action === "claim") {
-    await repo.requeueStale(iso(-RUNNING_STALE_MIN * 60_000));
+    await repo.requeueStale({ runningCutoff: iso(-RUNNING_STALE_MIN * 60_000), finalizingCutoff: iso(-FINALIZING_STALE_MIN * 60_000) });
     for (let attempt = 0; attempt < 5; attempt++) {
       const next = await repo.oldestQueued();
       if (!next) return json({ success: true, job: null, message: "沒有排隊中的裁決" });
       const claimed = await repo.transition(next.id, ["queued"], { status: "running", claimed_by: nonEmpty(b.runner) ? String(b.runner).slice(0, 80) : actor, claimed_at: iso(0) });
       if (!claimed) continue; // 被別的執行者搶走，換下一筆
       const q = new URLSearchParams({ lane: "strong", task_id: claimed.task_id, agent_name: RUNNER_AGENT_NAME });
+      // /next 暫時性失敗（網路、5xx、429、其他非預期回應）：放回 queued、記 last_error，連續 MAX_CLAIM_FAILURES 次才 failed
+      const transient = async (why: string): Promise<Response | null> => {
+        const failures = (claimed.claim_failures ?? 0) + 1;
+        const giveUp = failures >= MAX_CLAIM_FAILURES;
+        await repo.transition(claimed.id, ["running"], giveUp
+          ? { status: "failed", claim_failures: failures, last_error: why, error: `連續 ${failures} 次取不到題目：${why}`, completed_at: iso(0) }
+          : { status: "queued", claimed_by: null, claimed_at: null, claim_failures: failures, last_error: why });
+        return giveUp ? null : fail("取題暫時失敗，已放回排隊，請稍後重試", 502);
+      };
       let res: Response;
       try {
         res = await fetchImpl(`${deps.functionsBase}/next?${q}`, { headers: { [STRONG_KEY_HEADER]: deps.laneKey! } });
       } catch (e) {
-        console.error("strong-adjudicate claim /next 失敗:", errMsg(e));
-        await repo.transition(claimed.id, ["running"], { status: "queued", claimed_by: null, claimed_at: null });
-        return fail("取題失敗，已放回排隊，請稍後重試", 502);
+        console.error("strong-adjudicate claim /next 連線失敗:", errMsg(e));
+        const r = await transient("連線失敗");
+        if (r) return r;
+        continue;
       }
       const nb = (await res.json().catch(() => ({}))) as Obj;
-      if (!res.ok || nb.kind !== "task" || !nb.item) {
-        await repo.transition(claimed.id, ["running"], { status: "failed", error: `取不到題目（HTTP ${res.status}，${String(nb.kind ?? nb.error ?? "")}）：${String(nb.reason ?? nb.message ?? "").slice(0, 200)}` });
-        continue; // 這件已不在待辦，看下一筆
+      if (res.ok && nb.kind === "none") {
+        // 題已不在待辦（別人裁決了、已結案）：這筆才算 failed；只存 kind 與前 80 字的原因
+        await repo.transition(claimed.id, ["running"], { status: "failed", error: `取不到題目（none）：${String(nb.reason ?? nb.message ?? "").slice(0, 80)}`, completed_at: iso(0) });
+        continue;
       }
+      if (!res.ok || nb.kind !== "task" || !nb.item) {
+        console.error(`strong-adjudicate claim /next 非預期回應 HTTP ${res.status}`);
+        const r = await transient(`HTTP ${res.status}（${String(nb.kind ?? nb.error ?? "").slice(0, 40)}）`);
+        if (r) return r;
+        continue;
+      }
+      if ((claimed.claim_failures ?? 0) > 0) await repo.transition(claimed.id, ["running"], { claim_failures: 0 });
       return json({
         success: true, job: publicJob(claimed),
         task: scrub({ item: nb.item, type_spec: nb.type_spec ?? null, dispute: nb.dispute ?? null, current: nb.current ?? null, how_to: nb.how_to ?? null }),
@@ -324,7 +351,7 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
 
   if (action === "return_to_human") {
     if (!nonEmpty(b.reason)) return fail("reason 必填", 400);
-    const done = await repo.transition(id, ["queued", "running", "previewed", "finalize_failed", "failed"], { status: "returned", returned_by: actor, returned_at: iso(0), return_reason: b.reason.trim().slice(0, 500) });
+    const done = await repo.transition(id, ["previewed", "finalize_failed", "failed"], { status: "returned", returned_by: actor, returned_at: iso(0), return_reason: b.reason.trim().slice(0, 500) });
     return done ? json({ success: true, job: publicJob(done) }) : fail(`現在是 ${job.status}，不能退回人工`, 409);
   }
 
