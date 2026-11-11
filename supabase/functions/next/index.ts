@@ -510,6 +510,15 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           created_at: pick.created_at,
           // 這一型的交件欄位與驗證要點（協議 1.93.0：從 skill.md 搬出來，隨派工送）
           type_spec: typeSpecForVerify(pick.contribution_type),
+          // 必須指認的件（1.129.0）：同意票一定要帶 resolved_politician_id（候選之一的 id，都不是填 "new"），沒帶收票當下就退回重投（不算退件）
+          ...((verifyCurrent as Record<string, unknown>).identity_pick_required === true
+            ? {
+              identity_pick_required: true,
+              candidates: ((verifyCurrent as Record<string, unknown>).identity_candidates as Array<Record<string, unknown>> | undefined ?? [])
+                .map((c) => ({ id: c.id, name: c.name, birth_year: c.birth_year ?? null, region: c.region ?? null, party: c.party ?? null })),
+              identity_pick_instruction: "這一筆站上有同名的人、系統判不出是哪一位：投 agree 前先判斷，並在 resolved_politician_id 填 candidates 裡的 id，都不是填 \"new\"。沒帶會被退回重投（不算退件、不扣分）。",
+            }
+            : {}),
           // 爭點驗證：只有超過線的才有這個欄位（votes、prior 每一票的 verdict／agent／note／evidence_url／at、instruction）
           ...(dispute ? { dispute } : {}),
           // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
