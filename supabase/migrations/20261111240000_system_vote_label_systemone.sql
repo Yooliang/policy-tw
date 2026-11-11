@@ -4,8 +4,9 @@
 --      （model_display_name 照舊回 'Jev（系統）'；比對條件新舊兩個名稱都認，之後資料值改名也不用再動這裡）。
 -- 簽名不變、SECURITY／search_path 原樣；CREATE OR REPLACE 不動既有 GRANT／COMMENT，不用分兩次上。
 -- 前端（lib/model-quality.ts、lib/model-flow.ts）與主控台（policy-console #143）新舊標籤都認。
--- 涵蓋：model_vote_stats（抄自 20261007160000）、model_flow_stats（20261102030000）、model_flow_paths（20261102160000）、
---       policy_jp.model_vote_stats（20261009200000，標籤與正見同一字串）。
+-- 涵蓋：model_vote_stats(INTEGER)（抄自 20261003000003）、model_vote_stats(TIMESTAMPTZ, TIMESTAMPTZ)（抄自 20261007160000）、model_flow_stats（20261102030000）、model_flow_paths（20261102160000）、
+--       policy_jp.model_vote_stats（20261009200000，標籤與正見同一字串；日本站沒有天數版）。
+-- 注意：檔名不含 _policy_jp_，policy-jp-dispatch-drift 的 migration 掃描不會掃這份（日本版跟進靠 policy-jp-public-stats.test.ts 的 STATS_FOLLOWED）。
 
 CREATE OR REPLACE FUNCTION model_vote_stats(p_since TIMESTAMPTZ, p_until TIMESTAMPTZ)
 RETURNS TABLE (model TEXT, votes BIGINT, agree BIGINT, disagree BIGINT, unsure BIGINT, wrong BIGINT, raw_tools JSONB)
@@ -17,6 +18,44 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
       JOIN contributions c ON c.id = v.contribution_id
      WHERE v.created_at >= GREATEST(COALESCE(p_since, now() - INTERVAL '90 days'), now() - INTERVAL '90 days')
        AND (p_until IS NULL OR v.created_at < p_until)
+       AND c.status IN ('applied', 'rejected')
+  ), t AS MATERIALIZED (
+    SELECT d.tool_key, model_display_name(NULLIF(d.tool_key, '')) AS model FROM (SELECT DISTINCT COALESCE(agent_tool, '') AS tool_key FROM v) d
+  ), j AS (
+    SELECT CASE WHEN v.is_system OR t.model IN ('Jev（系統）', 'SystemOne（系統）') THEN '系統票（SystemOne）' ELSE t.model END AS model, v.*
+      FROM v JOIN t ON t.tool_key = COALESCE(v.agent_tool, '')
+  ), raw AS (
+    SELECT r.model, jsonb_agg(jsonb_build_object('tool', r.agent_tool, 'n', r.n) ORDER BY r.n DESC, r.agent_tool) AS raw_tools
+      FROM (
+        SELECT j.model, j.agent_tool, COUNT(*) AS n, row_number() OVER (PARTITION BY j.model ORDER BY COUNT(*) DESC, j.agent_tool) AS rk
+          FROM j GROUP BY j.model, j.agent_tool
+      ) r
+     WHERE r.rk <= 20
+     GROUP BY r.model
+  ), agg AS (
+    SELECT j.model,
+           COUNT(*) AS votes,
+           COUNT(*) FILTER (WHERE j.verdict = 'agree') AS agree,
+           COUNT(*) FILTER (WHERE j.verdict = 'disagree') AS disagree,
+           COUNT(*) FILTER (WHERE j.verdict = 'unsure') AS unsure,
+           COUNT(*) FILTER (WHERE (j.verdict = 'agree' AND j.status = 'rejected') OR (j.verdict = 'disagree' AND j.status = 'applied')) AS wrong
+      FROM j GROUP BY j.model
+  )
+  SELECT agg.model, agg.votes, agg.agree, agg.disagree, agg.unsure, agg.wrong, raw.raw_tools
+    FROM agg LEFT JOIN raw ON raw.model = agg.model
+   ORDER BY agg.votes DESC, agg.model
+$$;
+
+-- 抄自 20261003000003_model_quality_stats.sql（天數版；/stats 的 ModelQualityPanel 用的就是這支：rpc('model_vote_stats', { p_days })）
+CREATE OR REPLACE FUNCTION model_vote_stats(p_days INTEGER DEFAULT 14)
+RETURNS TABLE (model TEXT, votes BIGINT, agree BIGINT, disagree BIGINT, unsure BIGINT, wrong BIGINT, raw_tools JSONB)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  WITH v AS (
+    SELECT v.agent_tool, v.verdict, c.status,
+           (v.agent_name LIKE 'jev%' OR COALESCE(v.via, '') ILIKE '%system%') AS is_system
+      FROM contribution_votes v
+      JOIN contributions c ON c.id = v.contribution_id
+     WHERE v.created_at > now() - make_interval(days => LEAST(GREATEST(COALESCE(p_days, 14), 1), 90))
        AND c.status IN ('applied', 'rejected')
   ), t AS MATERIALIZED (
     SELECT d.tool_key, model_display_name(NULLIF(d.tool_key, '')) AS model FROM (SELECT DISTINCT COALESCE(agent_tool, '') AS tool_key FROM v) d
