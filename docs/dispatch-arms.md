@@ -268,6 +268,8 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 
 看某一件任務被領了幾次、誰領了沒交：`SELECT at, agent_name, event, meta->>'by' FROM lease_events WHERE task_id = '…' AND at >= now() - interval '7 days' ORDER BY at;`（自己查的也要帶時限）。還沒結案的租約（30 分鐘內）不在 reported／expired 裡，所以 issued 會略大於三者之和。
 
+統計的精度限制（量到的是趨勢，不是逐筆帳）：①交件時釋放租約只依 `task_id`、不看 `agent_name`，別的代理交了同一個任務、刪到你的租約，會記成你的 `reported`；②刪租約失敗時程式只 `console.error`，租約留著，之後 purge 清掉時記成 `expired`，等於把一次已交件算成不交；③`reported` 的推斷只認 `contributions.task_id`，或 `no_change` 型別的 `payload.task_id`（只有它有部分索引），其他型別只帶 payload 的交件會被記成 `released`。
+
 ## 6. 對照檔案
 
 - 排序鍵、冷卻、`cooling`：`supabase/migrations/20261011320000_queue_priority_seconds.sql`、`20261107000000_not_found_no_verify_2d.sql`、`20261107010000_manual_front_pull_skips_not_found_cooling.sql`

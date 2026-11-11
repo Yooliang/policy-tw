@@ -49,7 +49,9 @@ DECLARE
 BEGIN
   IF v_forced IN ('reported', 'released', 'expired') THEN
     v_event := v_forced; v_by := 'setting';
-  ELSIF EXISTS (SELECT 1 FROM contributions c WHERE c.task_id = OLD.task_id AND c.created_at >= OLD.created_at) THEN
+  ELSIF EXISTS (SELECT 1 FROM contributions c WHERE c.task_id = OLD.task_id AND c.created_at >= OLD.created_at)
+     -- 交件也可能只帶 payload.task_id（contribute-handler：item.task_id ?? payload.task_id）；只有 no_change 有 payload->>'task_id' 的部分索引，所以條件帶 contribution_type 才走得到它
+     OR EXISTS (SELECT 1 FROM contributions c WHERE c.contribution_type = 'no_change' AND c.payload->>'task_id' = OLD.task_id AND c.created_at >= OLD.created_at) THEN
     v_event := 'reported'; v_by := 'contribution_after_lease';
   ELSIF OLD.leased_until < now() THEN
     v_event := 'expired'; v_by := 'leased_until_passed';

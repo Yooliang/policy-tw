@@ -20,7 +20,7 @@ CREATE ROLE service_role; CREATE ROLE anon; CREATE ROLE authenticated;
 CREATE TABLE contribution_task_leases (
   task_id TEXT PRIMARY KEY, target_key TEXT NOT NULL, agent_name TEXT NOT NULL, ip_hash TEXT NOT NULL,
   leased_until TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
-CREATE TABLE contributions (id SERIAL PRIMARY KEY, task_id TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE contributions (id SERIAL PRIMARY KEY, task_id TEXT, contribution_type TEXT, payload JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE verify_dispatches (contribution_id TEXT, ip_hash TEXT, agent_name TEXT, dispatched_at TIMESTAMPTZ);
 CREATE TABLE contribution_task_skips (task_id TEXT, ip_hash TEXT, agent_name TEXT, skipped_at TIMESTAMPTZ);
 CREATE TABLE dispatch_records_settings (
@@ -61,7 +61,19 @@ Deno.test("A2 租約建立後有人交件、再刪除＝reported", async () => {
   assertEquals(ev[1].by, "contribution_after_lease");
 });
 
-Deno.test("A3 沒交件、沒過期就刪（skip 主動釋放）＝released", async () => {
+Deno.test("A2b 交件只帶 payload.task_id（no_change）也算 reported；其他型別只帶 payload 不算（索引限制）", async () => {
+  const db = await fresh();
+  await lease(db, "t2b");
+  await db.exec(`INSERT INTO contributions (task_id, contribution_type, payload) VALUES (NULL, 'no_change', '{"task_id":"t2b"}')`);
+  await db.exec(`DELETE FROM contribution_task_leases WHERE task_id = 't2b'`);
+  assertEquals((await events(db, "t2b")).map((e) => e.event), ["issued", "reported"]);
+  await lease(db, "t2c");
+  await db.exec(`INSERT INTO contributions (task_id, contribution_type, payload) VALUES (NULL, 'candidacy', '{"task_id":"t2c"}')`);
+  await db.exec(`DELETE FROM contribution_task_leases WHERE task_id = 't2c'`);
+  assertEquals((await events(db, "t2c")).map((e) => e.event), ["issued", "released"]);
+});
+
+Deno.test("A3沒交件、沒過期就刪（skip 主動釋放）＝released", async () => {
   const db = await fresh();
   await lease(db, "t3");
   await db.exec(`DELETE FROM contribution_task_leases WHERE task_id = 't3'`);
@@ -144,7 +156,7 @@ Deno.test("D 視圖 lease_outcomes_7d：只算 7 天內、依代理統計、不�
 });
 
 Deno.test("E 文字層：視圖有 7 天時限、保留天數預設與 CHECK 下限 ＞ 回看期 ＋ 邊際", () => {
-  const view = /CREATE OR REPLACE VIEW lease_outcomes_7d[\s\S]*?;\n/.exec(MIG)?.[0] ?? "";
+  const view = /CREATE OR REPLACE VIEW lease_outcomes_7d[\s\S]*?;\r?\n/.exec(MIG)?.[0] ?? "";
   const m = /\bat\s*>=\s*now\(\)\s*-\s*interval\s*'(\d+)\s*days'/i.exec(view);
   assert(m, "lease_outcomes_7d 沒有 at >= now() - interval 'N days' 時限");
   const lookbackHours = Number(m[1]) * 24;
@@ -161,6 +173,22 @@ Deno.test("E2 其他 migration 不得讀 lease_events 而沒有時限（目前�
   for await (const f of Deno.readDir(new URL("../../migrations/", import.meta.url))) {
     if (f.name === MIG_NAME) continue;
     const sql = await Deno.readTextFile(new URL(`../../migrations/${f.name}`, import.meta.url));
-    assert(!/\bFROM\s+lease_events\b/i.test(sql), `${f.name} 讀 lease_events：請加時限並更新守門`);
+    assert(!/\b(FROM|JOIN)\s+(public\.)?lease_events\b/i.test(sql), `${f.name} 讀 lease_events：請加時限並更新守門`);
   }
+});
+
+Deno.test("E3 程式端（supabase/functions/**/*.ts，不含測試）不得讀 lease_events／lease_outcomes_7d", async () => {
+  const root = new URL("../", import.meta.url);
+  const bad: string[] = [];
+  async function walk(dir: URL): Promise<void> {
+    for await (const e of Deno.readDir(dir)) {
+      const u = new URL(e.name + (e.isDirectory ? "/" : ""), dir);
+      if (e.isDirectory) { await walk(u); continue; }
+      if (!e.name.endsWith(".ts") || e.name.endsWith(".test.ts")) continue;
+      const text = await Deno.readTextFile(u);
+      if (/from\(\s*["'`](lease_events|lease_outcomes_7d)["'`]/.test(text) || /\b(FROM|JOIN)\s+(lease_events|lease_outcomes_7d)\b/i.test(text)) bad.push(u.pathname);
+    }
+  }
+  await walk(root);
+  assertEquals(bad, [], "程式端讀 lease_events 必須有 at 時限，並更新這支守門與 dispatch-records-purge 的回看期");
 });
