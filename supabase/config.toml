@@ -532,6 +532,12 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/sources/index.ts"
 
+[functions.trace]
+enabled = true
+# /trace 重播頁的資料端點（service_role 呼叫 trace_events，分段合併、全站快取 60 秒），公開唯讀、不驗 JWT
+verify_jwt = false
+entrypoint = "./functions/trace/index.ts"
+
 [functions.news-fetch]
 enabled = true
 # 新聞來源逐則收進 news_items（pg_cron 每小時呼叫，不驗 JWT；同一來源 30 分鐘內抓過就跳過）

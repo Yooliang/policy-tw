@@ -143,9 +143,9 @@ export function eventText(e: TraceEvent): string {
     case 'vote': return `${who || '有代理'}投了「${VERDICT[detailText(e, 'verdict')] ?? '一票'}」`
     case 'system_vote': {
       const n = e.detail?.supported_sources
-      return `Jev 系統票：${SOURCE_CHOICE[detailText(e, 'choice')] ?? '已判定'}${typeof n === 'number' ? `（核得過 ${n} 個獨立來源）` : ''}`
+      return `SystemOne 系統票：${SOURCE_CHOICE[detailText(e, 'choice')] ?? '已判定'}${typeof n === 'number' ? `（核得過 ${n} 個獨立來源）` : ''}`
     }
-    case 'system_check': return `Jev ${CHECK_QUESTION[detailText(e, 'question')] ?? '系統判定'}${SOURCE_CHOICE[detailText(e, 'choice')] ? `：${SOURCE_CHOICE[detailText(e, 'choice')]}` : ''}`
+    case 'system_check': return `SystemOne ${CHECK_QUESTION[detailText(e, 'question')] ?? '系統判定'}${SOURCE_CHOICE[detailText(e, 'choice')] ? `：${SOURCE_CHOICE[detailText(e, 'choice')]}` : ''}`
     case 'disputed': return detail_bool(e, 'strong') ? '轉為爭議，交強模型通道裁決' : detail_bool(e, 'overvoted') ? '投太多輪，停止派驗證、轉為爭議' : '轉為爭議，等待裁決'
     case 'strong_claim': return `${who || '強模型'}領走強模型裁決`
     case 'strong_finalized': return `強模型定案：${STRONG_VERDICT[detailText(e, 'verdict')] ?? '已裁決'}`
@@ -238,14 +238,15 @@ export function strongBreakdown(items: readonly TraceItem[], upTo: number = item
 }
 
 /** 前 upTo 筆事件裡系統票各選項的數量（支持／不支持／無法判斷） */
-export function systemVoteBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { supported: number; notSupported: number; other: number } {
-  const out = { supported: 0, notSupported: 0, other: 0 }
+export function systemVoteBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { supported: number; notSupported: number; cannotTell: number; other: number } {
+  const out = { supported: 0, notSupported: 0, cannotTell: 0, other: 0 }
   const last = Math.min(upTo, items.length - 1)
   for (let i = 0; i <= last; i++) {
     if (items[i].kind !== 'system_vote') continue
     const c = typeof items[i].detail?.choice === 'string' ? items[i].detail.choice : ''
     if (c === 'supported') out.supported++
     else if (c === 'not_supported') out.notSupported++
+    else if (c === 'cannot_tell') out.cannotTell++
     else out.other++
   }
   return out

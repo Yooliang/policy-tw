@@ -11,7 +11,7 @@ export const NODE_H = 36
 export type Side = 't' | 'b' | 'l' | 'r'
 export type Pt = [number, number]
 
-/** 框型：系統節點＝實線方框、代理節點＝圓角框、Jev＝雙線框、終點＝粗框填底 */
+/** 框型：系統節點＝實線方框、代理節點＝圓角框、SystemOne＝雙線框、終點＝粗框填底 */
 export type NodeKind = 'system' | 'agent' | 'jev' | 'end'
 
 export interface NodeDef {
@@ -33,8 +33,8 @@ export const NODE_DEFS: readonly NodeDef[] = [
   { id: 'applied', label: '落庫上線', kind: 'end', cx: 87, cy: 615 },
   { id: 'visitor', label: '訪客請求', kind: 'agent', cx: 261, cy: 41 },
   { id: 'suggest', label: '代理提議', kind: 'agent', cx: 436, cy: 41 },
-  { id: 'jevSort', label: 'Jev 整理', kind: 'jev', cx: 436, cy: 287 },
-  { id: 'jevVote', label: 'Jev 系統票', kind: 'jev', cx: 436, cy: 451 },
+  { id: 'jevSort', label: 'SystemOne 整理', kind: 'jev', cx: 436, cy: 287 },
+  { id: 'jevVote', label: 'SystemOne 系統票', kind: 'jev', cx: 436, cy: 451 },
   { id: 'submit', label: '代理交件', kind: 'agent', cx: 436, cy: 369 },
   { id: 'notfound', label: '查無', kind: 'system', cx: 610, cy: 369 },
   { id: 'cooldown', label: '冷卻 5／10／20 天', kind: 'system', cx: 610, cy: 205 },

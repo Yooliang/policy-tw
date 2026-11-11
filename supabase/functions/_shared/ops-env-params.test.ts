@@ -145,6 +145,7 @@ const NOT_REDIRECTED: Record<string, string> = {
   "roster-reconcile": "名冊對帳：系統建參選紀錄（cron 打 Supabase，要帶憑證），不對外、不是代理協議",
   "cec-roster-mirror": "中選會選舉專區名冊鏡像（cron 打 Supabase，要帶憑證），不對外、不是代理協議",
   "source-archive": "排程存檔，不對外",
+  "trace": "/trace 重播頁的資料端點：瀏覽器（lib/trace-api.ts）直接打 Supabase 的 functions 網域，不經網站網域，不是代理協議",
   "jp-next": "日本站（policy_jp）的派工端點，代理照日本站 skill.md 直接打 Supabase 的端點根網址，不經正見.tw 的 Worker",
   "jp-report": "日本站（policy_jp）的回報端點，同 jp-next",
   "jp-contributions-feed": "日本站（policy_jp）貢獻看板的公開唯讀資料，同 jp-next",

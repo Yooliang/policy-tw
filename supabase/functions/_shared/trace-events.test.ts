@@ -14,10 +14,11 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 // 目前生效的是最後一版（CREATE OR REPLACE 整支）：160000 起多 Jev 系統票與系統判定
-const TRACE_MIG = "20261111210000_trace_events_perf.sql";
+const TRACE_MIG = "20261111220000_trace_events_systemone.sql";
 const LEASE_MIG = "20261111120000_lease_events.sql";
 const norm = (s: string) => s.replace(/\r\n/g, "\n");
 const REAL = norm(await Deno.readTextFile(new URL(TRACE_MIG, MIGRATIONS)));
+const PERF = norm(await Deno.readTextFile(new URL("20261111210000_trace_events_perf.sql", MIGRATIONS)));
 const LEASE = norm(await Deno.readTextFile(new URL(LEASE_MIG, MIGRATIONS)));
 
 /** 拿掉 -- 註解（避免註解裡的字樣干擾；字串裡沒有 --） */
@@ -86,7 +87,7 @@ function problemsOf(sql: string, leaseRetentionDays: number): string[] {
   const to = /SET statement_timeout = '(\d+)s'/.exec(code);
   if (!to || Number(to[1]) < 5) out.push("函式宣告的 statement_timeout 要 ≥ 5s（匿名呼叫的預設上限很短，3s 在正式庫被砍過）")
   // uuid 欄位不准轉成文字再比（索引用不上、整表掃描）：id::text = … 一律改用 trace_uuid()
-  if (/\b\w+\.id::text\s*=\s+(?!ANY\b)/.test(code)) out.push("uuid 欄位轉文字再比（c.id::text = …）會讓索引失效，請改成 c.id = trace_uuid(…)");
+  if (/\b\w+\.id::text\s*=\s+(?!ANY\b)/.test(code) || /=\s*\w+\.id::text\b/.test(code)) out.push("uuid 欄位轉文字再比（c.id::text = …）會讓索引失效，請改成 c.id = trace_uuid(…)");
   if (!/REVOKE ALL ON FUNCTION trace_events\([^)]*\) FROM PUBLIC;/.test(code)) out.push("沒有 REVOKE ALL FROM PUBLIC");
   const grant = /GRANT EXECUTE ON FUNCTION trace_events\([^)]*\) TO ([A-Za-z_, ]+);/.exec(code);
   if (!grant) out.push("沒有 GRANT EXECUTE");
@@ -181,6 +182,7 @@ async function withDb(fn: (db: PGlite) => Promise<void>) {
   const db = new PGlite();
   try {
     await db.exec(STUB);
+    await db.exec(PERF); // trace_uuid() 與索引在 210000
     await db.exec(REAL);
     await db.exec(`
       INSERT INTO contributions(id, contribution_type, payload, task_id, agent_name, status, created_at, applied_at, applied_politician_id, reviewed_by)
@@ -225,7 +227,7 @@ Deno.test("還原驗證：jev_decisions 多回 state 其他內容／模型／機
   assert(problemsOf(model, leaseDays).some((p) => p.includes("j.model")));
   const state = mutate(REAL, "CASE WHEN jsonb_typeof(j.state->'supported_sources') = 'number' THEN j.state->'supported_sources' END", "j.state");
   assert(problemsOf(state, leaseDays).some((p) => p.includes("j.state")));
-  const noBound = mutate(REAL, "AND j.asked_at >= GREATEST(v_since, now() - interval '14 days') AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- Jev 的其他", "AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- Jev 的其他");
+  const noBound = mutate(REAL, "AND j.asked_at >= GREATEST(v_since, now() - interval '14 days') AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- SystemOne 的其他", "AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- SystemOne 的其他");
   assert(problemsOf(noBound, leaseDays).some((p) => p.includes("沒有 >= 時限")));
 });
 
@@ -241,7 +243,7 @@ Deno.test("行為：Jev 系統票與系統判定從 jev_decisions 來，只回�
       `SELECT kind, agent_name, detail FROM trace_events(p_contribution_id => '${CID}', p_since => now() - interval '1 hour', p_until => now() + interval '1 minute')`)).rows;
     const sys = rows.filter((r) => r.kind === "system_vote");
     assertEquals(sys.length, 1);
-    assertEquals(sys[0].agent_name, "Jev");
+    assertEquals(sys[0].agent_name, "SystemOne");
     assertEquals(sys[0].detail.choice, "supported");
     assertEquals(sys[0].detail.supported_sources, 2);
     const chk = rows.filter((r) => r.kind === "system_check");
@@ -313,6 +315,8 @@ Deno.test("還原驗證：timeout 調回 3s、拿掉自訂計畫、又寫回 id:
   assert(problemsOf(plan, leaseDays).some((p) => p.includes("plan_cache_mode")));
   const cast = mutate(REAL, "c.id = trace_uuid(j.subject_id)", "c.id::text = j.subject_id");
   assert(problemsOf(cast, leaseDays).some((p) => p.includes("轉文字")));
+  const rev = mutate(REAL, "trace_uuid(t2.target->>'contribution_id') = c.id)", "t2.target->>'contribution_id' = c.id::text)");
+  assert(problemsOf(rev, leaseDays).some((p) => p.includes("轉文字")), "反向寫法（… = x.id::text）也要抓");
 });
 
 Deno.test("行為：trace_uuid 不是 uuid 格式回 NULL，不讓整支失敗", async () => {
@@ -321,6 +325,8 @@ Deno.test("行為：trace_uuid 不是 uuid 格式回 NULL，不讓整支失敗",
     assertEquals([r.a, r.b], [CID, null]);
     // 其他 subject_type 的非 uuid 識別字（例如新聞編號 '1'）不會讓系統票分支出錯
     await db.exec(`INSERT INTO jev_decisions(subject_type, subject_id, question, choice, probability, model, state) VALUES ('news_item', '1', 'news_relevance', 'unrelated', 0.5, 'm', '{}')`);
-    assert((await kindsOf(db, "p_since => now() - interval '1 hour'")).length >= 0);
+    // 這個庫裡只有一筆新聞判定（subject_type='news_item'、不是交件）：不能誤出系統票或系統判定事件
+    const k = await kindsOf(db, "p_since => now() - interval '1 hour'");
+    assert(!k.includes("system_vote") && !k.includes("system_check"), `新聞判定誤出事件：${k}`);
   });
 });
