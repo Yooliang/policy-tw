@@ -580,3 +580,9 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/console-admin/index.ts"
 
+
+[functions.strong-adjudicate]
+enabled = true
+# 強模型裁決（主控台）：維護者動作驗 Firebase ID Token、執行者動作驗 x-strong-lane-key，都不是 Supabase JWT，閘道不驗，函式自己驗。
+verify_jwt = false
+entrypoint = "./functions/strong-adjudicate/index.ts"
