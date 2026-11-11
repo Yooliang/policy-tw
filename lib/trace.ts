@@ -143,9 +143,9 @@ export function eventText(e: TraceEvent): string {
     case 'vote': return `${who || '有代理'}投了「${VERDICT[detailText(e, 'verdict')] ?? '一票'}」`
     case 'system_vote': {
       const n = e.detail?.supported_sources
-      return `Jev 系統票：${SOURCE_CHOICE[detailText(e, 'choice')] ?? '已判定'}${typeof n === 'number' ? `（核得過 ${n} 個獨立來源）` : ''}`
+      return `SystemOne 系統票：${SOURCE_CHOICE[detailText(e, 'choice')] ?? '已判定'}${typeof n === 'number' ? `（核得過 ${n} 個獨立來源）` : ''}`
     }
-    case 'system_check': return `Jev ${CHECK_QUESTION[detailText(e, 'question')] ?? '系統判定'}${SOURCE_CHOICE[detailText(e, 'choice')] ? `：${SOURCE_CHOICE[detailText(e, 'choice')]}` : ''}`
+    case 'system_check': return `SystemOne ${CHECK_QUESTION[detailText(e, 'question')] ?? '系統判定'}${SOURCE_CHOICE[detailText(e, 'choice')] ? `：${SOURCE_CHOICE[detailText(e, 'choice')]}` : ''}`
     case 'disputed': return detail_bool(e, 'strong') ? '轉為爭議，交強模型通道裁決' : detail_bool(e, 'overvoted') ? '投太多輪，停止派驗證、轉為爭議' : '轉為爭議，等待裁決'
     case 'strong_claim': return `${who || '強模型'}領走強模型裁決`
     case 'strong_finalized': return `強模型定案：${STRONG_VERDICT[detailText(e, 'verdict')] ?? '已裁決'}`

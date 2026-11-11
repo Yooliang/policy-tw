@@ -200,7 +200,7 @@ function fitFont(c: CanvasRenderingContext2D, text: string, base: number, maxW: 
   }
 }
 
-/** 四種框：系統＝實線方框、代理＝圓角框、Jev＝雙線框、終點＝粗框填底；亮起時換底色 */
+/** 四種框：系統＝實線方框、代理＝圓角框、SystemOne＝雙線框、終點＝粗框填底；亮起時換底色 */
 function drawBox(c: CanvasRenderingContext2D, n: { kind: string; cx: number; cy: number; w: number; h: number }, glowAmt: number, s: number): void {
   const x = n.cx - n.w / 2
   const y = n.cy - n.h / 2

@@ -14,10 +14,11 @@ import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 // 目前生效的是最後一版（CREATE OR REPLACE 整支）：160000 起多 Jev 系統票與系統判定
-const TRACE_MIG = "20261111210000_trace_events_perf.sql";
+const TRACE_MIG = "20261111220000_trace_events_systemone.sql";
 const LEASE_MIG = "20261111120000_lease_events.sql";
 const norm = (s: string) => s.replace(/\r\n/g, "\n");
 const REAL = norm(await Deno.readTextFile(new URL(TRACE_MIG, MIGRATIONS)));
+const PERF = norm(await Deno.readTextFile(new URL("20261111210000_trace_events_perf.sql", MIGRATIONS)));
 const LEASE = norm(await Deno.readTextFile(new URL(LEASE_MIG, MIGRATIONS)));
 
 /** 拿掉 -- 註解（避免註解裡的字樣干擾；字串裡沒有 --） */
@@ -181,6 +182,7 @@ async function withDb(fn: (db: PGlite) => Promise<void>) {
   const db = new PGlite();
   try {
     await db.exec(STUB);
+    await db.exec(PERF); // trace_uuid() 與索引在 210000
     await db.exec(REAL);
     await db.exec(`
       INSERT INTO contributions(id, contribution_type, payload, task_id, agent_name, status, created_at, applied_at, applied_politician_id, reviewed_by)
@@ -225,7 +227,7 @@ Deno.test("還原驗證：jev_decisions 多回 state 其他內容／模型／機
   assert(problemsOf(model, leaseDays).some((p) => p.includes("j.model")));
   const state = mutate(REAL, "CASE WHEN jsonb_typeof(j.state->'supported_sources') = 'number' THEN j.state->'supported_sources' END", "j.state");
   assert(problemsOf(state, leaseDays).some((p) => p.includes("j.state")));
-  const noBound = mutate(REAL, "AND j.asked_at >= GREATEST(v_since, now() - interval '14 days') AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- Jev 的其他", "AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- Jev 的其他");
+  const noBound = mutate(REAL, "AND j.asked_at >= GREATEST(v_since, now() - interval '14 days') AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- SystemOne 的其他", "AND j.asked_at < v_until AND (v_all OR c.id = ANY(v_cids))\n      ORDER BY j.asked_at DESC LIMIT v_lim)\n    UNION ALL\n    -- SystemOne 的其他");
   assert(problemsOf(noBound, leaseDays).some((p) => p.includes("沒有 >= 時限")));
 });
 
@@ -241,7 +243,7 @@ Deno.test("行為：Jev 系統票與系統判定從 jev_decisions 來，只回�
       `SELECT kind, agent_name, detail FROM trace_events(p_contribution_id => '${CID}', p_since => now() - interval '1 hour', p_until => now() + interval '1 minute')`)).rows;
     const sys = rows.filter((r) => r.kind === "system_vote");
     assertEquals(sys.length, 1);
-    assertEquals(sys[0].agent_name, "Jev");
+    assertEquals(sys[0].agent_name, "SystemOne");
     assertEquals(sys[0].detail.choice, "supported");
     assertEquals(sys[0].detail.supported_sources, 2);
     const chk = rows.filter((r) => r.kind === "system_check");

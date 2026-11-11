@@ -112,13 +112,7 @@ async function loadNames(ids: string[]): Promise<void> {
 }
 
 async function loadAll(my: number): Promise<void> {
-  let shown = false
-  const r = await fetchWindow(4, Date.now(), (part) => {
-    // 最近的時段先到：第一批就先畫，其餘補上後再整段重播
-    if (my !== seq || shown || part.rows.length === 0) return
-    shown = true
-    reset({ by: 'all' }, part, '全站近 4 小時')
-  })
+  const r = await fetchWindow()
   if (my !== seq) return
   reset({ by: 'all' }, r, '全站近 4 小時')
   void loadNames(topActive(items.value, 10).filter((a) => a.kind === 'person').map((a) => a.id))
@@ -324,7 +318,7 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
         <ul class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600" aria-label="圖例">
           <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white" aria-hidden="true"></span>系統</li>
           <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 rounded-full border border-slate-700 bg-white" aria-hidden="true"></span>代理</li>
-          <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white p-[2px]" aria-hidden="true"><span class="block h-full w-full border border-slate-700"></span></span>Jev</li>
+          <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white p-[2px]" aria-hidden="true"><span class="block h-full w-full border border-slate-700"></span></span>SystemOne</li>
           <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border-[3px] border-slate-700 bg-slate-200" aria-hidden="true"></span>終點</li>
           <li class="inline-flex items-center gap-1.5"><span class="inline-block w-7 border-t-2 border-dashed border-slate-600" aria-hidden="true"></span>虛線：順手提議</li>
         </ul>

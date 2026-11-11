@@ -1,14 +1,9 @@
-// /trace 的資料讀取：只走匿名 client（supabasePublic）。
-// 事件來自 SQL 函式 trace_events()；人名走 politicians 公開讀。
-// PostgREST 單次最多回 1000 列，所以時間切小段分次取（每段回滿 1000 列就標「不完整」）。
+// /trace 的資料讀取：事件走 Edge Function `trace`（伺服器端用 service_role 呼叫 trace_events、分段合併、
+// 某一段回滿 1000 列自己再切、全站模式快取 60 秒），瀏覽器不再直接打資料庫函式（匿名角色的 timeout 太短）。
+// 人名搜尋走 politicians 公開讀。
 import { supabasePublic } from './supabase'
-import { isMissingFunction, withTimeoutAndRetry } from './retry'
-import { dedupe, timeSlices, type TraceEvent } from './trace'
-
-/** PostgREST 單次回傳上限（與伺服器 max-rows 一致） */
-export const PAGE_ROWS = 1000
-const HOUR = 3_600_000
-const DAY = 24 * HOUR
+import { withTimeoutAndRetry } from './retry'
+import { type TraceEvent } from './trace'
 
 export type Scope =
   | { by: 'all' }
@@ -18,105 +13,91 @@ export type Scope =
 
 export interface TraceResult {
   rows: TraceEvent[]
-  /** 有任何一段回滿上限，代表事件比畫面上多 */
+  /** 有任何一段切到最小還是回滿上限，代表事件比畫面上多 */
   truncated: boolean
   /** 有幾段讀不到（其餘照常顯示） */
   partial: boolean
-  /** 函式還沒上線（前端比 migration 早幾分鐘） */
+  /** 端點或函式還沒上線 */
   unavailable: boolean
   since: number
   until: number
 }
 
-function params(scope: Scope, since: number, until: number): Record<string, unknown> {
+interface TraceResponse {
+  success: boolean
+  rows?: TraceEvent[]
+  truncated?: boolean
+  partial?: boolean
+  since?: number
+  until?: number
+  scope?: Scope['by'] | null
+  error?: string
+}
+
+class UnavailableError extends Error {}
+
+function endpoint(params: Record<string, string>): string {
+  return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/trace?${new URLSearchParams(params)}`
+}
+
+function headers(): Record<string, string> {
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+  return key ? { apikey: key, Authorization: `Bearer ${key}` } : {}
+}
+
+async function call(params: Record<string, string>, label: string): Promise<TraceResponse> {
+  return await withTimeoutAndRetry(`trace ${label}`, async (signal) => {
+    const res = await fetch(endpoint(params), { headers: headers(), signal })
+    if (res.status === 404 || res.status === 503) throw new UnavailableError(`HTTP ${res.status}`)
+    const body = (await res.json().catch(() => null)) as TraceResponse | null
+    if (!res.ok || !body?.success) throw new Error(body?.error || `HTTP ${res.status}`)
+    return body
+  })
+}
+
+function toResult(b: TraceResponse, now: number): TraceResult {
   return {
-    p_task_id: scope.by === 'task' ? scope.id : null,
-    p_contribution_id: scope.by === 'contribution' ? scope.id : null,
-    p_politician_id: scope.by === 'person' ? scope.id : null,
-    p_since: new Date(since).toISOString(),
-    p_until: new Date(until).toISOString(),
-    p_limit: PAGE_ROWS,
+    rows: b.rows ?? [],
+    truncated: b.truncated === true,
+    partial: b.partial === true,
+    unavailable: false,
+    since: b.since ?? now,
+    until: b.until ?? now + 60_000,
   }
 }
 
-async function fetchSlice(scope: Scope, since: number, until: number, label: string): Promise<TraceEvent[]> {
-  const { data } = await withTimeoutAndRetry(`trace ${label}`, (signal) =>
-    supabasePublic.rpc('trace_events', params(scope, since, until)).abortSignal(signal).throwOnError())
-  return (data ?? []) as TraceEvent[]
-}
+const unavailable = (now: number, span: number): TraceResult =>
+  ({ rows: [], truncated: false, partial: false, unavailable: true, since: now - span, until: now + 60_000 })
 
-/**
- * 依序取每一段（不併發：同時打好幾段會互相搶資料庫資源，單段反而逾時）。
- * 單一段失敗不讓整頁失敗：記為 partial，其餘照常；全部段都失敗才丟錯。
- * 每取完一段呼叫 onSlice（累計結果），讓畫面可以先畫出已經到的部分。
- */
-async function fetchSlices(
-  scope: Scope,
-  slices: Array<[number, number]>,
-  onSlice?: (rows: TraceEvent[], partial: boolean, truncated: boolean) => void,
-): Promise<{ rows: TraceEvent[]; truncated: boolean; partial: boolean }> {
-  let rows: TraceEvent[] = []
-  let truncated = false
-  let failed = 0
-  let lastError: unknown = null
-  for (const [a, b] of slices) {
-    try {
-      const part = await fetchSlice(scope, a, b, scope.by)
-      if (part.length >= PAGE_ROWS) truncated = true
-      rows = dedupe([...rows, ...part])
-    } catch (e) {
-      if (isMissingFunction(e)) throw e
-      failed++
-      lastError = e
-      console.info('[重播] 有一段讀不到', e)
-    }
-    onSlice?.(rows, failed > 0, truncated)
-  }
-  if (failed === slices.length && failed > 0) throw lastError
-  return { rows, truncated, partial: failed > 0 }
-}
-
-/** 全站近 4 小時：切 30 分鐘一段，由新到舊依序取（先到的最近時段可以先畫） */
-export async function fetchWindow(hours = 4, now = Date.now(), onSlice?: (r: TraceResult) => void): Promise<TraceResult> {
-  const since = now - hours * HOUR
-  const until = now + 60_000
-  const slices = timeSlices(since, until, HOUR / 2).reverse()
+/** 全站近 4 小時（分段、合併、快取都在伺服器端） */
+export async function fetchWindow(hours = 4, now = Date.now()): Promise<TraceResult> {
   try {
-    const r = await fetchSlices({ by: 'all' }, slices, onSlice
-      ? (rows, partial, truncated) => onSlice({ rows, truncated, partial, unavailable: false, since, until })
-      : undefined)
-    return { ...r, unavailable: false, since, until }
+    return toResult(await call({ scope: 'all', hours: String(hours) }, 'all'), now)
   } catch (e) {
-    if (isMissingFunction(e)) return { rows: [], truncated: false, partial: false, unavailable: true, since, until }
+    if (e instanceof UnavailableError) return unavailable(now, hours * 3_600_000)
     throw e
   }
 }
 
-/** 指定對象：近 14 天，切 3 天一段 */
+/** 指定對象：近 14 天 */
 export async function fetchScoped(scope: Exclude<Scope, { by: 'all' }>, now = Date.now()): Promise<TraceResult> {
-  const since = now - 14 * DAY
-  const until = now + 60_000
   try {
-    const r = await fetchSlices(scope, timeSlices(since, until, 3 * DAY).reverse())
-    return { ...r, unavailable: false, since, until }
+    return toResult(await call({ scope: scope.by, id: scope.id }, scope.by), now)
   } catch (e) {
-    if (isMissingFunction(e)) return { rows: [], truncated: false, partial: false, unavailable: true, since, until }
+    if (e instanceof UnavailableError) return unavailable(now, 14 * 86_400_000)
     throw e
   }
 }
 
-/** 一個 uuid 可能是任務、交件或人物：各問一筆看哪個有事件（任務優先，再交件，再人物） */
-export async function probeUuid(id: string, now = Date.now()): Promise<Exclude<Scope, { by: 'all' }> | null> {
-  const since = now - 14 * DAY
-  const until = now + 60_000
-  const scopes: Array<Exclude<Scope, { by: 'all' }>> = [{ by: 'task', id }, { by: 'contribution', id }, { by: 'person', id }]
-  // 依序問（任務優先），有就停
-  for (const s of scopes) {
-    const { data } = await withTimeoutAndRetry(`trace probe ${s.by}`, (signal) =>
-      supabasePublic.rpc('trace_events', { ...params(s, since, until), p_limit: 1 }).abortSignal(signal).throwOnError())
-    if (Array.isArray(data) && data.length > 0) return s
+/** 一個 uuid 可能是任務、交件或人物：由伺服器依序問（任務優先，再交件，再人物），有就停 */
+export async function probeUuid(id: string): Promise<Exclude<Scope, { by: 'all' }> | null> {
+  try {
+    const b = await call({ probe: id }, 'probe')
+    return b.scope && b.scope !== 'all' ? ({ by: b.scope, id } as Exclude<Scope, { by: 'all' }>) : null
+  } catch (e) {
+    if (e instanceof UnavailableError) return null
+    throw e
   }
-  return null
 }
 
 export interface PersonHit { id: string; name: string; party: string | null; region: string | null; current_position: string | null }
