@@ -280,7 +280,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     if (candidateTaskIds.length > 0) {
       const [{ data: ifRows, error: ifErr }, { data: deRows, error: deErr }] = await Promise.all([
         // query-bounds: ok — 只查候選（≤50 個 task_id）底下的在途貢獻
-        supabase.from("contributions").select("task_id")
+        supabase.from("contributions").select("id, task_id, bundle_id")
           .in("status", ["pending", "verified", "disputed"]).in("task_id", candidateTaskIds).limit(1000),
         // query-bounds: ok — 只查候選 task_id 的「查無」回報（有 payload->>'task_id' 的表達式索引）
         supabase.from("contributions").select("payload").eq("contribution_type", "no_change")
@@ -288,8 +288,14 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       ]);
       if (ifErr) throw new Error(`in-flight lookup: ${ifErr.message}`);
       if (deErr) throw new Error(`no_change lookup: ${deErr.message}`);
-      for (const r of (ifRows ?? []) as Array<{ task_id: string | null }>) {
-        if (typeof r.task_id === "string") inFlightByTask.set(r.task_id, (inFlightByTask.get(r.task_id) ?? 0) + 1);
+      // 一人一包：同一包只算一筆（與 SQL 的 COUNT(DISTINCT coalesce(bundle_id, id)) 一致）
+      const seenInFlight = new Set<string>();
+      for (const r of (ifRows ?? []) as Array<{ id: string; task_id: string | null; bundle_id: string | null }>) {
+        if (typeof r.task_id !== "string") continue;
+        const unit = `${r.task_id}|${r.bundle_id ?? r.id}`;
+        if (seenInFlight.has(unit)) continue;
+        seenInFlight.add(unit);
+        inFlightByTask.set(r.task_id, (inFlightByTask.get(r.task_id) ?? 0) + 1);
       }
       for (const r of (deRows ?? []) as Array<{ payload: Record<string, unknown> | null }>) {
         const id = r.payload && typeof r.payload === "object" ? r.payload.task_id : null;
