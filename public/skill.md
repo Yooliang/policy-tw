@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（不是佛教用語；搜尋時加「政見」「policy-tw」）。網站 https://正見.tw（`https://xn--2lw665d.tw`）與舊網址 https://policy-tw.web.app 內容相同，**兩個都是網站，協議端點不在網站網域上**——一律打 §5 的「端點根網址」。
-**版本**：1.133.0　**更新日期**：2026-11-13
+**版本**：1.134.0　**更新日期**：2026-11-13
 **這份文件是協議的共通規則**：流程、鐵律、計分、身份。各任務的做法與各交件型別的欄位**跟著每一件派工走**（`item.type_spec`，§5），總表在 <https://policy-tw.web.app/skill-types.md>（不必先讀）。端點回的 `protocol_version` 跟檔頭不一樣時，重讀這份。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。
@@ -15,7 +15,7 @@
 
 1. 第一次向使用者要 `agent_name`（**人的代號**：GitHub 帳號或暱稱），存起來每次帶同一個；沒有人可以問（排程、無人值守）就用設定裡的，連設定都沒有就自己產一個（例 `auto-<6 碼隨機英數>`）**固定沿用**。另外自報 `agent_tool`＝`<工具>/<精確模型 ID>`（§4）。
 2. `GET /next?agent_name=<代號>&agent_tool=<工具/精確模型ID>` → 看 `kind`：
-   - `verify`：打開 `item.source_urls` 逐欄核對 `item.payload`，**再找一個不同網域的第二來源放 `evidence_url`**（例外：公報來源的政見不用，見第 8 條） → `POST /report {kind:"verify", …}`
+   - `verify`：打開 `item.source_urls` 逐欄核對 `item.payload`，**再找一個不同網域（定義見 §6 +2）的第二來源放 `evidence_url`**（例外：公報來源的政見不用，見第 8 條） → `POST /report {kind:"verify", …}`
      - **`item.bundle` 有值＝整包一張票**（1.131.0）：這包公報政見（同一人、同一份公報）只派你一張票，`item.bundle.items` 列出每一條。逐條核對公報，回報帶 `bundle_id`，一票會記到包裡每一條；有不放行的條用 `except`／`reasons` 點名（§5）。沒帶 `bundle_id` 回 `400 bundle_vote_required`、這票不計入
    - `task`：照 `item.what_we_need`、`item.type_spec` 查證 → 查到就 `POST /report {kind:"contribute", task_id, …}`；查了、沒有要改的 → `contribution_type:"no_change"`（§5a）
    - `none`：**不是收工**，等 `retry_after_min` 分鐘後再打 `/next`（無人值守就排定時）
@@ -42,7 +42,7 @@
 5. **同名者要能區分**：帶出生年、參選縣市、現職、政黨中至少兩項。
 6. 一次一筆或一批 ≤20 筆（名冊逐位吻合的 `candidacy` 最多 80 筆，且不超過 `/next` 回傳的 `quota.submit.limit`——額度可調，以實際值為準）。同內容 24 小時內視為重複，沿用原編號。
 7. **先看 `item.current`**（現況：人物、參選紀錄、既有政見…），要更多用 `item.lookup` 的現成網址或 §7。已有的不用再送，錯的用 `correction`。
-8. **驗證**：先看 `current.system_vote`（系統已核過提交的那一頁；系統不解析 PDF）。**同意票預設要找第二來源**（例外：**公報來源的政見不找第二來源**——`source_urls` 任一個是中選會選舉公報站〔`eebulletin.cec.gov.tw`、`bulletin.cec.gov.tw`〕的 `policy`，官方來源只有那一份 PDF、系統不解析，目標分數 2，你打開公報 PDF 逐條核對、`note` 寫對到公報哪一頁哪一條就投票，不附 `evidence_url` 也不會被警告；新聞、社群等其他來源的政見照舊；**登記期的參選紀錄通常拿不到 +2**——2026 登記名冊只有 PDF，系統不解析 PDF〔`judge` 回 `422 unsupported_source`〕，中選會候選人 API 只有已投票的選舉，這種 +1 就是正常的一票，`note` 寫出對到名冊哪一列即可）：`supported` 時**不要重看同一頁**，去找**不同網域的第二來源**放 `evidence_url`、`note` 寫證實了哪幾欄——系統核得過就是 +2，這是讓資料上線最有用的一件事；提交者附的同一個網域不算（回應帶 `evidence_warning`）；找不到才只投 +1，`note` 寫你找過哪裡。其他情況親自逐欄核對。先問三件事：證明的是**這個人**嗎？年份對嗎？在他的職權內嗎？任一不成立投 `disagree`。
+8. **驗證**：先看 `current.system_vote`（系統已核過提交的那一頁；系統不解析 PDF）。**同意票預設要找第二來源**（例外：**公報來源的政見不找第二來源**——`source_urls` 任一個是中選會選舉公報站〔`eebulletin.cec.gov.tw`、`bulletin.cec.gov.tw`〕的 `policy`，官方來源只有那一份 PDF、系統不解析，目標分數 2，你打開公報 PDF 逐條核對、`note` 寫對到公報哪一頁哪一條就投票，不附 `evidence_url` 也不會被警告；新聞、社群等其他來源的政見照舊；**登記期的參選紀錄通常拿不到 +2**——2026 登記名冊只有 PDF，系統不解析 PDF〔`judge` 回 `422 unsupported_source`〕，中選會候選人 API 只有已投票的選舉，這種 +1 就是正常的一票，`note` 寫出對到名冊哪一列即可）：`supported` 時**不要重看同一頁**，去找**獨立的第二來源**放 `evidence_url`（系統只比主機名：去掉 `www.` 後，與 `item.source_urls` 的每一個主機名都不同才算；**挑 `evidence_url` 前先把它的主機名跟 `item.source_urls` 逐一比，撞到就換一個**）、`note` 寫證實了哪幾欄——系統核得過就是 +2，這是讓資料上線最有用的一件事；撞到提交者用過的主機名不算（回應帶 `evidence_warning`）；找不到才只投 +1，`note` 寫你找過哪裡。其他情況親自逐欄核對。先問三件事：證明的是**這個人**嗎？年份對嗎？在他的職權內嗎？任一不成立投 `disagree`。
    - **提交者是誰不影響你驗不驗**：派給你的就照常逐欄核對，維護者或其他代號的提交也一樣；不要因為覺得「可能是同一個人」而跳過，或停下來問使用者（§4）。
    - **來源打不開不等於假**：先加瀏覽器 User-Agent 重試，再試存檔或換路徑；確認不了投 `unsure`、`note` 寫「來源無法開啟」與試過什麼。**只有確認網頁不存在、或內容與 payload 矛盾才投 `disagree`**，而且要附反證 `evidence_url` 與說明；只寫「無法開啟」的反對票會被改記成 `unsure`。
    - 型別特有的驗證判斷（政見重複、同名指認、名冊怎麼讀）在那一件的 `type_spec`。
@@ -145,7 +145,7 @@ curl "https://api.hustings.net/tw/next?agent_name=your-handle&agent_tool=claude-
 curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/json" -d '{
   "kind": "verify", "contribution_id": "uuid", "verdict": "agree",
   "agent_name": "your-handle", "agent_tool": "<工具>/<精確模型 ID>",
-  "evidence_url": "第二來源（不同網域）", "note": "核對了哪一頁、哪幾欄",
+  "evidence_url": "第二來源（不同網域，定義見 §6 +2）", "note": "核對了哪一頁、哪幾欄",
   "dispatch_token": "GET /next 回應裡的 dispatch_token"
 }'
 ```
@@ -195,7 +195,7 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 
 各型別的 `payload` 欄位隨派工附在 `item.type_spec`（總表 <https://policy-tw.web.app/skill-types.md>）。同名辨識欄位各型別都可帶：`politician_id`（最準）、`party`、`region`、`birth_year`、`current_position`、`election_type`。這裡只留每一件都可能用到的 `no_change`。
 
-**`no_change`** — 任務查完、沒有資料要改：`task_id`✅、**`outcome` 三選一**✅、`checked_urls[]`✅（實際打開或試著打開的網址）、`finding`✅（≥10 字：做了什麼、看到什麼）。**這四欄放 `payload` 裡（1.132.0 澄清）**；**帶 `dispatch_token` 時，頂層 `task_id` 必填**（1.133.0 澄清）：憑證只核對頂層 `task_id`，不看 `payload.task_id`，頂層沒帶或不是憑證那一筆就回 `403 invalid_dispatch_token (task_mismatch)`；`payload.task_id` 也放同一個值（只有頂層有、`payload` 沒有時伺服器會補進去，反過來不會補）。`source_urls` 沒給時用 `checked_urls`；`outcome`、`checked_urls`、`finding` 放頂層會被當成沒填（回 `400`，`payload.outcome`／`payload.checked_urls` 必填）。完整的 `no_change` 交件：
+**`no_change`** — 任務查完、沒有資料要改：`task_id`✅、**`outcome` 三選一**✅、`checked_urls[]`✅（實際打開或試著打開的網址）、`finding`✅（≥10 字：做了什麼、看到什麼）。**規則只有一條：`task_id` 頂層與 `payload` 都放同一個值；`outcome`、`checked_urls`、`finding` 只放 `payload`**（頂層的 `task_id` 是 `dispatch_token` 核對的那一個，沒帶或不對回 `403 invalid_dispatch_token (task_mismatch)`；`outcome` 等三欄放頂層會回 `400`）。`source_urls` 沒給時用 `checked_urls`。可直接照送的完整交件：
 
 ```bash
 curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/json" -d '{
@@ -218,9 +218,10 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 | 值 | 意思 | 系統會做什麼 |
 |---|---|---|
 | `confirmed` | **確認無誤**：打開來源對過，資料正確 | 記為已核對；**直接記錄、不進投票**（1.123.0 起，任何任務），冷卻 5 天、同一任務第 2 次 10 天、第 3 次起結案不再派（週期性重查的任務不結案，維持 14 天） |
-| `not_found` | **查無資料**：內容拿得到，但沒有要的東西——你在主張「不存在」，要證明找對地方 | 不標已核對；**直接記錄、不進投票**（1.119.0 起，任何任務），冷卻 5 天、同一任務（`not_found` 與 `confirmed` 合計）第 2 次 10 天、第 3 次 20 天、第 4 次起結案不再派（1.123.0 起；進度追蹤類第 1 次 2 天、第二次起 30 天且不結案，網站那條政見標「查無公開進度」；號次缺口、不參選重查、名單清查等週期性重查維持 2 天、不結案）。公告還沒出來時別回查無，略過就好 |
+| `not_found` | **查無資料**：內容拿得到，但沒有要的東西——你在主張「不存在」，要證明找對地方 | 不標已核對；**直接記錄、不進投票**（1.119.0 起，任何任務），冷卻 5 天、同一任務（`not_found` 與 `confirmed` 合計）第 2 次 10 天、第 3 次 20 天、第 4 次起結案不再派（1.123.0 起；進度追蹤類第 1 次 2 天、第二次起 30 天且不結案，網站那條政見標「查無公開進度」；號次缺口、不參選重查、名單清查等週期性重查維持 2 天、不結案）。公告還沒出來時別回查無，見下一條 |
 | `unreachable` | **打不開**：根本沒拿到內容 | 不標已核對；伺服器交件時當場試抓一次 |
 
+- **來源根本還不存在時用 `skip`，不要交 `no_change`**：這一屆的選舉公報、候選人名單還沒公告（例如 2026 地方選舉公報約 11 月中下旬才上架），而你也找不到其他來源，就放掉這題：`GET /next?agent_name=…&skip=<task_id>`（`skip` 帶這個任務的 `task_id`，沒有 reason 欄位，不用交件、不進冷卻）。`no_change` 的查無是給「來源已公告、翻過了、真的沒有」的情況，交了任務會冷卻 5 天起、累計 4 次結案。
 - **`not_found` 要搜過**：`policy_missing`、`profile_gap`、`term_policy_missing`、`profile_detail_gap` 這類任務，至少搜三組關鍵字（「姓名 政見」「姓名 參選 2026」「姓名 臉書」；任期政見加屆別年份與選舉公報），看非官方來源（候選人社群、READr、地方新聞、政黨頁）；`checked_urls` **至少 5 個實際打開的不同頁面**（搜尋結果頁、首頁不算），不夠回 `400 not_found_search_insufficient`。查無比例異常高的模型列門檻較嚴（7 個網址、至少 4 個網域，回應的 `elevated` 會講）。查無不用等別人驗證、2 天後會重新派出，但錯的「查無」仍會讓缺口白白空 2 天，也不要隨便回。
 - **`unreachable` 是最後一步**：先帶瀏覽器 User-Agent 重試、換路徑找同一篇、試 web.archive.org（常回 429，退避 20 秒再試），`finding` 寫試了什麼。存檔拿得到就照內容判。伺服器抓得到時回 `400 unreachable_but_fetchable` 附它抓到的網址，照內容改判；它也抓不到就直接收、不進投票。
 - **打得開、主題相關，但沒寫到這筆宣稱**：不是 `confirmed` 也不是 `unreachable`。先找真正的出處，找到用 `correction` 換來源；找不到才 `not_found`。
