@@ -159,6 +159,8 @@ export interface RequestDecisionInput {
   recentlyHandled?: RecentlyHandled | null;
   existingOpenTask: { id: string } | null;
   autoGapTaskId: string | null;
+  /** 工作卡（work_key）上已開著的任務（work_card_resolve；工作卡③），在 existingOpenTask／autoGapTaskId 都沒中時才看 */
+  workCardTaskId?: string | null;
   /** kind=audit：24 小時內同網址＋同目標已建過的任務 */
   duplicateAuditTask?: { id: string } | null;
 }
@@ -166,15 +168,21 @@ export interface RequestDecisionInput {
 export type RequestDecision =
   | { action: "rate_limited" }
   | { action: "recently_checked"; at: string; outcome: RecentOutcome }
-  | { action: "already_queued"; task_id: string; reason: "open_task" | "auto_gap" | "duplicate_url" }
+  | { action: "already_queued"; task_id: string; reason: "open_task" | "auto_gap" | "work_card" | "duplicate_url" }
   | { action: "create" };
 
-/** 純函式：限額 → 近期處理過 → 已有 open 手動任務 → 已有對應自動缺口 → 同網址重複 → 建立 */
+/** 純函式：限額 → 近期處理過 → 已有 open 手動任務 → 已有對應自動缺口 → 同一張工作卡已開著 → 同網址重複 → 建立 */
 export function decideRequest(input: RequestDecisionInput): RequestDecision {
   if (input.usedToday >= REQUEST_DAILY_LIMIT_PER_IP) return { action: "rate_limited" };
   if (input.recentlyHandled) return { action: "recently_checked", at: input.recentlyHandled.at, outcome: input.recentlyHandled.outcome };
   if (input.existingOpenTask) return { action: "already_queued", task_id: input.existingOpenTask.id, reason: "open_task" };
   if (input.autoGapTaskId) return { action: "already_queued", task_id: input.autoGapTaskId, reason: "auto_gap" };
+  if (input.workCardTaskId) return { action: "already_queued", task_id: input.workCardTaskId, reason: "work_card" };
   if (input.duplicateAuditTask) return { action: "already_queued", task_id: input.duplicateAuditTask.id, reason: "duplicate_url" };
   return { action: "create" };
+}
+
+/** 保險絲關閉（WORK_CARD_ATTACH=off）時的舊行為：撈全部自動缺口、找對應目標那一筆。尾巴比對補上 term_policy_missing:<人>:<屆> 的形狀 */
+export function matchLegacyAutoGap(gaps: Array<{ task_id: string }>, targetId: string): { task_id: string } | null {
+  return gaps.find((g) => g.task_id.endsWith(`:${targetId}`) || g.task_id.includes(`:${targetId}:`)) ?? null;
 }

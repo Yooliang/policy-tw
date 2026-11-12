@@ -50,6 +50,7 @@ import { loadElections } from "../_shared/elections.ts";
 import { protocolStatusFromCandidacy } from "../_shared/candidacy-status.ts";
 import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FOLLOWUP_QUESTION, submissionFollowupTask, submissionText, worthAsking, worthAskingSubmission, type FollowupChoice, type FollowupContribution, type FollowupVote, type SubmissionForFollowup } from "../_shared/vote-followup.ts";
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
+import { createOrAttachTask } from "../_shared/create-or-attach-task.ts";
 import { CLARIFY_DEFAULT_LIMIT, CLARIFY_MAX_LIMIT, clarifyOne, closeDuplicates, type ClarifyDeps, type ClarifyOutcome, type FollowupTaskRow } from "../_shared/followup-clarify.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
@@ -179,8 +180,9 @@ async function settleSubmissionFollowup(
   const task = submissionFollowupTask(c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
   const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
   if (existing) return;
-  const created = await createTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup" });
-  await clarifyNewTask(supabase, apiKey, created);
+  const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup", no_signal: true });
+  if (res.attached) return; // 工作卡③：同一張卡已在隊列上，已記一筆需求訊號、不另開任務
+  await clarifyNewTask(supabase, apiKey, res.task);
 }
 
 type VoteBudgetRow = { id: string; contribution_type: string; payload: Record<string, unknown> | null; source_urls: string[] | null };
@@ -270,9 +272,9 @@ async function settleFollowup(
     const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
     if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
     else {
-      const t = await createTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup" });
-      entry.task_id = t.id;
-      await clarifyNewTask(supabase, apiKey, t);
+      const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup", no_signal: true });
+      if (res.attached) { entry.task_id = res.task_id; entry.attached = true; }
+      else { entry.task_id = res.task.id; await clarifyNewTask(supabase, apiKey, res.task); }
     }
   }
   return entry;
@@ -1479,7 +1481,7 @@ Deno.serve(async (req) => {
           if (!dry) {
             const existing = await findOpenTaskForTarget(supabase, { politician_id: p.id, policy_id: null, task_type: "other" });
             if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
-            else { const t = await createTask(supabase, bioGapTask(p, v), { source: "suggested", suggested_by: "jev-bio", created_by: "jev-bio" }); entry.task_id = t.id; created++; }
+            else { const r = await createOrAttachTask(supabase, bioGapTask(p, v), { source: "suggested", suggested_by: "jev-bio", created_by: "jev-bio", no_signal: true }); if (r.attached) { entry.task_id = r.task_id; entry.attached = true; } else { entry.task_id = r.task.id; created++; } }
           }
           found.push(entry);
         } catch (e) {

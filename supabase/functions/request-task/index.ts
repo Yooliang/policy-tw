@@ -2,8 +2,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { siteUrl } from "../_shared/site.ts";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, POLICY_KINDS, RECENT_CHECK_DAYS, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
-import { createTask, findOpenTaskForTarget, findRecentAuditTask, findRecentlyHandled } from "../_shared/task-admin.ts";
+import { AUDIT_NOTE_MAX, buildRequestTaskText, decideRequest, matchLegacyAutoGap, isAuditUrl, isRequestKind, KIND_TO_TASK_TYPE, POLICY_KINDS, RECENT_CHECK_DAYS, REQUEST_DAILY_LIMIT_PER_IP } from "../_shared/request-task.ts";
+import { attachSignal, createOrAttachTask, workCardAttachEnabled, workCardOf } from "../_shared/create-or-attach-task.ts";
+import { findOpenTaskForTarget, findRecentAuditTask, findRecentlyHandled } from "../_shared/task-admin.ts";
 
 /**
  * request-task — 網站「請 AI 幫忙查」按鈕（公開、無金鑰、每 IP 每日 20 次）。
@@ -87,16 +88,30 @@ Deno.serve(async (req) => {
     const { count: usedToday, error: countError } = await supabase.from("contribution_tasks").select("id", { count: "exact", head: true })
       .eq("requester_ip_hash", ipHash).gte("created_at", todayStart.toISOString());
     if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
+    // 併卡的請求不建 contribution_tasks 列，也要計入每日額度：數今天這個來源寫過的 request 訊號
+    let signalsToday = 0;
+    if (workCardAttachEnabled()) {
+      const { count: sc, error: sErr } = await supabase.from("work_card_signals").select("id", { count: "exact", head: true })
+        .eq("kind", "request").eq("actor", ipHash).gte("created_at", todayStart.toISOString());
+      if (sErr) console.warn("work_card_signals 計數失敗（略過）：", sErr.message);
+      else signalsToday = sc ?? 0;
+    }
 
     // 已有 open 任務？已有對應自動缺口？（audit 不看這兩項，改看同網址 24 小時去重）
     const taskType = KIND_TO_TASK_TYPE[kind];
     const existing = kind === "audit" ? null : await findOpenTaskForTarget(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId, scope: electionScope });
     const targetId = isPolicyKind ? policyId : pid;
-    let autoGap: { task_id: string } | null = null;
-    if (kind !== "audit" && targetId && electionId === null) {
+    // 工作卡（work_key，SQL 算）：同一人×同一件事已在派工隊列上就併上去（寫需求訊號），不另開任務。
+    // 取代舊的「全量撈 contribution_auto_tasks 再逐字比尾巴」——term_policy_missing:<人>:<屆> 永遠比不到、又重
+    const cardInput = { title: "", task_type: taskType, target_politician_id: isPolicyKind ? null : pid, target_policy_id: policyId,
+      ...(electionId !== null ? { target_extra: { election_id: electionId } } : {}) };
+    const card = kind === "audit" || !targetId ? null : await workCardOf(supabase, cardInput, electionScope);
+    // 保險絲關閉：退回舊行為——撈全部自動缺口、對得上就當「已在任務池」
+    let legacyGap: { task_id: string } | null = null;
+    if (!workCardAttachEnabled() && kind !== "audit" && targetId && electionId === null) {
       const { data: gaps, error: gapError } = await supabase.rpc("contribution_auto_tasks", { p_type: taskType, p_region: null, p_limit: 100000, p_seed: "" });
       if (gapError) throw new Error(`auto tasks: ${gapError.message}`);
-      autoGap = ((gaps ?? []) as Array<{ task_id: string }>).find((g) => g.task_id.endsWith(`:${targetId}`)) ?? null;
+      legacyGap = matchLegacyAutoGap((gaps ?? []) as Array<{ task_id: string }>, targetId);
     }
     const recentlyHandled = kind === "audit" || !targetId ? null
       : await findRecentlyHandled(supabase, { politician_id: isPolicyKind ? null : pid, policy_id: policyId, task_type: taskType, election_id: electionId, scope: electionScope }, RECENT_CHECK_DAYS);
@@ -110,10 +125,11 @@ Deno.serve(async (req) => {
     const base = { queue_position: openManual ?? 0, open_tasks: (openManual ?? 0) + autoTotal, board_url: boardUrl() };
 
     const decision = decideRequest({
-      usedToday: usedToday ?? 0,
+      usedToday: (usedToday ?? 0) + signalsToday,
       recentlyHandled,
       existingOpenTask: existing ? { id: String(existing.id) } : null,
-      autoGapTaskId: autoGap?.task_id ?? null,
+      autoGapTaskId: legacyGap?.task_id ?? null,
+      workCardTaskId: card?.task_id ?? null,
       duplicateAuditTask: duplicateAudit ? { id: String(duplicateAudit.id) } : null,
     });
     if (decision.action === "rate_limited") {
@@ -122,16 +138,29 @@ Deno.serve(async (req) => {
     if (decision.action === "recently_checked") {
       return json({ success: true, status: "recently_checked", checked_at: decision.at, outcome: decision.outcome, window_days: RECENT_CHECK_DAYS, message: `近 ${RECENT_CHECK_DAYS} 天內已經查過，暫時不重複建立`, ...base });
     }
+    const recentlyCheckedBody = (at: string | null) => ({ success: true, status: "recently_checked", checked_at: at ?? new Date().toISOString(), outcome: "no_change", window_days: RECENT_CHECK_DAYS,
+      message: `近 ${RECENT_CHECK_DAYS} 天內已經查過，暫時不重複建立`, ...base });
     if (decision.action === "already_queued") {
-      return json({ success: true, status: "already_queued", task_id: decision.task_id, reason: decision.reason, message: "這個項目已在任務池中，AI 代理會來查", ...base });
+      // 同一張卡又有人要：算一次需求（同一個來源重複按只算一次）。寫入失敗就不宣稱已併卡
+      const res = card && decision.reason !== "duplicate_url"
+        ? await attachSignal(supabase, card.work_key, "request", ipHash, { boost: decision.reason === "work_card", scope: electionScope, source: "web_request" }) : null;
+      // 卡在查核冷卻中：訊號已寫（冷卻結束後需求疊加會帶它回前面），回「近期查過」，同 findRecentlyHandled 的既有行為
+      if (res?.attached && res.cooling) return json(recentlyCheckedBody(res.last_checked_at ?? null));
+      return json({ success: true, status: "already_queued", task_id: decision.task_id, reason: decision.reason, message: "這個項目已在任務池中，AI 代理會來查",
+        ...(card ? { attached: res?.attached === true, work_key: card.work_key } : {}), ...base });
     }
 
     const text = buildRequestTaskText({ kind, politician_id: pid, policy_id: policyId, politician_name: politician?.name ?? null, region: politician?.region ?? null, policy_title: policy?.title ?? null, source_url: sourceUrl, note, election_id: electionId, election_name: election?.short_name ?? null, elected, scope: electionScope });
-    const task = await createTask(supabase, {
+    const created = await createOrAttachTask(supabase, {
       title: text.title, description: text.description, task_type: taskType,
       target_politician_id: pid, target_policy_id: policyId, region: politician?.region ?? null, hint_sources: text.hint_sources, source_url: sourceUrl,
       ...(electionId !== null ? { target_extra: { election_id: electionId, elected, ...(electionScope ? { scope: electionScope } : {}) } } : {}),
-    }, { source: "web_request", created_by: typeof body.requester === "string" ? body.requester.slice(0, 40) : "web", requester_ip_hash: ipHash });
+    }, { source: "web_request", created_by: typeof body.requester === "string" ? body.requester.slice(0, 40) : "web", requester_ip_hash: ipHash, scope: electionScope, boost: true });
+    if (created.attached) {
+      if (created.cooling) return json(recentlyCheckedBody(created.last_checked_at));
+      return json({ success: true, status: "already_queued", task_id: created.task_id, reason: "work_card", attached: true, work_key: created.work_key, message: "這個項目已在任務池中，AI 代理會來查", ...base });
+    }
+    const task = created.task;
 
     return json({ success: true, status: "queued", task_id: task.id, message: "已加入任務池，AI 代理會來查", ...base, queue_position: (openManual ?? 0) + 1, open_tasks: base.open_tasks + 1 }, 201);
   } catch (error: unknown) {

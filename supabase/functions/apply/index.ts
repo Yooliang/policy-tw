@@ -2,7 +2,8 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { applyContribution, type ContributionRow, contributionStatusFor } from "../_shared/apply-contribution.ts";
 import { executeRevert, RevertBlockedError } from "../_shared/edit-history.ts";
-import { closeTask, createTask, validateTaskInput } from "../_shared/task-admin.ts";
+import { closeTask, validateTaskInput } from "../_shared/task-admin.ts";
+import { createOrAttachTask } from "../_shared/create-or-attach-task.ts";
 
 /**
  * apply — 維護者用（需 AI_IMPORT_API_KEY）。verified 的貢獻已由 /report／apply-verified 自動落庫，這支處理：
@@ -51,8 +52,10 @@ Deno.serve(async (req) => {
     if (action === "create_task") {
       const v = validateTaskInput(body.task);
       if (!v.ok || !v.input) return json({ success: false, error: "validation_failed", errors: v.errors }, 400);
-      const task = await createTask(supabase, v.input, { source: "manual", created_by: reviewer });
-      return json({ success: true, task }, 201);
+      // 工作卡③：維護者指定的任務預設也先併卡；帶 force_new:true 就照開
+      const created = await createOrAttachTask(supabase, v.input, { source: "manual", created_by: reviewer, force_new: body.force_new === true });
+      if (created.attached) return json({ success: true, attached: true, task_id: created.task_id, work_key: created.work_key, message: "這張工作卡已在派工隊列上，未另開任務（要照開請帶 force_new:true）" });
+      return json({ success: true, task: created.task }, 201);
     }
     if (action === "close_task") {
       if (typeof body.task_id !== "string") return json({ success: false, error: "缺 task_id" }, 400);
