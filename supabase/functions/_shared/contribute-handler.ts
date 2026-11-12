@@ -316,8 +316,10 @@ export async function handleContribute(
 
   // 超過 MAX_BATCH 筆的批次（整批都是引用中選會登記名冊的 candidacy，結構已由 validateContributionRequest 限定）：
   // 每一筆都要跟名冊資料表逐位吻合才收（2026-10-08，維護者裁示 B 案）；不算被拒
-  // （一人一包的政見包不是名冊批次：結構已在上面由 bundleProblems 把關）
-  if (validation.items.length > MAX_BATCH && !bundleOn) {
+  // 一人一包的政見包不是名冊批次，略過名冊閘門。條件明寫成「bundleOn 且全部 type=policy」：
+  // 只因 bundleProblems 已先擋掉非 policy 型別才安全（旗標開時它在上面已跑過，非 policy 一律 400），不是對任意批次放行
+  const bundleSkipsRosterGate = bundleOn && validation.items.every((it) => it.contribution_type === "policy");
+  if (validation.items.length > MAX_BATCH && !bundleSkipsRosterGate) {
     const gate = await rosterBatchProblems(supabase, validation.items);
     if (!gate.ok) return { status: 400, body: { success: false, error: gate.error, message: gate.message, errors: gate.errors } };
   }
@@ -912,20 +914,13 @@ export async function handleContribute(
     if (existingByHash.has(h) || blocked.has(i) || mergedByIndex.has(i) || bypassNotes.has(i)) return;
     if (seenInBatch.has(h)) dupInBatch.add(i); else seenInBatch.add(h);
   });
-  // 一人一包：併掉、重複之後剩不到 min 條就不成包（已併成同意票的照記，不會白做）
-  if (bundleOn) {
-    const survivors = validation.items.filter((_, i) => !existingByHash.has(hashes[i]) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i) && !dupInBatch.has(i)).length;
-    if (survivors < bundleSettings!.minItems) {
-      return {
-        status: 400,
-        body: {
-          success: false, error: "bundle_too_small",
-          message: `這包裡有 ${validation.items.length - survivors} 條與既有的重複（已併成同意票或已交過），剩 ${survivors} 條，少於一包的最少 ${bundleSettings!.minItems} 條，這包沒有收；剩下的請不要帶 bundle:true、照一般方式逐條交`,
-          remaining: survivors, docs: PROTOCOL_URL,
-        },
-      };
-    }
-  }
+  // 一人一包：原始條數 < min 已在 bundleProblems 回 400 bundle_too_small。這裡是併掉、重複之後剩不到 min 條：
+  // 併票已經記下了，不回 400（代理會以為整包沒做、重送又重複），改走一般逐條收，回應帶 bundle_downgraded:true 與 merged 數
+  const bundleSurvivors = bundleOn
+    ? validation.items.filter((_, i) => !existingByHash.has(hashes[i]) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i) && !dupInBatch.has(i)).length
+    : 0;
+  const bundleDowngraded = bundleOn && bundleSurvivors < bundleSettings!.minItems;
+  const bundleMerged = validation.items.length - bundleSurvivors;
   const toInsertBase = validation.items
     .map((item, i) => ({ item, hash: hashes[i], i }))
     .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i) && !dupInBatch.has(i))
@@ -948,7 +943,7 @@ export async function handleContribute(
 
   // 一人一包：先寫 policy_bundles，再寫逐條 contributions 帶 bundle_id／bundle_index（0 起、連續）
   let bundleId: string | null = null;
-  if (bundleOn && toInsertBase.length > 0) {
+  if (bundleOn && !bundleDowngraded && toInsertBase.length > 0) {
     const first = validation.items[0];
     const { data: bRow, error: bErr } = await supabase.from("policy_bundles").insert({
       task_id: first.task_id ?? null,
@@ -1152,6 +1147,7 @@ export async function handleContribute(
       ...(single ? results[0] : { results }),
       ...(bundleId ? { bundle: { bundle_id: bundleId, item_count: toInsert.length } } : {}),
       ...(bundleIgnored ? { bundle_ignored: true } : {}),
+      ...(bundleDowngraded ? { bundle_downgraded: true, merged: bundleMerged } : {}),
       daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size, ...quotaWindowFields() },
       ...(toolNotice || strippedCount > 0 || levelNotice ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : "", levelNotice].filter(Boolean).join("\n") } : {}),
       docs: PROTOCOL_URL,

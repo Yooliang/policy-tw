@@ -172,7 +172,7 @@ Deno.test("B3 同人／同任務／同屆／非公報／重複條／太小：各
     ["同屆", [...items(2), policy(8, { election_id: 2022 })], "bundle_invalid"],
     ["非公報", [...items(2), policy(8, {}, [NEWS])], "bundle_requires_bulletin"],
     ["重複條", [...items(3), policy(9, { title: "公報政見第0條：推動在地事項甲0" })], "bundle_duplicate_item"],
-    ["太小", items(1), "bundle_too_small"],
+    ["太小（原始條數 <2 才 400）", items(1), "bundle_too_small"],
   ];
   for (const [name, list, code] of cases) {
     resetQuotaCache();
@@ -183,12 +183,16 @@ Deno.test("B3 同人／同任務／同屆／非公報／重複條／太小：各
   }
 });
 
-Deno.test("B4 與既有的重複併掉後剩不到 2 條 → 400 bundle_too_small、不寫；剩夠就照收且 index 連續、item_count 是實收數", async () => {
+Deno.test("B4 與既有的重複併掉後剩不到 2 條 → 不回 400，降級成一般逐條收（bundle_downgraded、merged 數、沒有 bundle_id）；剩夠就照收且 index 連續、item_count 是實收數", async () => {
   resetQuotaCache();
   const few = fake({ dupHashes: 4 });
   const res = await call(few.api, bundleBody(items(5)));
-  assertEquals([res.status, (res.body as Record<string, unknown>).error], [400, "bundle_too_small"]);
-  assertEquals(few.inserted.length, 0);
+  assertEquals(res.status, 201, JSON.stringify(res.body));
+  const b = res.body as Record<string, unknown>;
+  assertEquals([b.bundle_downgraded, b.merged, b.bundle], [true, 4, undefined]);
+  assertEquals(few.order, ["contributions"]);
+  assert(rowsOf(few, "contributions").every((r) => !("bundle_id" in r)));
+  assertEquals(rowsOf(few, "contributions").length, 1);
 
   resetQuotaCache();
   const enough = fake({ dupHashes: 2 });
@@ -196,6 +200,7 @@ Deno.test("B4 與既有的重複併掉後剩不到 2 條 → 400 bundle_too_smal
   assertEquals(ok.status, 201, JSON.stringify(ok.body));
   assertEquals(rowsOf(enough, "contributions").map((r) => r.bundle_index), [0, 1, 2]);
   assertEquals(rowsOf(enough, "policy_bundles")[0].item_count, 3);
+  assertEquals((ok.body as Record<string, unknown>).bundle_downgraded, undefined);
 });
 
 Deno.test("B5 旗標關：忽略 bundle、照舊逐條收（沒有 bundle_id），回應 bundle_ignored:true；上限仍是 20", async () => {
