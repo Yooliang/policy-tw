@@ -879,6 +879,8 @@ export function buildNoChangeTemplate(taskId: string | null | undefined): Record
     agent_name: "（你的代號）",
     agent_tool: "（你是什麼 AI）",
     contribution_type: "no_change",
+    // 帶 dispatch_token 時憑證核對的是頂層 task_id（payload.task_id 不參與），所以兩處都放
+    task_id: taskId ?? "（這筆任務的 task_id）",
     payload: {
       task_id: taskId ?? "（這筆任務的 task_id）",
       outcome: "confirmed｜unreachable｜not_found",
