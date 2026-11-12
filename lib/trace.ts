@@ -279,6 +279,14 @@ export function workCardCount(items: readonly TraceItem[], upTo: number = items.
   return seen.size
 }
 
+/** 前 upTo 筆事件（含）裡被收回重排的認領數：逾時沒交（lease_expired）加代理主動放回（lease_released） */
+export function leaseReturnCount(items: readonly TraceItem[], upTo: number = items.length - 1): number {
+  let n = 0
+  const last = Math.min(upTo, items.length - 1)
+  for (let i = 0; i <= last; i++) if (items[i].kind === 'lease_expired' || items[i].kind === 'lease_released') n++
+  return n
+}
+
 /** SystemOne 整理：收件＝走進整理的交件（查無回報不經整理），提議＝其中抽成提議任務的 */
 export function sortBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { intake: number; suggestions: number } {
   const out = { intake: 0, suggestions: 0 }
@@ -295,6 +303,7 @@ export function sortBreakdown(items: readonly TraceItem[], upTo: number = items.
 
 /** 節點的說明（滑鼠移上去的提示與讀屏文字）；只寫數字的真正意思 */
 export const NODE_HINT: Partial<Record<NodeId, string>> = {
+  dispatcher: '派出：領走任務或驗證票的次數；逾時收回：派出後租約 30 分鐘到期未交件被收回重排，含代理主動釋放',
   card: '同一個人同一件事只有一張工作卡；數字是這段時間事件觸及的張數',
   queue: '缺口收回：缺口已補完、過了開放期間，或有交件落庫而從佇列收掉',
   jevSort: '收件：經過 SystemOne 整理的交件數；提議：其中抽成提議任務的件數',
