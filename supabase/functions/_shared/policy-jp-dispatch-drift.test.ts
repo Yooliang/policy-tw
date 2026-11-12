@@ -330,7 +330,7 @@ const PAIRS: Pair[] = [
   { name: "contribution_votes_trg" },
   { name: "contribution_votes_set_weight" },
   { name: "contribution_tasks_drop_dispatch" },
-  { name: "contribution_tasks_insert_dispatch" },
+  { name: "contribution_tasks_insert_dispatch", before: "20261112005000_election_year_priority.sql", note: "取正見加選舉年優先（20261112005000，2026-11-12，日本站暫不跟：日本站的選舉 id 是 election_key 字串、沒有選舉年後兩碼的算法）之前的版本" },
   // 20261011360000 新增的複本（SEC_NEW）
   { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
