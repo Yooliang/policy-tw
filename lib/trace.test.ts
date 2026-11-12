@@ -1,6 +1,6 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  speedLabel, leaseReturnCount, workCardCount, sortBreakdown, COUNT_LABEL, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
+  speedLabel, nodeSubtitle, leaseReturnCount, workCardCount, sortBreakdown, COUNT_LABEL, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
   type NodeId, type TraceEvent,
 } from './trace.ts'
 import { CANVAS_H, CANVAS_W, LINKS, NODE_DEFS, NODE_H, NODE_W, anchorPoint, computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
@@ -273,8 +273,8 @@ Deno.test('sortBreakdown：收件＝經整理的交件（不含查無），提�
   assertEquals(sortBreakdown(items, 0), { intake: 1, suggestions: 0 })
 })
 
-Deno.test('佇列格的計數是缺口收回（gap_closed），不是逾時收回', () => {
-  assertEquals(COUNT_LABEL.queue, '缺口收回')
+Deno.test('佇列格的計數是重排（gap_closed），不含租約逾時', () => {
+  assertEquals(COUNT_LABEL.queue, '重排')
   assertEquals(nodeCounts(toItems([ev({ kind: 'gap_closed' }), ev({ kind: 'lease_expired' })])), { queue: 1 })
 })
 
@@ -288,4 +288,25 @@ Deno.test('leaseReturnCount：逾時收回＝lease_expired＋lease_released，�
   assertEquals(leaseReturnCount(items), 2)
   assertEquals(leaseReturnCount(items, 1), 1)
   assertEquals(leaseReturnCount([]), 0)
+})
+
+Deno.test('nodeSubtitle：各格副標字樣', () => {
+  const d = {
+    counts: { queue: 4, dispatcher: 9, dispute: 3, jevVote: 7, detector: 2 },
+    cards: 5, returned: 2, intake: 6, strong: { claim: 1, finalized: 0 }, supported: 4,
+  }
+  assertEquals(nodeSubtitle('queue', d), '重排 4')
+  assertEquals(nodeSubtitle('dispatcher', d), '派出 9／收回 2')
+  assertEquals(nodeSubtitle('jevVote', d), '總數 7／加分 4')
+  assertEquals(nodeSubtitle('jevSort', d), '總數 6')
+  assertEquals(nodeSubtitle('dispute', d), '裁決 3')
+  assertEquals(nodeSubtitle('card', d), '人×事 5 張')
+  assertEquals(nodeSubtitle('detector', d), '新缺口 2')
+  // 沒有動態數字的格用固定副標；官方資料就是「中選會」
+  assertEquals(nodeSubtitle('official', d, '中選會'), '中選會')
+  assertEquals(nodeSubtitle('official', d), '')
+})
+
+Deno.test('版面：官方資料格的副標是中選會', () => {
+  assertEquals(computeLayout().nodes.official.sub, '中選會')
 })

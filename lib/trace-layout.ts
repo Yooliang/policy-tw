@@ -28,7 +28,7 @@ export interface NodeDef {
 
 /** 17 個節點（x、y 取自說明頁 NODES；id 已換成 /trace 事件的 node key） */
 export const NODE_DEFS: readonly NodeDef[] = [
-  { id: 'official', label: '官方資料', kind: 'system', x: 0.05, y: 0.0974 },
+  { id: 'official', label: '官方資料', sub: '中選會', kind: 'system', x: 0.05, y: 0.0974 },
   { id: 'detector', label: '資料缺口偵測', sub: '44 支臂，每 10 分鐘掃', kind: 'system', x: 0.15, y: 0.0974 },
   { id: 'card', label: '工作卡', sub: '人×事', kind: 'system', x: 0.25, y: 0.0974 },
   { id: 'queue', label: '派工佇列', sub: '1.7 萬／2.6 千／1.2 千', kind: 'system', x: 0.35, y: 0.0974 },

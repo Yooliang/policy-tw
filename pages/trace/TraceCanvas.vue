@@ -5,7 +5,7 @@
 //   events  指定對象——位置是「第幾件事」（小數＝這件事走到哪），一件一件照真實順序走
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  COUNT_LABEL, GROUP_COLOR, NODE_HINT, eventRoute, groupOf, indexAtOrBefore, nodeCounts, leaseReturnCount, sortBreakdown, strongBreakdown, workCardCount,
+  GROUP_COLOR, NODE_HINT, eventRoute, nodeSubtitle, systemVoteBreakdown, groupOf, indexAtOrBefore, nodeCounts, leaseReturnCount, sortBreakdown, strongBreakdown, workCardCount,
   type NodeCounts, type NodeId, type TraceItem,
 } from '../../lib/trace'
 import { computeLayout, pathThrough, pointAlong, polylineLength, type Layout, type Pt } from '../../lib/trace-layout'
@@ -47,6 +47,7 @@ let strong = { claim: 0, finalized: 0, rejected: 0 }
 let cards = 0
 let returned = 0
 let sorted = { intake: 0, suggestions: 0 }
+let sysVotes = { supported: 0, notSupported: 0, cannotTell: 0, other: 0 }
 let countKey = ''
 const glow: Partial<Record<NodeId, number>> = {}
 let hidden = typeof document !== 'undefined' && document.hidden
@@ -94,6 +95,7 @@ function refreshCounts(): void {
   cards = workCardCount(props.items, idx)
   returned = leaseReturnCount(props.items, idx)
   sorted = sortBreakdown(props.items, idx)
+  sysVotes = systemVoteBreakdown(props.items, idx)
 }
 
 // ---- 前進 ----
@@ -252,10 +254,8 @@ function draw(): void {
   // 節點
   for (const n of Object.values(layout.nodes)) {
     drawBox(c, n, glow[n.id] ?? 0, s)
-    const cl = COUNT_LABEL[n.id]
     const num = counts[n.id]
-    const fmt = (v: number): string => v.toLocaleString('zh-TW')
-    const second = n.id === 'dispatcher' ? `派出 ${fmt(num ?? 0)}／逾時收回 ${fmt(returned)}` : n.id === 'card' ? `人×事 ${fmt(cards)} 張` : n.id === 'jevSort' ? `收件 ${fmt(sorted.intake)}${sorted.suggestions > 0 ? `／提議 ${fmt(sorted.suggestions)}` : ''}` : n.id === 'strongLane' ? `認領 ${strong.claim}／定案 ${strong.finalized}` : n.id === 'dispute' ? `轉裁決 ${(num ?? 0).toLocaleString('zh-TW')}` : cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : (n.sub ?? '')
+    const second = nodeSubtitle(n.id, { counts, cards, returned, intake: sorted.intake, strong, supported: sysVotes.supported }, n.sub)
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillStyle = '#0f172a'

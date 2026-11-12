@@ -202,7 +202,7 @@ export function dedupe(rows: readonly TraceEvent[]): TraceEvent[] {
 // ---- 節點計數 ----
 
 export const COUNT_LABEL: Partial<Record<NodeId, string>> = {
-  detector: '新缺口', dispute: '爭議', strongLane: '認領', queue: '缺口收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
+  detector: '新缺口', dispute: '爭議', strongLane: '認領', queue: '重排', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
 }
 
 /** 這個事件算在哪個節點的計數上；不計數回 null */
@@ -303,10 +303,38 @@ export function sortBreakdown(items: readonly TraceItem[], upTo: number = items.
 
 /** 節點的說明（滑鼠移上去的提示與讀屏文字）；只寫數字的真正意思 */
 export const NODE_HINT: Partial<Record<NodeId, string>> = {
-  dispatcher: '派出：領走任務或驗證票的次數；逾時收回：派出後租約 30 分鐘到期未交件被收回重排，含代理主動釋放',
+  dispatcher: '派出：領走任務或驗證票的次數；收回：派出後租約 30 分鐘到期未交件被收回重排，含代理主動釋放',
   card: '同一個人同一件事只有一張工作卡；數字是這段時間事件觸及的張數',
-  queue: '缺口收回：缺口已補完、過了開放期間，或有交件落庫而從佇列收掉',
-  jevSort: '收件：經過 SystemOne 整理的交件數；提議：其中抽成提議任務的件數',
+  queue: '重排：缺口已補完、過了開放期間，或有交件落庫而從佇列收掉',
+  jevSort: '總數：經過 SystemOne 整理的交件數',
+  jevVote: '總數：系統票張數；加分：其中來源撐得住的張數',
+}
+
+/** 節點副標所需的各項計數（都是播放到目前位置的累計） */
+export interface SubtitleData {
+  counts: NodeCounts
+  cards: number
+  returned: number
+  intake: number
+  strong: { claim: number; finalized: number }
+  supported: number
+}
+
+/** 節點方框第二行的字；沒有動態數字的節點回固定副標（沒有就空字串）。副標盡量兩個字 */
+export function nodeSubtitle(id: NodeId, d: SubtitleData, fixed?: string): string {
+  const n = (v: number | undefined): string => (v ?? 0).toLocaleString('zh-TW')
+  switch (id) {
+    case 'dispatcher': return `派出 ${n(d.counts.dispatcher)}／收回 ${n(d.returned)}`
+    case 'card': return `人×事 ${n(d.cards)} 張`
+    case 'jevSort': return `總數 ${n(d.intake)}`
+    case 'jevVote': return `總數 ${n(d.counts.jevVote)}／加分 ${n(d.supported)}`
+    case 'dispute': return `裁決 ${n(d.counts.dispute)}`
+    case 'strongLane': return `認領 ${d.strong.claim}／定案 ${d.strong.finalized}`
+    default: {
+      const label = COUNT_LABEL[id]
+      return label ? `${label} ${n(d.counts[id])}` : (fixed ?? '')
+    }
+  }
 }
 
 /** 時間 t（毫秒）以前（含）有幾筆事件；二分搜尋，items 須已排序 */
