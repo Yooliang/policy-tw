@@ -23,8 +23,8 @@ const PR1 = await readMig(PR1_NAME);
 Deno.test("A1 seed：新定義＝20261112005000 的定義加一處登記的排除，拿掉就一字不差", async () => {
   const prev = fnText(await readMig("20261112005000_election_year_priority.sql"), "seed_auto_task_queue");
   const neu = fnText(MIG, "seed_auto_task_queue");
-  const add = `     -- >>> 一人一包（20261112020000）：還在包裡、不是 0 號的條目沒有自己的票（票在載體上），不補
-     AND NOT (c.bundle_id IS NOT NULL AND c.bundle_index > 0 AND c.bundle_released_at IS NULL)
+  const add = `     -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有自己的票（票在載體上），不補；載體本身（含移轉後的新載體）照補
+     AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
      -- <<< 一人一包
 `;
   assertEquals(neu.split(add).length - 1, 1);
@@ -39,8 +39,8 @@ Deno.test("A2 task_boost_matches：新定義＝20261102180000 的定義加一處
   const prevName = "20261102180000_boost_verify_fast_task_ids.sql";
   const prev = fnText(await readMig(prevName), "task_boost_matches");
   const neu = fnText(MIG, "task_boost_matches");
-  const add = `       -- >>> 一人一包（20261112020000）：還在包裡、不是 0 號的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）
-       AND NOT (c.bundle_id IS NOT NULL AND c.bundle_index > 0 AND c.bundle_released_at IS NULL)
+  const add = `       -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）；載體（含移轉後的新載體）照算
+       AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
        -- <<< 一人一包
 `;
   assertEquals(neu.split(add).length - 1, 1);
@@ -100,6 +100,9 @@ async function env(mutateFan: (s: string) => string = (s) => s): Promise<PGlite>
   await db.exec(await latestFn("contribution_votes_trg", MIG_NAME));
   await db.exec(`CREATE TRIGGER trg_contribution_votes_consensus AFTER INSERT OR UPDATE OR DELETE ON contribution_votes FOR EACH ROW EXECUTE FUNCTION contribution_votes_trg();`);
   for (const n of ["verify_ticket_enqueue", "contribution_queue_row", "bundle_pick_carrier"]) await db.exec(fnText(PR1, n));
+  // PR2：載體判斷抽成 bundle_carrier_id，bundle_pick_carrier 改用它（覆蓋 PR1 的定義）
+  await db.exec(fnText(MIG, "bundle_carrier_id"));
+  await db.exec(fnText(MIG, "bundle_pick_carrier"));
   await db.exec("CREATE TRIGGER trg_contribution_queue_row AFTER INSERT ON contributions FOR EACH ROW EXECUTE FUNCTION contribution_queue_row();");
   await db.exec(mutateFan(fnText(MIG, "bundle_vote_fanout")));
   return db;
@@ -259,6 +262,36 @@ async function seedScenario(insert: string): Promise<{ db: PGlite; ids: string[]
 Deno.test("C1 seed 補票段：只替載體、沒包的、已釋放的建票；未釋放且 index>0 不建", async () => {
   const { db, ids, plain, released } = await seedScenario(seedInsert);
   assertEquals(await ticketSet(db), [ids[0]!, plain, released].sort());
+  await db.close();
+});
+
+Deno.test("C2 載體移轉後：seed 不替舊載體（已非 pending）建票、也不替非載體建票；新載體有票，票弄丟時 seed 補回", async () => {
+  const db = await env();
+  const [c0, c1, c2] = await bundle3(db);
+  await db.exec(`UPDATE contributions SET status = 'rejected' WHERE id = '${c0}'`);
+  assertEquals(await db.query<{ p: string }>(`SELECT bundle_pick_carrier('${BUNDLE}') AS p`).then((r) => r.rows[0]!.p), c1);
+  assert((await ticketSet(db)).includes(c1!), "新載體有票");
+  await db.exec("DELETE FROM task_dispatches"); // 票全弄丟（含舊載體的、新載體的）
+  await db.exec(seedInsert);
+  assertEquals(await ticketSet(db), [c1!], "只補新載體；舊載體已定案、c2 不是載體");
+  assertEquals((await db.query<{ c: string | null }>(`SELECT bundle_carrier_id('${BUNDLE}') AS c`)).rows[0]!.c, c1);
+  assert(!(await ticketSet(db)).includes(c2!));
+  await db.close();
+});
+
+Deno.test("C3 插隊命中的條件（取 task_boost_matches 裡登記的那一句）：載體移轉後命中新載體，不命中非載體", async () => {
+  const t = fnText(MIG, "task_boost_matches");
+  const m = /-- >>> 一人一包[^\n]*\n(\s*AND NOT \([^\n]*\))\n/.exec(t);
+  assert(m, "找不到 task_boost_matches 的排除句");
+  const db = await env();
+  const [c0, c1, c2] = await bundle3(db);
+  await db.exec(`UPDATE contributions SET status = 'rejected' WHERE id = '${c0}'`);
+  await db.exec(`SELECT bundle_pick_carrier('${BUNDLE}')`);
+  const plain = uid();
+  await db.exec(`INSERT INTO contributions (id) VALUES ('${plain}')`);
+  const hit = (await db.query<{ id: string }>(`SELECT c.id FROM contributions c WHERE c.status = 'pending' ${m[1]} ORDER BY c.id`)).rows.map((r) => r.id);
+  assertEquals(hit, [c1!, plain].sort());
+  assert(!hit.includes(c2!));
   await db.close();
 });
 

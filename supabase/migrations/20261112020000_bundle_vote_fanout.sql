@@ -11,6 +11,35 @@
 --                                             本 PR 不改 TS，列給接線的 PR 處理
 
 -- ------------------------------------------------------------
+-- 0. bundle_carrier_id：誰是載體（持有整包那一張票的條目）＝仍在包裡、仍 pending、bundle_index 最小的條目
+--    bundle_pick_carrier、bundle_vote_fanout 的移轉、seed 補票段、task_boost_matches 共用這一個判斷
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION bundle_carrier_id(p_bundle UUID) RETURNS UUID
+LANGUAGE sql STABLE AS $$
+  SELECT c.id
+    FROM contributions c
+   WHERE c.bundle_id = p_bundle AND c.bundle_released_at IS NULL AND c.status = 'pending'
+   ORDER BY c.bundle_index ASC, c.created_at ASC, c.id ASC
+   LIMIT 1;
+$$;
+COMMENT ON FUNCTION bundle_carrier_id IS '一人一包：包的載體＝仍在包裡（bundle_released_at IS NULL）、仍 pending、bundle_index 最小的條目；沒有回 NULL。2026-11-12';
+REVOKE ALL ON FUNCTION bundle_carrier_id(UUID) FROM PUBLIC, anon, authenticated;
+
+-- 以 20261112010000 的定義為底，只把「找載體」換成 bundle_carrier_id（鎖與補票不變）
+CREATE OR REPLACE FUNCTION bundle_pick_carrier(p_bundle_id UUID) RETURNS UUID
+LANGUAGE plpgsql AS $$
+DECLARE v_id UUID;
+BEGIN
+  -- 同一包的載體移轉一次只有一個交易在做，確保一包只有一張票
+  PERFORM pg_advisory_xact_lock(hashtext(p_bundle_id::text));
+  v_id := bundle_carrier_id(p_bundle_id);
+  IF v_id IS NOT NULL THEN
+    PERFORM verify_ticket_enqueue(v_id);
+  END IF;
+  RETURN v_id;
+END $$;
+
+-- ------------------------------------------------------------
 -- 1. bundle_vote_fanout：整包投票扇出成逐條 contribution_votes（單一交易）
 --    ①bundle_votes 先記一筆（UNIQUE(bundle_id, voter_key) 擋重複）②對還在包裡、pending、不在 except、這位投票人還沒票的條目逐條插票
 --    （計分、共識由既有的 contribution_votes 觸發器逐列算，這裡不碰分數）③except 的條目釋放並建自己的票；載體被釋放或已定案就移轉
@@ -205,8 +234,8 @@ BEGIN
   -- <<< 驗證票跟著任務
     FROM contributions c
    WHERE c.status = 'pending'
-     -- >>> 一人一包（20261112020000）：還在包裡、不是 0 號的條目沒有自己的票（票在載體上），不補
-     AND NOT (c.bundle_id IS NOT NULL AND c.bundle_index > 0 AND c.bundle_released_at IS NULL)
+     -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有自己的票（票在載體上），不補；載體本身（含移轉後的新載體）照補
+     AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
      -- <<< 一人一包
      AND NOT EXISTS (SELECT 1 FROM task_dispatches d WHERE d.task_id = 'verify:' || c.id)
   ON CONFLICT (task_id) DO NOTHING;
@@ -270,8 +299,8 @@ LANGUAGE sql STABLE AS $$
            election_id_or_null(c.payload->>'election_id'),
            c.payload->>'election_type'
       FROM contributions c WHERE c.status = 'pending'
-       -- >>> 一人一包（20261112020000）：還在包裡、不是 0 號的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）
-       AND NOT (c.bundle_id IS NOT NULL AND c.bundle_index > 0 AND c.bundle_released_at IS NULL)
+       -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）；載體（含移轉後的新載體）照算
+       AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
        -- <<< 一人一包
   )
   SELECT s.task_id, s.kind
