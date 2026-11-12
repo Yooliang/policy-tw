@@ -91,7 +91,7 @@ CREATE TABLE election_task_config (election_id integer PRIMARY KEY, enabled bool
 INSERT INTO election_task_config (election_id) VALUES (2022), (2024), (2026);
 CREATE TABLE queue_settings (id smallint PRIMARY KEY, boost_seconds bigint NOT NULL DEFAULT ${BOOST}, visitor_front_seconds bigint NOT NULL DEFAULT 315360000,
   manual_front_seconds bigint NOT NULL DEFAULT 157680000, verify_priority_seconds integer NOT NULL DEFAULT 1209600, dispatch_horizon_seconds integer NOT NULL DEFAULT 86400,
-  verify_inherit_negative boolean NOT NULL DEFAULT false, no_change_verify_defer_seconds integer NOT NULL DEFAULT 86400, no_change_verify_redispatch_defer_seconds integer NOT NULL DEFAULT 172800);
+  verify_inherit_negative boolean NOT NULL DEFAULT false, no_change_verify_defer_seconds integer NOT NULL DEFAULT 86400, no_change_verify_redispatch_defer_seconds integer NOT NULL DEFAULT 172800, election_year_priority_applied_at timestamptz);
 INSERT INTO queue_settings (id) VALUES (1);
 CREATE TABLE task_dispatches (task_id text PRIMARY KEY, last_dispatched_at timestamptz NOT NULL DEFAULT now(), dispatch_count integer NOT NULL DEFAULT 1, refreshed_at timestamptz,
   queue_at timestamptz NOT NULL DEFAULT now(), task_type text, target jsonb NOT NULL DEFAULT '{}'::jsonb, what_we_need text, hint_sources text[], reward integer, region text,
@@ -266,6 +266,12 @@ Deno.test("B7 一次性重算區塊：priority_seconds 加選舉年、queue_at �
   assertEquals(await prio(aNone), 2600 * DAY + 3 * DAY, "沒有選舉 id＝2026，原本的 +3 天保留");
   assertEquals(days(await at(db, a22), await at(db, a26)), 400, "2022 排到 2026 後面 400 天");
   assertEquals(await at(db, bst), iso("2026-10-05", -2200 - BOOST / DAY), "插隊秒數照舊");
+  // 冪等：再跑一次（migration 重跑）不疊加
+  await db.exec(m[0]);
+  assertEquals(await prio(a22), 2200 * DAY, "重跑不疊加");
+  assertEquals(days(await at(db, a22), await at(db, a26)), 400);
+  const applied = await db.query<{ t: string | null }>(`SELECT election_year_priority_applied_at::text AS t FROM queue_settings`);
+  assert(applied.rows[0]!.t !== null, "記下套用時間");
   await db.close();
 });
 

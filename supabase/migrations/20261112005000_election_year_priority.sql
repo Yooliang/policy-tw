@@ -262,9 +262,17 @@ UPDATE election_task_config SET enabled = false, updated_at = now(), note = COAL
 --      2024：  122 張，最小 2026-10-28 22:18 → 2020-04-02 22:18，中位數 2026-11-04 18:10 → 2020-04-09 18:10
 --      2026：   31 張（含無選舉 id），中位數 2026-11-04 12:14 → 2019-09-22 12:14
 --    （目前佇列共 1,194 張驗證票：未領走 279、領走過 915，全部套用；重算後 2022 票的中位數晚於 2026 票。）
+--    冪等：重算只做一次，做完在 queue_settings.election_year_priority_applied_at 記時間，有值就整段跳過（migration 重跑不會疊加）。
+ALTER TABLE queue_settings ADD COLUMN IF NOT EXISTS election_year_priority_applied_at TIMESTAMPTZ;
+COMMENT ON COLUMN queue_settings.election_year_priority_applied_at IS '選舉年優先的一次性重算（20261112005000）做完的時間；有值＝已套用，重跑 migration 不再疊加。2026-11-12';
+
 DO $$
 DECLARE r RECORD; v_n INTEGER;
 BEGIN
+  IF EXISTS (SELECT 1 FROM queue_settings WHERE id = 1 AND election_year_priority_applied_at IS NOT NULL) THEN
+    RAISE NOTICE '選舉年優先的一次性重算已套用過，略過';
+    RETURN;
+  END IF;
   FOR r IN SELECT (verify_ticket_election_seconds(d.task_id) / 86400)::INTEGER AS days, count(*) AS n, min(d.queue_at) AS min_q,
                   percentile_disc(0.5) WITHIN GROUP (ORDER BY d.queue_at) AS med_q
              FROM task_dispatches d WHERE d.task_id LIKE 'verify:%' AND d.boost_seconds = 0 GROUP BY 1 ORDER BY 1 LOOP
@@ -296,8 +304,7 @@ BEGIN
   -- 現有驗證票：基準往前減選舉年秒數（沒有基準的舊列先用現在的 queue_at 反推，同觸發器的退路），priority_seconds 同步加
   UPDATE task_dispatches v
      SET dispatch_base_at = COALESCE(v.dispatch_base_at, verify_ticket_freeze_base(v.queue_at, v.dispatch_count, v.boost_seconds, verify_ticket_step_seconds(v.task_id)))
-                            - make_interval(secs => verify_ticket_election_seconds(v.task_id)),
-         priority_seconds = v.priority_seconds + verify_ticket_election_seconds(v.task_id)
+                            - make_interval(secs => verify_ticket_election_seconds(v.task_id))
    WHERE v.task_id LIKE 'verify:%';
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE '重算 % 張驗證票的基準', v_n;
@@ -313,6 +320,8 @@ BEGIN
                 AND queue_at IS DISTINCT FROM task_queue_key(last_dispatched_at, priority_seconds, cool_until, boost_seconds)) THEN
     RAISE EXCEPTION '有任務列的 queue_at 不是排序鍵';
   END IF;
+
+  UPDATE queue_settings SET election_year_priority_applied_at = now() WHERE id = 1;
 END;
 $$;
 
