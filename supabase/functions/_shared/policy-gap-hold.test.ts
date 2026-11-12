@@ -90,10 +90,27 @@ Deno.test("A4 不擋的情況：選舉或職位不明、沒有整場公報里程
   await db.close();
 });
 
-Deno.test("A5 縣市長類讀規則 mayor_policies 的 election_types（主控台改了就跟著改）", async () => {
+Deno.test("A5 縣市長類＝規則 mayor_policies 的 election_types 與縣市長、直轄市長的聯集（正式庫規則只列縣市長，直轄市長仍不擋）", async () => {
+  const only = await buildDb(["縣市長"]);
+  assertFalse(await held(only, 2026, "縣市長"));
+  assertFalse(await held(only, 2026, "直轄市長"), "規則只列縣市長時，直轄市長仍不擋");
+  assert(await held(only, 2026, "縣市議員"));
+  await only.close();
+  const extra = await buildDb(["縣市長", "某新職位"]);
+  assertFalse(await held(extra, 2026, "某新職位"), "規則多列的職位也不擋");
+  assert(await held(extra, 2026, "村里長"));
+  await extra.close();
+  const empty = await buildDb([]);
+  assertFalse(await held(empty, 2026, "直轄市長"), "規則清單空的也不擋");
+  await empty.close();
+});
+
+Deno.test("A6 migration 末段自我檢查（DO 區塊）在正式庫形狀的規則（只有縣市長）下跑得過", async () => {
   const db = await buildDb(["縣市長"]);
-  assertFalse(await held(db, 2026, "縣市長"));
-  assert(await held(db, 2026, "直轄市長"), "規則只列縣市長時，直轄市長不在例外");
+  const sql = await readMig(MIG);
+  const m = sql.match(/DO \$\$[\s\S]*?END \$\$;/g) ?? [];
+  assert(m.length >= 1);
+  await db.exec(m[m.length - 1]);
   await db.close();
 });
 

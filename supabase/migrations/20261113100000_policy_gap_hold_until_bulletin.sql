@@ -10,7 +10,7 @@
 --
 -- 改了什麼（全部在總表這一層，因為 auto:* 派工列只有 seed_auto_task_queue 會寫，而 seed 吃的是總表 contribution_auto_tasks_arms() 的輸出）：
 --   1. election_bulletin_published(p_election_id)：這場選舉的公報里程碑是不是 done（STABLE）。
---   2. policy_gap_held(p_election_id, p_election_type)：這場選舉的這個職位，缺政見任務現在要不要擋——縣市長類（讀規則 mayor_policies 的 election_types）不擋、還沒投票、
+--   2. policy_gap_held(p_election_id, p_election_type)：這場選舉的這個職位，缺政見任務現在要不要擋——縣市長類（縣市長、直轄市長，加上規則 mayor_policies 的 election_types，取聯集）不擋、還沒投票、
 --      有整場的公報里程碑而且不是 done 才擋；職位或選舉不明、沒有公報里程碑、已經投票的一律不擋（寧可開著也不無聲關掉，同 activity_open 的 open_when_unknown 精神）。
 --   3. contribution_auto_tasks_arms()（前一版 20261105200000）：多一個 held CTE（每組選舉×職位問 policy_gap_held 一次），並在 w.ok（流量開窗那一處）多一個條件。
 --      被擋的列跟「窗口關著」同一條路：旗標 gap.arms_all 開著時留下、opened_by 是 NULL，seed 收回已存在的派工列時原因記 window；
@@ -55,13 +55,13 @@ GRANT EXECUTE ON FUNCTION election_bulletin_published(INTEGER) TO service_role;
 CREATE OR REPLACE FUNCTION policy_gap_held(p_election_id INTEGER, p_election_type TEXT) RETURNS BOOLEAN
 LANGUAGE sql STABLE AS $$
   WITH mayor AS (
-    -- 縣市長類職位讀規則 mayor_policies 的 params（跟 raw、mayor_policies 臂同一來源）；讀不到或空的就用預設兩個
-    SELECT COALESCE(NULLIF(
-             (SELECT ARRAY(SELECT jsonb_array_elements_text(r.params->'election_types'))
-                FROM activity_rules r
-               WHERE r.activity = 'mayor_policies' AND r.priority IS NULL
-               ORDER BY r.enabled DESC, r.id LIMIT 1),
-             ARRAY[]::TEXT[]), ARRAY['縣市長', '直轄市長']) AS types
+    -- 縣市長類職位＝規則 mayor_policies 的 params.election_types 與固定的縣市長、直轄市長取聯集：
+    -- 正式庫的規則只列「縣市長」，只靠規則的話直轄市長會被擋；規則讀不到時也至少有這兩個
+    SELECT ARRAY['縣市長', '直轄市長']::TEXT[]
+           || COALESCE((SELECT ARRAY(SELECT jsonb_array_elements_text(r.params->'election_types'))
+                          FROM activity_rules r
+                         WHERE r.activity = 'mayor_policies' AND r.priority IS NULL
+                         ORDER BY r.enabled DESC, r.id LIMIT 1), ARRAY[]::TEXT[]) AS types
   )
   SELECT p_election_id IS NOT NULL AND p_election_type IS NOT NULL
      AND NOT (p_election_type = ANY ((SELECT mayor.types FROM mayor)::TEXT[]))
