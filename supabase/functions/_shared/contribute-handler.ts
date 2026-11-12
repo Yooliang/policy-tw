@@ -285,7 +285,7 @@ export async function handleContribute(
   const sharedBulletin = bundleOn ? sharedBulletinUrl(validation.items) : null;
   if (bundleOn) {
     const problem = bundleProblems(validation.items, { minItems: bundleSettings!.minItems, maxItems: bundleSettings!.maxItems });
-    if (problem) return { status: 400, body: { success: false, error: problem.error, message: problem.message, indexes: problem.indexes, docs: PROTOCOL_URL } };
+    if (problem) return { status: 400, body: { success: false, error: problem.error, message: problem.message, indexes: problem.indexes } };
   }
   // 憑證綁的是哪個任務，這批裡有 task_id 的每一筆都要是那一個（不同任務各自領各自的憑證）；一筆也對不上＝拿錯憑證
   {
