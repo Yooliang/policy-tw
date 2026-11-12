@@ -133,7 +133,7 @@ CREATE TABLE task_dispatches (
   opened_at timestamptz NOT NULL DEFAULT now(), last_dispatched_at timestamptz);
 CREATE TABLE contributions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), task_id text, contribution_type text, status text, payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-  contributor_ip_hash text, agent_name text);
+  contributor_ip_hash text, agent_name text, bundle_id uuid);
 CREATE TABLE contribution_task_leases (task_id text, target_key text, leased_until timestamptz, agent_name text, work_key text);
 CREATE TABLE citizen_questions (id uuid PRIMARY KEY, answer_count integer NOT NULL DEFAULT 0);
 CREATE TABLE question_answers (question_id uuid, agent_name text);

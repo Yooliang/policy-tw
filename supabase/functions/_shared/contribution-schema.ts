@@ -137,6 +137,8 @@ export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], reado
 export const REMOVAL_TABLES = ["policies", "politicians"] as const;
 
 export const MAX_BATCH = 20;
+/** 一人一包（PR3）：旗標 queue_settings.bundle_enabled 開、且請求帶 bundle:true 時，一批最多幾條（預設；實際值讀 queue_settings.bundle_max_items）；名冊例外 MAX_BATCH_ROSTER 不動 */
+export const MAX_BUNDLE_ITEMS = 30;
 /**
  * 名冊逐位吻合的 candidacy 批次上限（2026-10-08，維護者裁示 B 案：只放寬這一種，其他型別維持 MAX_BATCH）。
  * 這裡只看結構——整批每一筆都是 candidacy、而且 source_urls 引用中選會登記名冊 PDF；「逐位吻合」要查名冊資料表，在 contribute-handler
@@ -268,6 +270,8 @@ export interface ValidationResult {
   errors: ValidationError[];
   items: ContributionInput[];
   contributor: Contributor;
+  /** 請求帶了 bundle:true（只是「請求的意思」；旗標關時由 contribute-handler 忽略） */
+  bundle?: boolean;
 }
 
 type Obj = Record<string, unknown>;
@@ -942,11 +946,11 @@ export function lineageSourceProblems(type: string, payload: unknown, sourceUrls
 
 /** 把請求 body 正規化成清單並逐筆驗證；有任何錯就整批不收（讓 AI 一次修完再送）。 */
 /** opts.rosterBatchCap：名冊大批次的上限（呼叫端算好：min(MAX_BATCH_ROSTER, 目前生效的網段提交額度)，2026-10-29 額度可調）；沒給用 MAX_BATCH_ROSTER */
-export function validateContributionRequest(body: unknown, elections?: readonly ElectionRef[], opts?: { rosterBatchCap?: number }): ValidationResult {
+export function validateContributionRequest(body: unknown, elections?: readonly ElectionRef[], opts?: { rosterBatchCap?: number; bundleCap?: number }): ValidationResult {
   const previous = activeElections;
   activeElections = elections && elections.length > 0 ? elections : FALLBACK_ELECTIONS;
   try {
-    return validateContributionRequestInner(body, opts?.rosterBatchCap ?? MAX_BATCH_ROSTER);
+    return validateContributionRequestInner(body, opts?.rosterBatchCap ?? MAX_BATCH_ROSTER, opts?.bundleCap);
   } finally {
     activeElections = previous;
   }
@@ -980,7 +984,7 @@ function resolveElectionKeys(p: Obj, push: (path: string, message: string) => vo
   }
 }
 
-function validateContributionRequestInner(body: unknown, rosterCap: number): ValidationResult {
+function validateContributionRequestInner(body: unknown, rosterCap: number, bundleCap?: number): ValidationResult {
   const errors: ValidationError[] = [];
   const items: ContributionInput[] = [];
   const contributor: Contributor = { agent_name: "" };
@@ -1015,9 +1019,15 @@ function validateContributionRequestInner(body: unknown, rosterCap: number): Val
   const rawList: unknown[] = Array.isArray(body.contributions) ? body.contributions : [body];
   if (Array.isArray(body.contributions) && rawList.length === 0) errors.push({ index: -1, path: "contributions", message: "contributions 不能是空陣列" });
   // 超過 MAX_BATCH 筆只有一種例外：整批都是引用中選會登記名冊的 candidacy（上限 MAX_BATCH_ROSTER；逐位吻合名冊由 contribute-handler 查表把關）
-  const batchCap = rawList.length > MAX_BATCH && isRosterCandidacyBatch(rawList) ? rosterCap : MAX_BATCH;
+  // bundle（一人一包）：可選布林；只有 contributions 陣列形式才有意義。bundleCap 由呼叫端在旗標開時才給（旗標關＝不給＝上限照舊 MAX_BATCH）
+  if (body.bundle !== undefined && typeof body.bundle !== "boolean") errors.push({ index: -1, path: "bundle", message: "bundle 要是 true 或 false" });
+  const bundleRequested = body.bundle === true;
+  const bundleLimit = bundleRequested && Array.isArray(body.contributions) && typeof bundleCap === "number" ? Math.max(MAX_BATCH, bundleCap) : MAX_BATCH;
+  const batchCap = rawList.length > MAX_BATCH && isRosterCandidacyBatch(rawList) ? rosterCap : bundleLimit;
   if (rawList.length > batchCap) {
-    errors.push({ index: -1, path: "contributions", message: `一次最多 ${MAX_BATCH} 筆（整批都是 candidacy、source_urls 引用中選會登記名冊 PDF 而且逐位吻合名冊的，最多 ${rosterCap} 筆）` });
+    errors.push({ index: -1, path: "contributions", message: bundleLimit > MAX_BATCH
+      ? `一包最多 ${bundleLimit} 筆（一般批次最多 ${MAX_BATCH} 筆）`
+      : `一次最多 ${MAX_BATCH} 筆（整批都是 candidacy、source_urls 引用中選會登記名冊 PDF 而且逐位吻合名冊的，最多 ${rosterCap} 筆）` });
   }
 
   rawList.slice(0, batchCap).forEach((raw, index) => {
@@ -1082,7 +1092,7 @@ function validateContributionRequestInner(body: unknown, rosterCap: number): Val
     });
   });
 
-  return { ok: errors.length === 0, errors, items, contributor };
+  return { ok: errors.length === 0, errors, items, contributor, ...(bundleRequested ? { bundle: true } : {}) };
 }
 
 export const VERDICTS = ["agree", "disagree", "unsure"] as const;

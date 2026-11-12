@@ -41,6 +41,7 @@ import { SELF_CITATION_MESSAGE, selfCitationProblems } from "./self-hosts.ts";
 import { SEARCH_PAGE_GATE, searchPageProblems, strippedNotice, stripSearchPages } from "./search-page-guard.ts";
 import { voteFieldsNotice } from "./candidacy-result.ts";
 import { detailsOfPayload, sourceLevelNotice } from "./source-write.ts";
+import { bundleProblems, loadBundleSettings, sharedBulletinUrl } from "./policy-bundle.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -260,7 +261,15 @@ export async function handleContribute(
   // 允許的選舉 id 與 election_key 以資料庫 elections 表為準（#344 第二階段 A），驗證本身仍是純函式
   const elections = await loadElections(supabase);
   const quotaLimits = await loadQuotaLimits(supabase, "tw", QUOTA_DEFAULTS);
-  const validation = validateContributionRequest(body, elections, { rosterBatchCap: effectiveRosterBatchCap(MAX_BATCH_ROSTER, quotaLimits.per_ip_submit, MAX_BATCH) });
+  // 一人一包（PR3）：只有請求帶 bundle:true 才讀旗標；旗標關（或讀不到）＝忽略 bundle，照舊逐條收
+  const bundleRequested = !!body && typeof body === "object" && (body as Record<string, unknown>).bundle === true;
+  const bundleSettings = bundleRequested ? await loadBundleSettings(supabase) : null;
+  const bundleOn = bundleSettings?.enabled === true;
+  const bundleIgnored = bundleRequested && !bundleOn;
+  const validation = validateContributionRequest(body, elections, {
+    rosterBatchCap: effectiveRosterBatchCap(MAX_BATCH_ROSTER, quotaLimits.per_ip_submit, MAX_BATCH),
+    ...(bundleOn ? { bundleCap: bundleSettings!.maxItems } : {}),
+  });
   if (!validation.ok) {
     const encoding = validation.errors.some((e) => e.code === "encoding_invalid");
     const category = validation.errors.some((e) => e.code === "category_invalid");
@@ -271,6 +280,12 @@ export async function handleContribute(
       ? validation.errors.find((e) => e.code === "category_invalid")!.message
       : "有欄位不合格，整批未收；請依 errors 修正後重送（格式見 skill.md）";
     return { status: 400, body: { success: false, error, message, errors: validation.errors } };
+  }
+  // 一人一包：結構檢查（整批未收、不算被拒）。旗標關時不做
+  const sharedBulletin = bundleOn ? sharedBulletinUrl(validation.items) : null;
+  if (bundleOn) {
+    const problem = bundleProblems(validation.items, { minItems: bundleSettings!.minItems, maxItems: bundleSettings!.maxItems });
+    if (problem) return { status: 400, body: { success: false, error: problem.error, message: problem.message, indexes: problem.indexes, docs: PROTOCOL_URL } };
   }
   // 憑證綁的是哪個任務，這批裡有 task_id 的每一筆都要是那一個（不同任務各自領各自的憑證）；一筆也對不上＝拿錯憑證
   {
@@ -301,7 +316,8 @@ export async function handleContribute(
 
   // 超過 MAX_BATCH 筆的批次（整批都是引用中選會登記名冊的 candidacy，結構已由 validateContributionRequest 限定）：
   // 每一筆都要跟名冊資料表逐位吻合才收（2026-10-08，維護者裁示 B 案）；不算被拒
-  if (validation.items.length > MAX_BATCH) {
+  // （一人一包的政見包不是名冊批次：結構已在上面由 bundleProblems 把關）
+  if (validation.items.length > MAX_BATCH && !bundleOn) {
     const gate = await rosterBatchProblems(supabase, validation.items);
     if (!gate.ok) return { status: 400, body: { success: false, error: gate.error, message: gate.message, errors: gate.errors } };
   }
@@ -896,7 +912,21 @@ export async function handleContribute(
     if (existingByHash.has(h) || blocked.has(i) || mergedByIndex.has(i) || bypassNotes.has(i)) return;
     if (seenInBatch.has(h)) dupInBatch.add(i); else seenInBatch.add(h);
   });
-  const toInsert = validation.items
+  // 一人一包：併掉、重複之後剩不到 min 條就不成包（已併成同意票的照記，不會白做）
+  if (bundleOn) {
+    const survivors = validation.items.filter((_, i) => !existingByHash.has(hashes[i]) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i) && !dupInBatch.has(i)).length;
+    if (survivors < bundleSettings!.minItems) {
+      return {
+        status: 400,
+        body: {
+          success: false, error: "bundle_too_small",
+          message: `這包裡有 ${validation.items.length - survivors} 條與既有的重複（已併成同意票或已交過），剩 ${survivors} 條，少於一包的最少 ${bundleSettings!.minItems} 條，這包沒有收；剩下的請不要帶 bundle:true、照一般方式逐條交`,
+          remaining: survivors, docs: PROTOCOL_URL,
+        },
+      };
+    }
+  }
+  const toInsertBase = validation.items
     .map((item, i) => ({ item, hash: hashes[i], i }))
     .filter(({ hash, i }) => !existingByHash.has(hash) && !blocked.has(i) && !mergedByIndex.has(i) && !bypassNotes.has(i) && !dupInBatch.has(i))
     .map(({ item, hash }) => ({
@@ -916,10 +946,36 @@ export async function handleContribute(
       via,
     }));
 
+  // 一人一包：先寫 policy_bundles，再寫逐條 contributions 帶 bundle_id／bundle_index（0 起、連續）
+  let bundleId: string | null = null;
+  if (bundleOn && toInsertBase.length > 0) {
+    const first = validation.items[0];
+    const { data: bRow, error: bErr } = await supabase.from("policy_bundles").insert({
+      task_id: first.task_id ?? null,
+      politician_id: (first.payload as Record<string, unknown>).politician_id ?? null,
+      election_id: (first.payload as Record<string, unknown>).election_id ?? null,
+      source_url: sharedBulletin,
+      agent_name: validation.contributor.agent_name,
+      actor_id: actor.actor_id,
+      contributor_ip_hash: ipHash,
+      item_count: toInsertBase.length,
+    }).select("id").maybeSingle();
+    if (bErr) throw new Error(`policy_bundles insert: ${bErr.message}`);
+    bundleId = (bRow as { id?: string } | null)?.id ?? null;
+    if (!bundleId) throw new Error("policy_bundles insert 沒有回傳 id");
+  }
+  const toInsert = bundleId
+    ? toInsertBase.map((row, index) => ({ ...row, bundle_id: bundleId, bundle_index: index }))
+    : toInsertBase;
+
   let inserted: Array<{ id: string; payload_hash: string }> = [];
   if (toInsert.length > 0) {
     const { data, error } = await supabase.from("contributions").insert(toInsert).select("id, payload_hash");
-    if (error) throw new Error(`contributions insert: ${error.message}`);
+    if (error) {
+      // 條目寫不進去就把剛建的包收回，不留孤兒包
+      if (bundleId) await supabase.from("policy_bundles").delete().eq("id", bundleId);
+      throw new Error(`contributions insert: ${error.message}`);
+    }
     inserted = data ?? [];
   }
   const insertedByHash = new Map(inserted.map((r) => [r.payload_hash, r.id]));
@@ -1094,6 +1150,8 @@ export async function handleContribute(
       ].filter(Boolean).join("；") + trailingVoteNote,
       agent_name: validation.contributor.agent_name,
       ...(single ? results[0] : { results }),
+      ...(bundleId ? { bundle: { bundle_id: bundleId, item_count: toInsert.length } } : {}),
+      ...(bundleIgnored ? { bundle_ignored: true } : {}),
       daily_quota: { limit: sq.limit, used: used + inserted.length + bypassResults.size, ...quotaWindowFields() },
       ...(toolNotice || strippedCount > 0 || levelNotice ? { notice: [toolNotice, strippedCount > 0 ? strippedNotice(strippedCount) : "", levelNotice].filter(Boolean).join("\n") } : {}),
       docs: PROTOCOL_URL,
