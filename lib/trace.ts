@@ -202,7 +202,7 @@ export function dedupe(rows: readonly TraceEvent[]): TraceEvent[] {
 // ---- 節點計數 ----
 
 export const COUNT_LABEL: Partial<Record<NodeId, string>> = {
-  detector: '新缺口', dispute: '爭議', strongLane: '認領', queue: '收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
+  detector: '新缺口', dispute: '爭議', strongLane: '認領', queue: '缺口收回', dispatcher: '派出', submit: '交件', vote: '投票', applied: '落庫', rejected: '退件', jevVote: '系統票', notfound: '查無', visitor: '請求', suggest: '提議',
 }
 
 /** 這個事件算在哪個節點的計數上；不計數回 null */
@@ -266,6 +266,38 @@ export function nodeCounts(items: readonly TraceItem[], upTo: number = items.len
     if (n) out[n] = (out[n] ?? 0) + 1
   }
   return out
+}
+
+/** 前 upTo 筆事件（含）觸及幾張不同的工作卡（不同 work_key；事件沒帶 work_key 的不算） */
+export function workCardCount(items: readonly TraceItem[], upTo: number = items.length - 1): number {
+  const seen = new Set<string>()
+  const last = Math.min(upTo, items.length - 1)
+  for (let i = 0; i <= last; i++) {
+    const k = items[i].work_key
+    if (k) seen.add(k)
+  }
+  return seen.size
+}
+
+/** SystemOne 整理：收件＝走進整理的交件（查無回報不經整理），提議＝其中抽成提議任務的 */
+export function sortBreakdown(items: readonly TraceItem[], upTo: number = items.length - 1): { intake: number; suggestions: number } {
+  const out = { intake: 0, suggestions: 0 }
+  const last = Math.min(upTo, items.length - 1)
+  for (let i = 0; i <= last; i++) {
+    if (items[i].kind !== 'submitted') continue
+    const type = detailText(items[i], 'type')
+    if (type === 'no_change') continue
+    out.intake++
+    if (type === 'task_suggestion') out.suggestions++
+  }
+  return out
+}
+
+/** 節點的說明（滑鼠移上去的提示與讀屏文字）；只寫數字的真正意思 */
+export const NODE_HINT: Partial<Record<NodeId, string>> = {
+  card: '同一個人同一件事只有一張工作卡；數字是這段時間事件觸及的張數',
+  queue: '缺口收回：缺口已補完、過了開放期間，或有交件落庫而從佇列收掉',
+  jevSort: '收件：經過 SystemOne 整理的交件數；提議：其中抽成提議任務的件數',
 }
 
 /** 時間 t（毫秒）以前（含）有幾筆事件；二分搜尋，items 須已排序 */

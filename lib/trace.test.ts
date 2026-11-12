@@ -1,6 +1,6 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  speedLabel, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
+  speedLabel, workCardCount, sortBreakdown, COUNT_LABEL, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
   type NodeId, type TraceEvent,
 } from './trace.ts'
 import { CANVAS_H, CANVAS_W, LINKS, NODE_DEFS, NODE_H, NODE_W, anchorPoint, computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
@@ -248,4 +248,32 @@ Deno.test('pointAlong：起點、終點、中點', () => {
 Deno.test('speedLabel：全站 30／60／120／240 顯示 0.5／1／2／4×，指定對象照原數字', () => {
   assertEquals([30, 60, 120, 240].map((s) => speedLabel('window', s)), ['0.5×', '1×', '2×', '4×'])
   assertEquals([0.5, 1, 2, 4].map((s) => speedLabel('events', s)), ['0.5×', '1×', '2×', '4×'])
+})
+
+Deno.test('workCardCount：不同 work_key 才算，沒帶 work_key 的不算，只算到 upTo', () => {
+  const items = toItems([
+    ev({ at: '2026-11-11T02:00:00Z', kind: 'gap_opened', work_key: 'politician:a:policies:2026' }),
+    ev({ at: '2026-11-11T02:01:00Z', kind: 'lease_issued', work_key: 'politician:a:policies:2026' }),
+    ev({ at: '2026-11-11T02:02:00Z', kind: 'gap_opened', work_key: 'politician:b:policies:2026' }),
+    ev({ at: '2026-11-11T02:03:00Z', kind: 'vote', work_key: null }),
+  ])
+  assertEquals(workCardCount(items), 2)
+  assertEquals(workCardCount(items, 1), 1)
+  assertEquals(workCardCount([]), 0)
+})
+
+Deno.test('sortBreakdown：收件＝經整理的交件（不含查無），提議＝其中的任務提議', () => {
+  const items = toItems([
+    ev({ at: '2026-11-11T02:00:00Z', kind: 'submitted', detail: { type: 'policy' } }),
+    ev({ at: '2026-11-11T02:01:00Z', kind: 'submitted', detail: { type: 'task_suggestion' } }),
+    ev({ at: '2026-11-11T02:02:00Z', kind: 'submitted', detail: { type: 'no_change' } }),
+    ev({ at: '2026-11-11T02:03:00Z', kind: 'vote' }),
+  ])
+  assertEquals(sortBreakdown(items), { intake: 2, suggestions: 1 })
+  assertEquals(sortBreakdown(items, 0), { intake: 1, suggestions: 0 })
+})
+
+Deno.test('佇列格的計數是缺口收回（gap_closed），不是逾時收回', () => {
+  assertEquals(COUNT_LABEL.queue, '缺口收回')
+  assertEquals(nodeCounts(toItems([ev({ kind: 'gap_closed' }), ev({ kind: 'lease_expired' })])), { queue: 1 })
 })
