@@ -234,7 +234,7 @@ BEGIN
   -- <<< 驗證票跟著任務
     FROM contributions c
    WHERE c.status = 'pending'
-     -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有自己的票（票在載體上），不補；載體本身（含移轉後的新載體）照補
+     -- >>> 一人一包（20261112065000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有自己的票（票在載體上），不補；載體本身（含移轉後的新載體）照補
      AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
      -- <<< 一人一包
      AND NOT EXISTS (SELECT 1 FROM task_dispatches d WHERE d.task_id = 'verify:' || c.id)
@@ -299,7 +299,7 @@ LANGUAGE sql STABLE AS $$
            election_id_or_null(c.payload->>'election_id'),
            c.payload->>'election_type'
       FROM contributions c WHERE c.status = 'pending'
-       -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）；載體（含移轉後的新載體）照算
+       -- >>> 一人一包（20261112065000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）；載體（含移轉後的新載體）照算
        AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
        -- <<< 一人一包
   )

@@ -1,5 +1,5 @@
 /**
- * 一人一包 PR2（migration 20261112020000_bundle_vote_fanout.sql；docs/PLAN-bundle-policies.md 第 3 節）。
+ * 一人一包 PR2（migration 20261112065000_bundle_vote_fanout.sql；docs/PLAN-bundle-policies.md 第 3 節）。
  *   A. 文字層：seed 只在補驗證列那段加包內排除（前一版 20261112005000 為底）；task_boost_matches 同理（20261102180000 為底）；權限
  *   B. PGlite：兩代理整包同意（目標 2）→各條 2 分、verified；例外條不寫票、被釋放並建自己的票；重複投回 already_voted；
  *      例外含載體時票移轉；整包 disagree／unsure 扇出同一 verdict；錯誤路徑不寫入
@@ -12,7 +12,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, latestFn, migrationNames, mutate, readMig } from "./arms-pglite.ts";
 
-const MIG_NAME = "20261112020000_bundle_vote_fanout.sql";
+const MIG_NAME = "20261112065000_bundle_vote_fanout.sql";
 const PR1_NAME = "20261112010000_policy_bundles.sql";
 const MIG = await readMig(MIG_NAME);
 const PR1 = await readMig(PR1_NAME);
@@ -23,7 +23,7 @@ const PR1 = await readMig(PR1_NAME);
 Deno.test("A1 seed：新定義＝20261112005000 的定義加一處登記的排除，拿掉就一字不差", async () => {
   const prev = fnText(await readMig("20261112005000_election_year_priority.sql"), "seed_auto_task_queue");
   const neu = fnText(MIG, "seed_auto_task_queue");
-  const add = `     -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有自己的票（票在載體上），不補；載體本身（含移轉後的新載體）照補
+  const add = `     -- >>> 一人一包（20261112065000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有自己的票（票在載體上），不補；載體本身（含移轉後的新載體）照補
      AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
      -- <<< 一人一包
 `;
@@ -39,7 +39,7 @@ Deno.test("A2 task_boost_matches：新定義＝20261102180000 的定義加一處
   const prevName = "20261102180000_boost_verify_fast_task_ids.sql";
   const prev = fnText(await readMig(prevName), "task_boost_matches");
   const neu = fnText(MIG, "task_boost_matches");
-  const add = `       -- >>> 一人一包（20261112020000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）；載體（含移轉後的新載體）照算
+  const add = `       -- >>> 一人一包（20261112065000）：還在包裡、不是載體（bundle_carrier_id）的條目沒有票，不算進插隊命中（matched_verifies 才不會多算）；載體（含移轉後的新載體）照算
        AND NOT (c.bundle_id IS NOT NULL AND c.bundle_released_at IS NULL AND c.id IS DISTINCT FROM bundle_carrier_id(c.bundle_id))
        -- <<< 一人一包
 `;
