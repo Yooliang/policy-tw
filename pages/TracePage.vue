@@ -295,6 +295,11 @@ onBeforeUnmount(() => {
             :can-reset-scope="mode === 'events' || !!input"
             :fullscreen-supported="fullscreenSupported"
             :fullscreen="fullscreen"
+            :position="position"
+            :window-start="windowStart"
+            :window-ms="windowMs"
+            :count="items.length"
+            @seek="seek"
             @toggle="toggle"
             @restart="restart"
             @prev="stepEvent(-1)"
@@ -331,16 +336,7 @@ onBeforeUnmount(() => {
             @end="onEnd"
           />
         </div>
-        <TraceControls
-          :mode="mode"
-          :speed="speed"
-          :position="position"
-          :window-start="windowStart"
-          :window-ms="windowMs"
-          :count="items.length"
-          :reduced="reduced"
-          @seek="seek"
-        />
+        <TraceControls :mode="mode" :speed="speed" :window-ms="windowMs" :reduced="reduced" />
         <ul class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600" aria-label="圖例">
           <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white" aria-hidden="true"></span>系統</li>
           <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 rounded-full border border-slate-700 bg-white" aria-hidden="true"></span>代理</li>

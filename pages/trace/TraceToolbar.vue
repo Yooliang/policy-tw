@@ -1,8 +1,8 @@
 <script setup lang="ts">
-// 圖表上方的一條工具列：暫停／重來（圖示）、倍速、搜尋（預設收成一顆圖示鈕）、全屏。
-import { nextTick, ref } from 'vue'
+// 圖表上方的一條工具列：暫停／重來（圖示）、倍速、時間軸、搜尋（預設收成一顆圖示鈕）、全屏。
+import { computed, nextTick, ref } from 'vue'
 import { Maximize, Minimize, Pause, Play, RotateCcw, Search, SkipBack, SkipForward } from 'lucide-vue-next'
-import { speedLabel } from '../../lib/trace'
+import { speedLabel, taipeiClock } from '../../lib/trace'
 
 const props = defineProps<{
   mode: 'window' | 'events'
@@ -17,6 +17,10 @@ const props = defineProps<{
   canResetScope: boolean
   fullscreenSupported: boolean
   fullscreen: boolean
+  position: number
+  windowStart: number
+  windowMs: number
+  count: number
 }>()
 const emit = defineEmits<{
   toggle: []
@@ -27,8 +31,19 @@ const emit = defineEmits<{
   'update:query': [value: string]
   search: []
   all: []
+  seek: [value: number]
   'toggle-fullscreen': []
 }>()
+
+const max = computed(() => (props.mode === 'window' ? props.windowMs : Math.max(0, props.count - 1)))
+const step = computed(() => (props.mode === 'window' ? 1000 : 1))
+const sliderValue = computed(() => Math.min(props.position, max.value))
+const percent = computed(() => (max.value > 0 ? Math.round((sliderValue.value / max.value) * 1000) / 10 : 0))
+const clock = computed(() => (props.mode === 'window' ? taipeiClock(props.windowStart + props.position) : `${Math.min(props.count, Math.floor(props.position) + 1)} / ${props.count}`))
+
+function onSlide(e: Event): void {
+  emit('seek', Number((e.target as HTMLInputElement).value))
+}
 
 const open = ref(false)
 const inputEl = ref<HTMLInputElement | null>(null)
@@ -91,7 +106,22 @@ function onInput(e: Event): void {
       >{{ speedLabel(props.mode, s) }}</button>
     </span>
 
-    <div class="ml-auto flex items-center gap-2">
+    <div class="flex min-w-[200px] flex-1 items-center gap-3">
+      <input
+        type="range"
+        class="trace-range min-w-0 flex-1"
+        :style="{ '--p': percent + '%' }"
+        :min="0"
+        :max="max"
+        :step="step"
+        :value="sliderValue"
+        :aria-label="props.mode === 'window' ? '時間軸' : '第幾件事'"
+        @input="onSlide"
+      />
+      <span class="shrink-0 text-xs tabular-nums text-slate-600 sm:text-sm">{{ clock }}</span>
+    </div>
+
+    <div class="flex items-center gap-2">
       <button v-if="props.canResetScope" type="button" class="h-9 rounded border border-slate-300 bg-white px-3 text-xs hover:bg-slate-50" @click="emit('all')">全站近 4 小時</button>
       <form class="flex items-center gap-2" role="search" @submit.prevent>
         <label class="sr-only" for="trace-input">任務編號、交件編號、人物編號或人名</label>
@@ -137,3 +167,18 @@ function onInput(e: Event): void {
     </div>
   </div>
 </template>
+
+<style>
+/* 時間軸：圓點平常藏起來，滑鼠移到軸上、鍵盤聚焦或拖曳時才出現（拖曳行為是原生的，沒動） */
+.trace-range { -webkit-appearance: none; appearance: none; height: 18px; background: transparent; cursor: pointer; --fill: #334155; --rest: #cbd5e1; }
+html.dark .trace-range { --fill: #94a3b8; --rest: #475569; }
+.trace-range:focus { outline: none; }
+.trace-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--fill) var(--p), var(--rest) var(--p)); }
+.trace-range::-moz-range-track { height: 4px; border-radius: 2px; background: var(--rest); }
+.trace-range::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--fill); }
+.trace-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; border: 0; background: var(--fill); opacity: 0; transition: opacity 0.12s; }
+.trace-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; border: 0; background: var(--fill); opacity: 0; transition: opacity 0.12s; }
+.trace-range:hover::-webkit-slider-thumb, .trace-range:focus-visible::-webkit-slider-thumb, .trace-range:active::-webkit-slider-thumb { opacity: 1; }
+.trace-range:hover::-moz-range-thumb, .trace-range:focus-visible::-moz-range-thumb, .trace-range:active::-moz-range-thumb { opacity: 1; }
+.trace-range:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; border-radius: 4px; }
+</style>
