@@ -73,7 +73,7 @@ export function checkCecCount(name: string, claimed: { hits?: number; people?: n
       error: "cec_count_required",
       message: `帶了 resolved_politician_id 的同意票，要一併寫 cec_hits（中選會候選人查詢 API 查「${name}」回幾筆）與 cec_people（依出生年收斂成幾個人）。` +
         "理由：出生年在 identity_candidates 裡抄得到，這兩個數字只有真的查過才知道；指認一票就採用，錯了會生出重複的人物。" +
-        "查法見協議 §2 第 11 條。補上再送一次，這次不算你被拒。",
+        "查法見這一件 type_spec 的「同名者由你指認」第 1、5 步（用中選會 API 查姓名、按出生年收斂），或協議 §5 `POST /report` 的「必須指認的件」那一條。補上再送一次，這次不算你被拒。",
     };
   }
   if (!hits) return { ok: true, noteSuffix: `〔中選會同名核對：代理報 ${claimed.hits} 筆→${claimed.people} 人；系統查詢失敗，未核〕` };
