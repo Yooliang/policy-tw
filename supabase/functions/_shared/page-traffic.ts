@@ -117,7 +117,7 @@ export interface TrafficStore {
   readSettings(): Promise<{ enabled: boolean; window_days: number }>;
   /** RPC replace_page_traffic：回傳寫入列數 */
   replace(rows: TrafficRow[], windowDays: number): Promise<number>;
-  /** RPC work_card_view_signals_sync（工作卡③，20261112080000）：把達標頁名下的卡補上頁面訪問訊號；沒實作（舊測試的假 store）就略過 */
+  /** RPC work_card_view_signals_sync（工作卡③，20261112120000）：把達標頁名下的卡補上頁面訪問訊號；沒實作（舊測試的假 store）就略過 */
   syncViewSignals?(): Promise<number>;
 }
 

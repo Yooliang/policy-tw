@@ -1,5 +1,5 @@
 /**
- * 建任務前先用 work_key 查重併卡（工作卡③，migration 20261112080000，docs/PLAN-workcard-123.md 項目③）。
+ * 建任務前先用 work_key 查重併卡（工作卡③，migration 20261112120000，docs/PLAN-workcard-123.md 項目③）。
  *
  * 這張卡（同一人×同一件事）已經在派工隊列上，就不再開一筆平行任務：改寫一筆需求訊號（work_card_signals，①的疊加來源）、
  * 必要時插隊一次，回 { attached: true, task_id, work_key }。沒有卡（或任務型別不是卡的形狀：question、audit、adjudicate…）才照舊 createTask。
