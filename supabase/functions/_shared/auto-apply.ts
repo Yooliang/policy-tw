@@ -46,7 +46,7 @@ export function shouldRetry(row: { status: string; retry_count?: number | null; 
 }
 
 // task_id 要撈：上線後拿它判斷所屬任務該不該關（task-fulfilment.ts）；少了它，關任務會默默不做
-const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id, reviewed_by, review_notes, needs_identity_pick";
+const ROW_COLUMNS = "id, contribution_type, payload, source_urls, note, agent_name, agent_tool, contributor_url, status, retry_count, next_retry_at, task_id, reviewed_by, review_notes, needs_identity_pick, bundle_id, bundle_released_at";
 const IDENTITY_TYPES = new Set(["politician", "candidacy"]);
 
 async function identityFromVotes(supabase: SupabaseLike, contributionId: string): Promise<ReturnType<typeof resolveIdentityFromVotes>> {
@@ -64,7 +64,12 @@ export function canReissueForPick(row: { reviewed_by?: string | null }): boolean
  * 重發驗證票：跟觸發器 contribution_queue_row（只在 INSERT 觸發）與 seed 補列同一個做法——插一列 `verify:<id>`，
  * 排序鍵 queue_at 由 task_dispatches_queue_key 觸發器照母任務的基準算（INSERT 時一律覆蓋），這裡不寫 queue_at。已有票就不動。失敗不丟：seed 每 10 分鐘會補漏。
  */
-async function reissueVerifyTicket(supabase: SupabaseLike, contributionId: string, nowIso: string): Promise<void> {
+async function reissueVerifyTicket(supabase: SupabaseLike, contributionId: string, nowIso: string, bundle?: { bundle_id?: string | null; bundle_released_at?: string | null }): Promise<void> {
+  // 一人一包（20261112065000）：還在包裡的條目，只有載體（bundle_carrier_id）才有票；非載體多建一張會讓同一包出現兩張票。查不到載體就不建（seed 每 10 分鐘會補載體）
+  if (bundle?.bundle_id && !bundle.bundle_released_at) {
+    const { data: carrierId, error: cErr } = await supabase.rpc("bundle_carrier_id", { p_bundle: bundle.bundle_id });
+    if (cErr || carrierId !== contributionId) return;
+  }
   const { error } = await supabase.from("task_dispatches")
     .upsert({ task_id: `verify:${contributionId}`, last_dispatched_at: nowIso, dispatch_count: 0 }, { onConflict: "task_id", ignoreDuplicates: true });
   if (error) console.error("reissue verify ticket:", error.message);
@@ -164,7 +169,7 @@ export async function autoApplyContribution(supabase: SupabaseLike, contribution
     if (status === "rejected" && outcome.identity_pick && !row.needs_identity_pick && canReissueForPick(row)) {
       const note = `[auto] ${outcome.message}。改回待指認重發驗證票：同意票請在 resolved_politician_id 指認是哪一位（都不是填 "new"）`;
       const err = await update({ status: "pending", needs_identity_pick: true, needs_identity_pick_at: now, ...mergeReview(row, note), reviewed_at: now });
-      if (!err) await reissueVerifyTicket(supabase, lock.id, now);
+      if (!err) await reissueVerifyTicket(supabase, lock.id, now, row);
       return { triggered: true, status: "pending", outcome, ...(err ? { error: err } : {}) };
     }
     if (status === "rejected") {

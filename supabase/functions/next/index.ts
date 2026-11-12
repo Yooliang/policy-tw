@@ -29,6 +29,7 @@ import { RESULTS_BATCH_MODEL_PREFIX } from "../_shared/election-results.ts";
 import { REASSIGN_MODEL_PREFIX } from "../_shared/reassign-candidacy.ts";
 import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-no-check.ts";
 import { fetchDisputeContext } from "../_shared/dispute-verify.ts";
+import { BUNDLE_HOW_TO, loadBundleItem } from "../_shared/bundle-verify.ts";
 import { minutesUntilReset, QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
 import { createSecretWarner, dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 
@@ -405,6 +406,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       const verifyContext = await fetchVerifyContext(supabase, pick.contribution_type, verifyPayload, pick.id);
       // 爭點驗證（2026-10-18）：票數超過線（同主控台「投太多輪」，門檻只在 SQL）→ 附前面每一票的結論與理由，並改成針對爭點判斷
       const dispute = await fetchDisputeContext(supabase, pick.id);
+      // 一人一包（1.131.0）：載體附整包條目（item.bundle）；舊代理拿到同一個 item、只是多一個欄位
+      const bundleView = await loadBundleItem(supabase, pick.id);
       // #7（2026-09-21）：既有票一併送去（去識別在 shapeVotes 做）。query-bounds: ok — 一筆貢獻的票是個位數
       const { data: priorVotes } = await supabase.from("contribution_votes")
         .select("verdict, weight, note, evidence_url, created_at").eq("contribution_id", pick.id).order("created_at", { ascending: true }).limit(50);
@@ -527,6 +530,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
             : {}),
           // 爭點驗證：只有超過線的才有這個欄位（votes、prior 每一票的 verdict／agent／note／evidence_url／at、instruction）
           ...(dispute ? { dispute } : {}),
+          ...(bundleView ? { bundle: bundleView } : {}),
           // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
           ...(pick.contribution_type === "policy"
             ? (() => {
@@ -538,6 +542,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         // 依型別給該問的第一個問題：驗一份裁決卻先講政見的判準，代理會照著問錯的東西
         // （selkie 2026-09-21）。共同的那一段（怎麼送票）不分型別。
         how_to: (dispute ? `${dispute.instruction}（前面每一票在 item.dispute.prior。）` : "") +
+          (bundleView ? `${BUNDLE_HOW_TO} ` : "") +
           // 公報來源的政見（2026-11-11）：不找第二來源
           (bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? []) ? `${BULLETIN_POLICY_VERIFY_NOTE}（公報網址：${bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? [])}，混合來源時打開這一條）。` : "") + (pick.contribution_type === "policy"
           ? "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。"
