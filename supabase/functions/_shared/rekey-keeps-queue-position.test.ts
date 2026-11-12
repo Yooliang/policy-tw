@@ -35,7 +35,7 @@ Deno.test("A1 seed：新定義＝20261017010000 的現行定義加 rekey-positio
   assertEquals(neu, applyRekeyEdits(prev, REKEY_EDITS));
   const defining: string[] = [];
   for (const n of await migrationNames()) if ((await readMig(n)).includes("CREATE OR REPLACE FUNCTION seed_auto_task_queue(")) defining.push(n);
-  assertEquals(defining.slice(-4), [prevName, MIG_NAME, "20261112005000_election_year_priority.sql", "20261112065000_bundle_vote_fanout.sql"], "seed 的前一版變了：要以最新的為底重做替換（rekey-position-edits.ts）");
+  assertEquals(defining.slice(-5), [prevName, MIG_NAME, "20261112005000_election_year_priority.sql", "20261112065000_bundle_vote_fanout.sql", "20261112070100_work_card_demand_seed.sql"], "seed 的前一版變了：要以最新的為底重做替換（rekey-position-edits.ts）");
   // 替換沒有碰到驗證票的那兩處（補驗證列、最後的 refresh_verify_ticket_keys）與在途停放、窗口／filled 的收回
   for (const keep of ["PERFORM refresh_verify_ticket_keys();", "SELECT 'verify:' || c.id, now(), now(), 0", "PERFORM set_config('gap.close_reason', 'window', true);",
     "(d.task_type, d.target, d.what_we_need, d.hint_sources, d.reward, d.region) IS DISTINCT FROM (g.task_type, g.target, g.what_we_need, g.hint_sources, g.reward, g.region)"]) {

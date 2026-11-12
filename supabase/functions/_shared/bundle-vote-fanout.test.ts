@@ -32,7 +32,7 @@ Deno.test("A1 seed：新定義＝20261112005000 的定義加一處登記的排�
   // 前一版是不是還是 seed 的最新定義（中間有人插一版，這裡的底就過期）
   const defining: string[] = [];
   for (const n of await migrationNames()) if ((await readMig(n)).includes("CREATE OR REPLACE FUNCTION seed_auto_task_queue(")) defining.push(n);
-  assertEquals(defining.slice(-2), ["20261112005000_election_year_priority.sql", MIG_NAME]);
+  assertEquals(defining.slice(-3), ["20261112005000_election_year_priority.sql", MIG_NAME, "20261112070100_work_card_demand_seed.sql" /* 工作卡需求疊加：seed 多一個標記區塊，守門在 work-card-demand.test.ts */]);
 });
 
 Deno.test("A2 task_boost_matches：新定義＝20261102180000 的定義加一處登記的排除", async () => {
