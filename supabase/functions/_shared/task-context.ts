@@ -90,6 +90,8 @@ export interface TaskContextData {
   question_answers?: Obj[];
   /** policy_missing／term_policy_missing：這個人歷屆推得出來的選舉公報（politician_bulletins_for，2026-10-06）；撈不到就 undefined */
   bulletins?: Obj[];
+  /** policy_missing／term_policy_missing（協議 1.136.0）：這件任務那場選舉的選舉公報上架了嗎（election_milestones 的 bulletin_published 是 done）；沒有公報里程碑的舊屆算已上架；查不到就 undefined（不給欄位） */
+  bulletin_published?: boolean;
   /** 查證來源（2026-09-28）：依這個任務對象的政黨／縣市／選舉別自動附上的查證來源，撈不到就 undefined */
   verification_sources?: TaskSourceHint[];
   /** 政見三要素（#364）：這條政見已經有的要素列（沒有的那幾個＝未調查） */
@@ -546,6 +548,8 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           ? `已經有 ${queued.length} 筆在等票，內容重複的不要再交；找到同一件事請改去投那一筆的票。`
           : null,
         ...(shapeBulletins(data.bulletins) ?? {}),
+        // 公報還沒公告（false）就不用自己去公報站確認；沒查到（undefined）不給欄位
+        ...(typeof data.bulletin_published === "boolean" ? { bulletin_published: data.bulletin_published } : {}),
       };
     }
     case "policy_validity":
@@ -811,6 +815,18 @@ async function fetchLineagePolicies(supabase: SupabaseLike, lineageId: string): 
   return (data ?? []) as Obj[];
 }
 
+/** 這場選舉整場的公報里程碑（bulletin_published、election_type 空）的 status；表查不到或出錯回 null */
+async function bulletinMilestoneQuery(supabase: SupabaseLike, electionId: number): Promise<Obj[] | null> {
+  const ms = await supabase.from("election_milestones").select("status").eq("election_id", electionId).eq("kind", "bulletin_published").is("election_type", null).limit(1);
+  return !ms.error && Array.isArray(ms.data) ? (ms.data as Obj[]) : null;
+}
+
+/** 里程碑列 → 公報上架了嗎：done 才算；沒有這個里程碑（舊屆）算已上架；查不到（null）不給答案（undefined） */
+export function bulletinPublishedFrom(rows: readonly Obj[] | null): boolean | undefined {
+  if (rows === null) return undefined;
+  return rows.length === 0 ? true : rows[0].status === "done";
+}
+
 /** 碰 DB：依 task_type／target 撈 current 要的資料 */
 export async function fetchTaskContext(supabase: SupabaseLike, taskType: string, target: Obj): Promise<TaskContextData> {
   const pid = typeof target.politician_id === "string" ? target.politician_id : null;
@@ -955,7 +971,9 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies_total = count ?? (data.policies ?? []).length;
   }
   if ((taskType === "policy_missing" || taskType === "term_policy_missing") && pid) {
-    const [el, pol, queued, bul] = await Promise.all([
+    // 公報上架了嗎（協議 1.136.0）：看里程碑（kind=bulletin_published、整場、status=done），不看 elections.bulletin_published_on（預估日也會填）。選舉＝任務 target.election_id
+    const bulStarted = typeof target.election_id === "number";
+    const [el, pol, queued, bul, bulMs] = await Promise.all([
       supabase.from("politician_elections").select("election_id, election_type, candidacy_status, source_note").eq("politician_id", pid).order("election_id", { ascending: false }),
       supabase.from("policies").select("id, title, category, status, election_id", { count: "exact" }).eq("politician_id", pid).is("removed_at", null).order("proposed_date", { ascending: false }).limit(MAX_EXISTING_POLICIES),
       // 還在等票的提交也要給代理看見（2026-09-17：「輪到這種任務時，要先問是不是
@@ -966,12 +984,20 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
         .eq("payload->>politician_id", pid).order("created_at", { ascending: false }).limit(MAX_EXISTING_POLICIES),
       // 歷屆選舉公報（2026-10-06）：函式還沒上線（migration 比函式晚套上的那幾分鐘）或出錯就不給，不擋派工
       supabase.rpc("politician_bulletins_for", { p_politician_id: pid }),
+      bulStarted ? bulletinMilestoneQuery(supabase, target.election_id as number) : Promise.resolve(null),
     ]);
     if (!bul.error && Array.isArray(bul.data)) data.bulletins = bul.data as Obj[];
     data.elections = el.data ?? [];
     data.policies = pol.data ?? [];
     data.policies_total = pol.count ?? (data.policies ?? []).length;
     data.queued_policies = queued.data ?? [];
+    // 公報上架了嗎（協議 1.136.0）：沒有 target.election_id 才用這個人最新一屆的參選紀錄補查一次
+    if (!bulStarted) {
+      const firstEid = (data.elections?.[0] as Obj | undefined)?.election_id;
+      if (typeof firstEid === "number") data.bulletin_published = bulletinPublishedFrom(await bulletinMilestoneQuery(supabase, firstEid));
+    } else {
+      data.bulletin_published = bulletinPublishedFrom(bulMs);
+    }
   }
   // 單則新聞任務（2026-09-29）：判成進度的要看那條政見與它的時間軸；判成新承諾的要看這個人已有／等票中的政見，免得重交
   if (isNewsItemTask(taskType, target) && pid) {
