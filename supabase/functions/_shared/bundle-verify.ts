@@ -14,6 +14,7 @@ import { isRepeatedNote, voterKey } from "./consensus.ts";
 import { checkIdentityPick } from "./identity-pick-gate.ts";
 import { sharedBulletinUrl } from "./policy-bundle.ts";
 import type { VerifyInput } from "./contribution-schema.ts";
+import { PROTOCOL_URL } from "./protocol.ts";
 import type { Actor } from "./actor.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -29,7 +30,7 @@ export const BUNDLE_DISAGREE_WINDOW_HOURS = 24;
 
 export const BUNDLE_VOTE_REQUIRED_MESSAGE =
   "這張票是「整包一張票」：item.bundle 列出這包的所有條目，一票會逐條記到每一條。你的回報沒有帶 bundle_id，伺服器不會只替載體那一條投票（這次送的票沒有計入）。" +
-  "請升級到協議 1.131.0（重讀 https://policy-tw.web.app/skill.md），回報帶 bundle_id（item.bundle.bundle_id）、note（至少 40 字，寫出核對了公報哪幾頁）；" +
+  `請升級到協議 1.131.0（重讀 ${PROTOCOL_URL}），回報帶 bundle_id（item.bundle.bundle_id）、note（至少 40 字，寫出核對了公報哪幾頁）；` +
   "有不放行的條目用 except 與 reasons 列出。不是你的錯，這次不算被拒。";
 
 const obj = (v: unknown): Obj => (v && typeof v === "object" ? v as Obj : {});
