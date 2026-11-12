@@ -315,14 +315,11 @@ Deno.test("C2 無卡新開（並回 work_key）；卡存在但任務型別不是
   assertEquals([r3.attached, f3.inserted.length, f3.rpcs.length], [false, 1, 0], "force_new 連查都不查");
 });
 
-Deno.test("C3 保險絲 WORK_CARD_ATTACH=off 與資料庫失敗：退回舊的 createTask", async () => {
-  Deno.env.set("WORK_CARD_ATTACH", "off");
-  try {
-    const f = fake({ key: KEY_P1, taskId: "auto:x" });
-    assertEquals((await createOrAttachTask(f.supabase, input, { source: "web_request" })).attached, false);
-    assertEquals([f.inserted.length, f.rpcs.length], [1, 0]);
-    assertEquals(await workCardOf(f.supabase, input), null);
-  } finally { Deno.env.delete("WORK_CARD_ATTACH"); }
+Deno.test("C3 保險絲 enabled:false 與資料庫失敗：退回舊的 createTask（不靠環境變數，CI 沒給 --allow-env）", async () => {
+  const f = fake({ key: KEY_P1, taskId: "auto:x" });
+  assertEquals((await createOrAttachTask(f.supabase, input, { source: "web_request", enabled: false })).attached, false);
+  assertEquals([f.inserted.length, f.rpcs.length], [1, 0]);
+  assertEquals(await workCardOf(f.supabase, input, null, false), null);
   const f2 = fake({ fail: true });
   const r = await createOrAttachTask(f2.supabase, input, { source: "web_request" });
   assertEquals([r.attached, f2.inserted.length], [false, 1], "rpc 失敗不擋請求");

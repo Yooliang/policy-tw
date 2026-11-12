@@ -44,13 +44,17 @@ export interface CreateOrAttachOptions extends CreateTaskOptions {
   no_signal?: boolean;
   /** 併卡時存進 work_card_notes 的說明；沒給就用標題＋說明＋來源網址 */
   note?: string | null;
+  /** 覆蓋保險絲（預設讀環境變數 WORK_CARD_ATTACH）；false＝退回舊的 createTask */
+  enabled?: boolean;
 }
 
 export type CreateOrAttachResult =
   | { attached: true; task_id: string; work_key: string; signal_added: boolean; cooling: boolean; last_checked_at: string | null }
   | { attached: false; task: Obj; work_key: string | null };
 
-export const workCardAttachEnabled = (): boolean => {
+/** 保險絲：測試或呼叫端可直接傳 enabled；沒傳就讀 WORK_CARD_ATTACH（沒有 env 權限讀不到時當 on） */
+export const workCardAttachEnabled = (enabled?: boolean): boolean => {
+  if (enabled !== undefined) return enabled;
   try {
     return (Deno.env.get("WORK_CARD_ATTACH") ?? "on").toLowerCase() !== "off";
   } catch {
@@ -72,8 +76,9 @@ export async function workCardOf(
   supabase: SupabaseLike,
   input: TaskInput,
   scope: string | null = null,
+  enabled?: boolean,
 ): Promise<{ work_key: string; task_id: string | null } | null> {
-  if (!workCardAttachEnabled()) return null;
+  if (!workCardAttachEnabled(enabled)) return null;
   try {
     const target = taskTarget(input);
     const { data: key, error } = await supabase.rpc("task_work_key_for_manual", { p_type: input.task_type ?? "other", p_target: target });
@@ -94,9 +99,9 @@ export async function attachSignal(
   workKey: string,
   kind: "request" | "suggest" | null,
   actor: string | null,
-  opts: { boost?: boolean; scope?: string | null; note?: string | null; source?: string | null } = {},
+  opts: { boost?: boolean; scope?: string | null; note?: string | null; source?: string | null; enabled?: boolean } = {},
 ): Promise<AttachResult | null> {
-  if (!workCardAttachEnabled()) return null;
+  if (!workCardAttachEnabled(opts.enabled)) return null;
   try {
     const { data, error } = await supabase.rpc("work_card_attach", {
       p_work_key: workKey, p_kind: actor ? kind : null, p_actor: actor ?? "", p_boost: opts.boost === true, p_scope: opts.scope ?? null,
@@ -115,14 +120,14 @@ export async function attachSignal(
  * force_new、保險絲關閉、任務型別不是卡的形狀、卡上沒有尚開著的任務，都走 createTask。
  */
 export async function createOrAttachTask(supabase: SupabaseLike, input: TaskInput, options: CreateOrAttachOptions): Promise<CreateOrAttachResult> {
-  const { force_new, actor: _a, scope, boost, no_signal: _n, note: _note, ...createOptions } = options;
-  if (force_new || !workCardAttachEnabled()) {
+  const { force_new, actor: _a, scope, boost, no_signal: _n, note: _note, enabled, ...createOptions } = options;
+  if (force_new || !workCardAttachEnabled(enabled)) {
     return { attached: false, task: await createTask(supabase, input, createOptions), work_key: null };
   }
-  const card = await workCardOf(supabase, input, scope ?? null);
+  const card = await workCardOf(supabase, input, scope ?? null, enabled);
   if (card?.task_id) {
     const kind = options.no_signal ? null : (SOURCE_SIGNAL_KIND[options.source] ?? null);
-    const res = await attachSignal(supabase, card.work_key, kind, actorOf(options), { boost, scope, note: noteOf(input, options), source: options.source });
+    const res = await attachSignal(supabase, card.work_key, kind, actorOf(options), { boost, scope, note: noteOf(input, options), source: options.source, enabled });
     if (res?.attached && res.task_id) {
       return { attached: true, task_id: res.task_id, work_key: card.work_key, signal_added: res.signal_added === true,
         cooling: res.cooling === true, last_checked_at: res.last_checked_at ?? null };
