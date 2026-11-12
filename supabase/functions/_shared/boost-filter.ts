@@ -2,7 +2,7 @@
  * 插隊條件的白名單驗證（2026-09-22）。端點無金鑰，所以條件只能是固定詞彙、固定型別、有上限，
  * 不能有任何自由文字進 SQL。詞彙與 SQL 端 task_boost_matches 一致。
  */
-export const BOOST_FILTER_KEYS = ["regions", "election_id", "election_types", "task_types", "missing_avatar", "politician_ids", "kinds", "task_ids"] as const;
+export const BOOST_FILTER_KEYS = ["regions", "election_id", "election_types", "task_types", "missing_avatar", "politician_ids", "kinds", "task_ids", "card_tickets"] as const;
 export type BoostFilterKey = typeof BOOST_FILTER_KEYS[number];
 export const BOOST_KINDS = ["task", "verify"] as const;
 export const BOOST_LABEL_MAX = 60;
@@ -61,6 +61,12 @@ export function validateBoostFilter(raw: unknown): { ok: true; filter: Record<st
         if (v.some((x) => typeof x !== "string" || !TASK_ID_RE.test(x))) return { ok: false, error: "task_ids 每一項要是 task_id 字串（只含英數與 : _ . -，最長 200 字）" };
         out.task_ids = [...new Set(v as string[])]; break;
       }
+      case "card_tickets": {
+        // 插隊任務時帶動同一張工作卡的驗證票（預設 true）；只有 false 要寫進條件，且它不是篩選條件（不算「生效的條件」）
+        if (typeof v !== "boolean") return { ok: false, error: "card_tickets 要是 true／false（預設 true：插隊任務時同卡的驗證票一起插）" };
+        if (!v) out.card_tickets = false;
+        break;
+      }
       case "politician_ids": {
         if (!Array.isArray(v) || v.length === 0 || v.length > 200) return { ok: false, error: "politician_ids 要是 1～200 個 uuid 的陣列" };
         if (v.some((x) => typeof x !== "string" || !UUID_RE.test(x))) return { ok: false, error: "politician_ids 每一項要是 uuid" };
@@ -68,6 +74,6 @@ export function validateBoostFilter(raw: unknown): { ok: true; filter: Record<st
       }
     }
   }
-  if (Object.keys(out).length === 0) return { ok: false, error: "filter 至少要有一個生效的條件（missing_avatar:false 不算）" };
+  if (Object.keys(out).filter((k) => k !== "card_tickets").length === 0) return { ok: false, error: "filter 至少要有一個生效的條件（missing_avatar:false 不算）" };
   return { ok: true, filter: out };
 }
