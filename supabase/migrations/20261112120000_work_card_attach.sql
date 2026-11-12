@@ -145,7 +145,7 @@ END;
 $$;
 COMMENT ON FUNCTION task_work_key IS
   '工作卡鍵（2026-11-11，docs/PLAN-dispatch-work-unit.md 0.1）：同一人×同一件事同一個鍵。完整對應表見 migration 20261111100000 檔頭；'
-  'policy_missing 與 term_policy_missing 同人同屆同鍵、帶指紋的臂去掉末段指紋、uuid 手動任務查 contribution_tasks 後交 task_work_key_for_manual（20261112080000 抽出）、'
+  'policy_missing 與 term_policy_missing 同人同屆同鍵、帶指紋的臂去掉末段指紋、uuid 手動任務查 contribution_tasks 後交 task_work_key_for_manual（20261112120000 抽出）、'
   'verify:<id> 取母任務的鍵（找不到 NULL）。STABLE（讀 campaign_election_id、contribution_tasks、contributions）';
 
 -- ------------------------------------------------------------
@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS work_card_notes (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS work_card_notes_key_idx ON work_card_notes (work_key, created_at);
-COMMENT ON TABLE work_card_notes IS '工作卡併卡備註（20261112080000）：維護者指定、代理提議併進既有卡時帶來的標題／說明／來源，給接手的人看。私有表：RLS 開、只有 service_role。2026-11-12';
+COMMENT ON TABLE work_card_notes IS '工作卡併卡備註（20261112120000）：維護者指定、代理提議併進既有卡時帶來的標題／說明／來源，給接手的人看。私有表：RLS 開、只有 service_role。2026-11-12';
 ALTER TABLE work_card_notes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "work_card_notes service write" ON work_card_notes;
 CREATE POLICY "work_card_notes service write" ON work_card_notes FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');

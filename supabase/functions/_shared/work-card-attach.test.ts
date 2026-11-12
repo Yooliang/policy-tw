@@ -1,6 +1,6 @@
 /**
  * 工作卡③：請求／提議／指定任務建立前先用 work_key 查重併卡，並接上需求訊號
- * （migration 20261112080000_work_card_attach.sql、_shared/create-or-attach-task.ts，docs/PLAN-workcard-123.md 項目③）。
+ * （migration 20261112120000_work_card_attach.sql、_shared/create-or-attach-task.ts，docs/PLAN-workcard-123.md 項目③）。
  *
  *   A. task_work_key 的 uuid 分支抽成 task_work_key_for_manual 後，輸出對舊定義逐案不變；新函式不給 anon／authenticated
  *   B. PGlite：work_card_resolve（自動缺口優先、policy_missing 與 term_policy_missing 同卡、scope 例外）、work_card_attach（冪等、無卡、插隊只一次、冷卻不插）、
@@ -15,7 +15,7 @@ import { loadEntry, type RestCall } from "./jp/entry-harness.ts";
 import { createOrAttachTask, workCardOf } from "./create-or-attach-task.ts";
 import { decideRequest } from "./request-task.ts";
 
-const MIG_NAME = "20261112080000_work_card_attach.sql";
+const MIG_NAME = "20261112120000_work_card_attach.sql";
 const MIG = await readMig(MIG_NAME);
 const DEMAND = await readMig("20261112070000_work_card_demand.sql");
 const OLD_WK = await readMig("20261111100000_work_key.sql");
