@@ -228,6 +228,10 @@ export interface VerifyInput {
   cec_people?: number;
   /** 整批型別（cand_numbers）的 agree 票：標出抄錯的列（politician_election_id）；落庫時那幾列不寫、缺口重派（2026-10-30，#781） */
   bad_items?: number[];
+  /** 一人一包（1.131.0）：整包票。bundle_id＝/next 的 item.bundle.bundle_id；except＝這位驗證者不放行的條目序號（只能搭 agree）；reasons＝except 每條的理由（key 是序號字串） */
+  bundle_id?: string;
+  except?: number[];
+  reasons?: Record<string, string>;
 }
 
 export interface VerifyValidation {
@@ -1125,6 +1129,15 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
       errors.push({ path: "note", message: "標了 bad_items 就要寫 note（至少 10 字）：每個錯列在公告上實際是幾號、哪一頁" });
     }
   }
+  if (body.bundle_id !== undefined && body.bundle_id !== null && !isUuid(body.bundle_id)) errors.push({ path: "bundle_id", message: "bundle_id 要是 uuid（/next 的 item.bundle.bundle_id）" });
+  if (body.except !== undefined && body.except !== null) {
+    const e = body.except;
+    if (!Array.isArray(e) || e.length > 100 || !e.every((x) => Number.isInteger(x) && (x as number) >= 0 && (x as number) < 1000)) errors.push({ path: "except", message: "except 要是包內條目序號（item.bundle.items[].index，0 起算整數）的陣列" });
+  }
+  if (body.reasons !== undefined && body.reasons !== null) {
+    const r = body.reasons;
+    if (!isObj(r) || Object.keys(r).length > 100 || !Object.entries(r).every(([k, v]) => /^\d{1,3}$/.test(k) && typeof v === "string" && v.length <= 1000)) errors.push({ path: "reasons", message: "reasons 要是 {序號: 理由文字} 物件（序號用字串，每條理由至多 1000 字）" });
+  }
   for (const k of ["cec_hits", "cec_people"] as const) {
     if (body[k] !== undefined && !(Number.isInteger(body[k]) && (body[k] as number) >= 0 && (body[k] as number) <= 10000)) errors.push({ path: k, message: "要是 0 以上的整數" });
   }
@@ -1143,6 +1156,9 @@ export function validateVerifyRequest(body: unknown): VerifyValidation {
       ...(typeof body.cec_hits === "number" ? { cec_hits: body.cec_hits } : {}),
       ...(typeof body.cec_people === "number" ? { cec_people: body.cec_people } : {}),
       ...(Array.isArray(body.bad_items) && body.bad_items.length > 0 ? { bad_items: [...new Set(body.bad_items as number[])] } : {}),
+      ...(typeof body.bundle_id === "string" ? { bundle_id: body.bundle_id } : {}),
+      ...(Array.isArray(body.except) ? { except: [...new Set(body.except as number[])].sort((a, b) => a - b) } : {}),
+      ...(isObj(body.reasons) ? { reasons: { ...(body.reasons as Record<string, string>) } } : {}),
     },
   };
 }

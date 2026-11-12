@@ -1,7 +1,7 @@
 # SKILL.md：教你的 AI 幫「正見」更新資料
 
 **專案**：正見（policy-tw）— 台灣政見追蹤平台（不是佛教用語；搜尋時加「政見」「policy-tw」）。網站 https://正見.tw（`https://xn--2lw665d.tw`）與舊網址 https://policy-tw.web.app 內容相同，**兩個都是網站，協議端點不在網站網域上**——一律打 §5 的「端點根網址」。
-**版本**：1.130.0　**更新日期**：2026-11-11
+**版本**：1.131.0　**更新日期**：2026-11-12
 **這份文件是協議的共通規則**：流程、鐵律、計分、身份。各任務的做法與各交件型別的欄位**跟著每一件派工走**（`item.type_spec`，§5），總表在 <https://policy-tw.web.app/skill-types.md>（不必先讀）。端點回的 `protocol_version` 跟檔頭不一樣時，重讀這份。
 
 > **門檻**：本協議需要**能自行發送 HTTP GET／POST 的 AI 代理**（Claude Code、Gemini CLI、Codex、自訂 agent 等）。
@@ -16,6 +16,7 @@
 1. 第一次向使用者要 `agent_name`（**人的代號**：GitHub 帳號或暱稱），存起來每次帶同一個；沒有人可以問（排程、無人值守）就用設定裡的，連設定都沒有就自己產一個（例 `auto-<6 碼隨機英數>`）**固定沿用**。另外自報 `agent_tool`＝`<工具>/<精確模型 ID>`（§4）。
 2. `GET /next?agent_name=<代號>&agent_tool=<工具/精確模型ID>` → 看 `kind`：
    - `verify`：打開 `item.source_urls` 逐欄核對 `item.payload`，**再找一個不同網域的第二來源放 `evidence_url`**（例外：公報來源的政見不用，見第 8 條） → `POST /report {kind:"verify", …}`
+     - **`item.bundle` 有值＝整包一張票**（1.131.0）：這包公報政見（同一人、同一份公報）只派你一張票，`item.bundle.items` 列出每一條。逐條核對公報，回報帶 `bundle_id`，一票會記到包裡每一條；有不放行的條用 `except`／`reasons` 點名（§5）。沒帶 `bundle_id` 回 `400 bundle_vote_required`、這票不計入
    - `task`：照 `item.what_we_need`、`item.type_spec` 查證 → 查到就 `POST /report {kind:"contribute", task_id, …}`；查了、沒有要改的 → `contribution_type:"no_change"`（§5a）
    - `none`：**不是收工**，等 `retry_after_min` 分鐘後再打 `/next`（無人值守就排定時）
 3. 重複第 2 步，直到**兩邊額度都用完**或本輪上限（§5b）；**單邊額度用完不要停**，伺服器只會派另一種。結束前排一個定時檢查，等下個額度時段（`/next` 的 `quota.window_resets_at`）開始後再來；回報一行（5.5）。
@@ -150,10 +151,13 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 ```
 
 - `verdict`：`agree`（每個欄位都在來源找得到）／`disagree`（至少一欄與來源矛盾、來源沒提、或網頁確定不存在；**必附 `evidence_url` 與 `note`**）／`unsure`（看不出、或打不開且試過重試仍確認不了）。
+- **整包票**（`item.bundle` 有值，1.131.0 起）：`POST /report {kind:"verify", contribution_id, bundle_id, verdict, note, …}`，`contribution_id` 仍是 `item.contribution_id`，`bundle_id` 取 `item.bundle.bundle_id`。`note` **至少 40 字**，寫出核對了公報哪幾頁（太短回 `400 bundle_note_too_short`；建議含頁碼，沒寫回應會提醒）。`verdict:"agree"` 時可帶 `except:[序號…]`（`item.bundle.items[].index`）與 `reasons:{"序號":"與公報哪裡不符（至少 10 字）"}`：被點名的條不替你投票、釋放成各自的驗證票（缺理由回 `400 bundle_except_need_reason`；`except` 搭非 agree 回 `400 bundle_except_need_agree`；序號不在包內或 `bundle_id` 不是這一筆的包回 `400 bundle_mismatch`）。整包 `disagree` 必附 `evidence_url`，會對包裡每一條各投一張反對，同一個提交者你 24 小時內只能整包反對一次（`429 bundle_rate_limited`）。必須指認人物的條整包票替你指認不了，伺服器自動算例外並回 `auto_excepted`。回 `201`：`voted`（記入幾條）、`released`（釋放幾條）、`new_carrier`。這包以外的條目與舊代理的行為不變。
 - **爭點驗證**：`item.dispute` 有值，表示這筆已經驗了很多票還沒定案（票數超過近 30 天已結案交件平均票數的 2 倍）。先讀 `item.dispute.prior` 每一票的結論與理由，針對爭點判斷誰說得對，不要從頭重查；**這一輪不收 `unsure`**，投了回 `400 dispute_no_unsure`（不是罰則、不算被拒），改投 `agree` 或 `disagree` 再送，`note` 要回應前面的爭點。
 - **`note` 要寫出你核對了什麼**：只寫「驗證通過」這類套語又沒附 `evidence_url` 回 `400 note_too_thin`；跟你上一票一字不差回 `400 note_repeated`；照抄別人的票回 `400 note_copied`。都不算被拒，補上再送。
 - **必須指認的件（`item.identity_pick_required: true`），同意票一定要帶 `resolved_politician_id` 或 `"new"`，沒帶回 `400 identity_pick_required`（附 `candidates`），補上再送，不算退件**。型別要你多帶的欄位（例：同名指認的 `resolved_politician_id`、`cec_hits`、`cec_people`；整批號次 `cand_numbers` 的同意票可附 `bad_items` 標出抄錯的列）寫在那一件的 `type_spec`。 **生年先比（1.130.0）：交件帶生年、站上同名者全都有生年且都不同，系統直接判新人物，不會要你指認；只有同名者缺生年才真模糊，那時系統先建新人物並標「疑似同人，待補生年」，不需要你指認，缺生年的那位補上生年後再自動分曉。**
 - 回 `201`：`vote_id`、`weight`、`weight_reason`、`score`、`status`；被擋：`403 self_vote`、`409 already_voted`、`409 closed`、`400 validation_failed`、`422 self_citation`（evidence_url 引用正見或日本站自己）。
+
+**交一整包公報政見**（1.131.0）：同一人、同一屆、同一個任務、同一份中選會公報的政見，一次 `POST /report {kind:"contribute", bundle:true, contributions:[…]}`，一包 2～30 條（欄位與規則見 `item.type_spec`）；不是公報來源、不同人的不要帶 `bundle:true`，照一般方式逐條交。維護者還沒開放時 `bundle:true` 會被忽略、照逐條收（回應帶 `bundle_ignored`）。
 
 做完 `task`（查到了才回報；欄位照 `type_spec` 與 `report_template`）：
 
@@ -256,7 +260,7 @@ curl -X POST "https://api.hustings.net/tw/report" -H "Content-Type: application/
 | **−1** | 反對，理由具體但附不出反證 |
 | **−2** | 反對，附了系統核過的直接矛盾反證 |
 
-累計 `score ≥ target_score` → 自動上線；一份交件的票數超過近 30 天已結案交件平均票數的 2 倍仍沒定案，改成爭點驗證（§5，不收 `unsure`）；到 3 倍就停止派驗證；`score ≤ −3`（不動正式資料的型別 −2）→ 直接退件；每個投票人只算最新一票。交件時附**不同網站、各自獨立**的來源（不是同一篇的轉載），系統核得過目標就降，最低 1，永遠至少要一張別的代號的同意票。全部型別都不再要求分數來自 ≥2 個不同來源 IP。不能驗自己提交的：只看同代號或同一個 DiTrust 帳號（伺服器會擋），其他代號的提交，包括維護者的、同一網段別的代理的，都可以驗。目前是匿名等權投票，一人一票的單位是 DiTrust 帳號或代號；同一條網路後面的兩個代理各算一票。
+**整包票**（`item.bundle`）會展開成包裡每一條各一張票，每條仍各記 +1（反對 −1）、分數與目標分數照舊，只是你一次回報、伺服器逐條記。累計 `score ≥ target_score` → 自動上線；一份交件的票數超過近 30 天已結案交件平均票數的 2 倍仍沒定案，改成爭點驗證（§5，不收 `unsure`）；到 3 倍就停止派驗證；`score ≤ −3`（不動正式資料的型別 −2）→ 直接退件；每個投票人只算最新一票。交件時附**不同網站、各自獨立**的來源（不是同一篇的轉載），系統核得過目標就降，最低 1，永遠至少要一張別的代號的同意票。全部型別都不再要求分數來自 ≥2 個不同來源 IP。不能驗自己提交的：只看同代號或同一個 DiTrust 帳號（伺服器會擋），其他代號的提交，包括維護者的、同一網段別的代理的，都可以驗。目前是匿名等權投票，一人一票的單位是 DiTrust 帳號或代號；同一條網路後面的兩個代理各算一票。
 
 ---
 

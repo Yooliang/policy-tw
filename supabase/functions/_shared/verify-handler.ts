@@ -22,6 +22,7 @@ import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
 import { disputeNoUnsureMessage, disputeVotesNow } from "./dispute-verify.ts";
 import { candNoItems } from "./cand-numbers.ts";
+import { adjustedVerifyUsed, BUNDLE_VOTE_REQUIRED_MESSAGE, handleBundleVerify } from "./bundle-verify.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -122,13 +123,15 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     .from("contribution_votes").select("id", { count: "exact", head: true })
     .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
-  if ((used ?? 0) >= vq.limit) {
+  // 一人一包：包票一包算一次額度（一包 N 條票不是 N 次）；只在到上限時重算
+  const usedNow = (used ?? 0) >= vq.limit ? await adjustedVerifyUsed(supabase, vq, windowStart.toISOString(), used ?? 0) : (used ?? 0);
+  if (usedNow >= vq.limit) {
     return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每個時段最多驗 ${vq.limit} 筆`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() } };
   }
 
   const { data: contribution, error: cError } = await supabase
     .from("contributions")
-    .select("id, status, task_id, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score")
+    .select("id, status, task_id, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score, bundle_id, bundle_released_at")
     .eq("id", input.contribution_id)
     .maybeSingle();
   if (cError) throw new Error(`contributions lookup: ${cError.message}`);
@@ -191,6 +194,29 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
       event: "dispatch_binding", endpoint: via, binding: "ip", task_id: `verify:${contribution.id}`,
       agent_name: input.agent_name, report_net: ipHash,
     });
+  }
+
+  // 一人一包（協議 1.131.0）：載體還在包裡＝這張票是整包一張票。沒帶 bundle_id 的舊代理不靜默只投載體一條（400 bundle_vote_required）；
+  // 帶 bundle_id 走 handleBundleVerify（扇出成逐條票，bundle-verify.ts）。merge 票（系統併票）不經這裡。
+  {
+    const inBundle = typeof contribution.bundle_id === "string" && !contribution.bundle_released_at;
+    if (via !== "merge") {
+      if (inBundle && !input.bundle_id) {
+        return { status: 400, body: { success: false, error: "bundle_vote_required", message: BUNDLE_VOTE_REQUIRED_MESSAGE, bundle_id: contribution.bundle_id } };
+      }
+      if (input.bundle_id && (!inBundle || input.bundle_id !== contribution.bundle_id)) {
+        return { status: 400, body: { success: false, error: "bundle_mismatch", message: "bundle_id 不是這一筆所屬的包（用 /next 的 item.bundle.bundle_id）；這次不算被拒" } };
+      }
+      if (!input.bundle_id && (input.except || input.reasons)) {
+        return { status: 400, body: { success: false, error: "bundle_mismatch", message: "except／reasons 只用在整包票（要帶 bundle_id）" } };
+      }
+      if (inBundle && input.bundle_id) {
+        return await handleBundleVerify({
+          supabase, input, actor, ipHash, via, applyFn,
+          carrier: { id: contribution.id, bundle_id: contribution.bundle_id, agent_name: contribution.agent_name, actor_id: contribution.actor_id },
+        });
+      }
+    }
   }
 
   const { data: existing, error: eError } = await supabase
