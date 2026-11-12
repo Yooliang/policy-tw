@@ -353,7 +353,8 @@ watch(() => [props.items, props.mode, props.reduced], () => {
 </script>
 
 <template>
-  <div ref="wrap" class="w-full overflow-x-auto">
+  <!-- 畫布的顏色是照淺色底畫的（深色線、白底方框），深色模式下底色也固定白，不然線會看不清 -->
+  <div ref="wrap" class="w-full overflow-x-auto rounded" style="background-color: #ffffff">
     <canvas ref="canvas" role="img" :aria-label="label" class="block" style="touch-action: pan-x pan-y" />
   </div>
 </template>

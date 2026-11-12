@@ -5,7 +5,7 @@
 // 資料來自 trace_events()（匿名可執行、只回事件摘要與代理顯示名）；客戶端渲染、noindex、不進網站地圖，做法同 /queue。
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Waypoints, Search, ListOrdered } from 'lucide-vue-next'
+import { Waypoints, ListOrdered } from 'lucide-vue-next'
 import Hero from '../components/Hero.vue'
 import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
@@ -17,6 +17,7 @@ import {
 import { taskTypeLabel } from '../lib/task-labels'
 import TraceCanvas from './trace/TraceCanvas.vue'
 import TraceControls from './trace/TraceControls.vue'
+import TraceToolbar from './trace/TraceToolbar.vue'
 import TraceTimeline from './trace/TraceTimeline.vue'
 import TraceTop from './trace/TraceTop.vue'
 
@@ -50,6 +51,20 @@ const subject = ref('')
 const mode = computed<'window' | 'events'>(() => (scope.value.by === 'all' ? 'window' : 'events'))
 const speeds = computed(() => (mode.value === 'window' ? WINDOW_SPEEDS : EVENT_SPEEDS))
 const reduced = ref(false)
+
+// 全屏：圖表加上方工具列整塊進全屏（時間軸與計數列留在卡片）；不支援 Fullscreen API 的環境隱藏按鈕
+const stage = ref<HTMLElement | null>(null)
+const fullscreenSupported = ref(false)
+const fullscreen = ref(false)
+const onFullscreenChange = (): void => { fullscreen.value = document.fullscreenElement === stage.value && stage.value !== null }
+async function toggleFullscreen(): Promise<void> {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await stage.value?.requestFullscreen()
+  } catch (e) {
+    console.info('[重播] 全屏失敗', e)
+  }
+}
 let mql: MediaQueryList | null = null
 const onMql = (e: MediaQueryListEvent): void => { reduced.value = e.matches }
 
@@ -243,11 +258,16 @@ watch(() => route.params.id, (id) => {
 onMounted(() => {
   mql = window.matchMedia('(prefers-reduced-motion: reduce)')
   reduced.value = mql.matches
+  fullscreenSupported.value = !!document.fullscreenEnabled
+  document.addEventListener('fullscreenchange', onFullscreenChange)
   mql.addEventListener('change', onMql)
   const id = route.params.id
   void run(Array.isArray(id) ? id[0] : id)
 })
-onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
+onBeforeUnmount(() => {
+  mql?.removeEventListener('change', onMql)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
+})
 </script>
 
 <template>
@@ -257,26 +277,7 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
       <template #description>看任務怎麼從缺口、佇列、派工、交件走到驗證、落庫或退件</template>
       <template #icon><Waypoints :size="400" class="text-blue-500" /></template>
     </Hero>
-    <main class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">
-      <form class="flex flex-col gap-2 sm:flex-row" role="search" @submit.prevent="onSubmit">
-        <label class="sr-only" for="trace-input">任務編號、交件編號、人物編號或人名</label>
-        <input
-          id="trace-input"
-          v-model="input"
-          type="text"
-          inputmode="search"
-          autocomplete="off"
-          placeholder="貼任務編號、交件編號、人物編號，或輸入人名（留白＝全站近 4 小時）"
-          class="min-h-[44px] flex-1 rounded border border-slate-300 bg-white px-3 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
-        />
-        <div class="flex gap-2">
-          <button type="submit" class="inline-flex min-h-[44px] items-center gap-1 rounded bg-slate-800 px-4 text-white hover:bg-slate-700 disabled:opacity-50" :disabled="loading">
-            <Search :size="16" /> 重播
-          </button>
-          <button v-if="mode === 'events' || input" type="button" class="min-h-[44px] rounded border border-slate-300 bg-white px-3 hover:bg-slate-50" @click="go(null)">全站近 4 小時</button>
-        </div>
-      </form>
-
+    <main class="w-full px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">
       <ul v-if="candidates.length" class="divide-y divide-slate-100 rounded border border-slate-200 bg-white" aria-label="符合的人物">
         <li v-for="p in candidates" :key="p.id">
           <button type="button" class="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left hover:bg-slate-50" @click="go(p.id)">
@@ -296,35 +297,50 @@ onBeforeUnmount(() => mql?.removeEventListener('change', onMql))
           <h2 class="text-base font-semibold text-slate-900">{{ mode === 'window' ? '全站即時流動' : subject }}</h2>
           <p class="text-xs text-slate-500">{{ loading ? '讀取中…' : spanText }}</p>
         </div>
-        <TraceCanvas
-          :items="items"
-          :mode="mode"
-          :window-start="windowStart"
-          :window-ms="windowMs"
-          :position="position"
-          :playing="playing"
-          :speed="speed"
-          :reduced="reduced"
-          :label="canvasLabel"
-          @update:position="position = $event"
-          @end="onEnd"
-        />
+        <div ref="stage" class="space-y-3 bg-white" :class="fullscreen ? 'flex h-full flex-col overflow-auto p-3' : ''">
+          <TraceToolbar
+            v-model:query="input"
+            :mode="mode"
+            :playing="playing"
+            :speed="speed"
+            :speeds="speeds"
+            :reduced="reduced"
+            :loading="loading"
+            :can-reset-scope="mode === 'events' || !!input"
+            :fullscreen-supported="fullscreenSupported"
+            :fullscreen="fullscreen"
+            @toggle="toggle"
+            @restart="restart"
+            @prev="stepEvent(-1)"
+            @next="stepEvent(1)"
+            @speed="onSpeed"
+            @search="onSubmit"
+            @all="go(null)"
+            @toggle-fullscreen="toggleFullscreen"
+          />
+          <TraceCanvas
+            :items="items"
+            :mode="mode"
+            :window-start="windowStart"
+            :window-ms="windowMs"
+            :position="position"
+            :playing="playing"
+            :speed="speed"
+            :reduced="reduced"
+            :label="canvasLabel"
+            @update:position="position = $event"
+            @end="onEnd"
+          />
+        </div>
         <TraceControls
           :mode="mode"
-          :playing="playing"
           :speed="speed"
-          :speeds="speeds"
           :position="position"
           :window-start="windowStart"
           :window-ms="windowMs"
           :count="items.length"
           :reduced="reduced"
-          @toggle="toggle"
-          @restart="restart"
           @seek="seek"
-          @speed="onSpeed"
-          @prev="stepEvent(-1)"
-          @next="stepEvent(1)"
         />
         <ul class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-600" aria-label="圖例">
           <li class="inline-flex items-center gap-1.5"><span class="inline-block h-4 w-7 border border-slate-700 bg-white" aria-hidden="true"></span>系統</li>

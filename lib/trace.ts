@@ -1,6 +1,11 @@
 // /trace 重播頁的純函式：事件長相、事件走哪條線、節點計數、最活躍排行、時間顯示。
 // 資料來自 SQL 函式 trace_events()（migration 20261111140000）；這裡不碰網路、不碰 DOM，方便測試。
 
+/** 倍速鈕的標籤：全站模式內部倍率是資料秒／真實秒，60 倍（4 小時約 4 分鐘）顯示成 1×；指定對象模式內部倍率本來就是 0.5～4 */
+export function speedLabel(mode: 'window' | 'events', s: number): string {
+  return `${mode === 'window' ? s / 60 : s}×`
+}
+
 /** 流程圖上的節點代號（版面在 lib/trace-layout.ts） */
 export type NodeId =
   | 'official' | 'detector' | 'card' | 'queue' | 'dispatcher' | 'vote' | 'applied' | 'visitor'

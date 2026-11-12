@@ -1,6 +1,6 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
+  speedLabel, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
   type NodeId, type TraceEvent,
 } from './trace.ts'
 import { CANVAS_H, CANVAS_W, LINKS, NODE_DEFS, NODE_H, NODE_W, anchorPoint, computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
@@ -243,4 +243,9 @@ Deno.test('pointAlong：起點、終點、中點', () => {
   assertEquals(pointAlong(pts, 0.5), [10, 0])
   assertEquals(pointAlong(pts, 1), [10, 10])
   assertEquals(pointAlong(pts, 0.75), [10, 5])
+})
+
+Deno.test('speedLabel：全站 30／60／120／240 顯示 0.5／1／2／4×，指定對象照原數字', () => {
+  assertEquals([30, 60, 120, 240].map((s) => speedLabel('window', s)), ['0.5×', '1×', '2×', '4×'])
+  assertEquals([0.5, 1, 2, 4].map((s) => speedLabel('events', s)), ['0.5×', '1×', '2×', '4×'])
 })
