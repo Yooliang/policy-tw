@@ -118,7 +118,7 @@ const EXPECTED_NODES: Record<string, [number, number]> = {
 }
 const EXPECTED_LINKS = [
   'a1b official r2 detector l2', 'bw detector r2 card l2', 'wc card r2 queue l2', 'cd queue r2 dispatcher l2', 'dv dispatcher r2 vote l2', 'vl vote r2 applied l2',
-  'a2w visitor r2 card b0', 'a3w suggest r2 card b1', 'ja jevSort b0 suggest b1', 'ep3 submit b2 jevVote b2', 'ep2 submit b0 jevSort b2',
+  'a2w visitor r2 card b0', 'a3w suggest r2 card b1', 'ja jevSort b0 suggest b1', 'ep3 submit b2 jevVote b1', 'ep2 submit b0 jevSort b1',
   'de dispatcher b1 submit t1', 'jq jevSort t1 queue b1', 'jv jevVote t1 vote b1', 'vg vote r3 dispute t1', 'gq dispute b1 strongLane t1',
   'ql strongLane r2 applied b1', 'qr strongLane b1 rejected t1', 'vr vote r4 rejected l2', 'en submit b1 notfound t1', 'nk notfound l2 cooldown r2',
   'kr cooldown b1 rejected b1', 'kw cooldown t2 card b2',
@@ -309,4 +309,21 @@ Deno.test('nodeSubtitle：各格副標字樣', () => {
 
 Deno.test('版面：官方資料格的副標是中選會', () => {
   assertEquals(computeLayout().nodes.official.sub, '中選會')
+})
+
+Deno.test('版面：代理交件到 SystemOne 兩條線接底邊中點（往下→橫→往上），不穿過往查無的線', () => {
+  const L = computeLayout()
+  const en = L.routes.find((r) => r.id === 'en')!
+  for (const [id, target] of [['ep2', 'jevSort'], ['ep3', 'jevVote']] as const) {
+    const r = L.routes.find((x) => x.id === id)!
+    const n = L.nodes[target]
+    const end = r.pts[r.pts.length - 1]
+    assertEquals(end, [n.cx, n.cy + n.h / 2], `${id} 終點是 ${target} 底邊中點`)
+    assertEquals(r.pts.length, 4, `${id} 是往下、橫、往上三段`)
+    assert(r.pts[1][1] > r.pts[0][1] && r.pts[2][1] === r.pts[1][1] && r.pts[3][1] < r.pts[2][1], `${id} 走向`)
+    // 橫段與往查無的垂直線不相交（橫段 x 範圍不含 en 的 x）
+    const enX = en.pts[0][0]
+    const [x1, x2] = [Math.min(r.pts[1][0], r.pts[2][0]), Math.max(r.pts[1][0], r.pts[2][0])]
+    assert(enX < x1 || enX > x2, `${id} 橫段穿過往查無的線`)
+  }
 })
