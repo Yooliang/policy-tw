@@ -126,5 +126,10 @@ function makeTrafficStore(db: any): TrafficStore {
       if (error) throw new Error(error.message);
       return Number(data ?? 0);
     },
+    async syncViewSignals() {
+      const { data, error } = await db.rpc("work_card_view_signals_sync");
+      if (error) throw new Error(error.message);
+      return Number(data ?? 0);
+    },
   };
 }

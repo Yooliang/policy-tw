@@ -24,7 +24,8 @@ import { normElectionType, normText, rosterNameKey } from "./identity-normalize.
 import { renameCollision, renameCollisionMessage } from "./person-identity-guard.ts";
 import { normalizeCategory } from "./category-map.ts";
 import { type EditContext, recordInsert, recordUpdate } from "./edit-history.ts";
-import { closeTask, createTask, validateTaskInput } from "./task-admin.ts";
+import { closeTask, validateTaskInput } from "./task-admin.ts";
+import { createOrAttachTask } from "./create-or-attach-task.ts";
 import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { personCheckTaskId, resolveGroupPerson } from "./group-person.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
@@ -1738,7 +1739,12 @@ async function applyTaskSuggestion(supabase: SupabaseLike, row: ContributionRow)
     hint_sources: Array.isArray(p.hint_sources) ? p.hint_sources : [],
   });
   if (!validated.ok || !validated.input) return { status: "failed", message: `提議內容不合格：${validated.errors.map((e) => e.message).join("；")}` };
-  const task = await createTask(supabase, validated.input, { source: "suggested", suggested_by: row.agent_name, created_by: row.agent_name });
+  // 工作卡③：同一張卡已在派工隊列上就併上去（算一次需求），不另開任務；/report 的提議格式不變
+  const created = await createOrAttachTask(supabase, validated.input, { source: "suggested", suggested_by: row.agent_name, created_by: row.agent_name, actor: row.agent_name });
+  if (created.attached) {
+    return { status: "applied", message: `提議已併入既有工作卡（task_id=${created.task_id}），不另開任務`, task_id: created.task_id };
+  }
+  const task = created.task;
   await recordInsert(supabase, ctxOf(row), "contribution_tasks", String(task.id), task);
   return { status: "applied", message: `提議已成為公開任務（task_id=${task.id}），/next 會派出`, task_id: String(task.id) };
 }

@@ -117,6 +117,8 @@ export interface TrafficStore {
   readSettings(): Promise<{ enabled: boolean; window_days: number }>;
   /** RPC replace_page_traffic：回傳寫入列數 */
   replace(rows: TrafficRow[], windowDays: number): Promise<number>;
+  /** RPC work_card_view_signals_sync（工作卡③，20261112080000）：把達標頁名下的卡補上頁面訪問訊號；沒實作（舊測試的假 store）就略過 */
+  syncViewSignals?(): Promise<number>;
 }
 
 export type TrafficState = "ok" | "skipped" | "error";
@@ -155,6 +157,15 @@ export async function runPageTrafficSync(input: {
   try {
     const n = await input.store.replace(rows, settings.window_days);
     deps.log("頁面流量：", { window_days: settings.window_days, rows: n });
+    // 訊號寫入失敗不影響流量表本身（那邊已覆寫成功）：只記日誌
+    if (input.store.syncViewSignals) {
+      try {
+        const sig = await input.store.syncViewSignals();
+        deps.log("工作卡頁面訪問訊號：", { written: sig });
+      } catch (e) {
+        deps.log("工作卡頁面訪問訊號失敗：", { message: (e as Error).message });
+      }
+    }
     return { state: "ok", message: null, rows: n };
   } catch (e) {
     return { state: "error", message: `replace_page_traffic 失敗：${(e as Error).message}` };
