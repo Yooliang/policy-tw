@@ -45,7 +45,7 @@ function onSlide(e: Event): void {
       </span>
     </div>
     <p v-if="mode === 'window'" class="text-xs text-slate-400">
-      近 4 小時的事件壓縮重播，{{ speedLabel('window', speed) }} 速約 {{ minutes }} 分鐘播完；可以拖時間軸跳到任何時刻。
+      近 4 小時的事件壓縮重播，{{ speedLabel('window', speed) }} 倍速約 {{ minutes }} 分鐘播完；可以拖時間軸跳到任何時刻。
     </p>
     <p v-else-if="reduced" class="text-xs text-slate-400">你的裝置設定為減少動態，改成一件一件步進，不自動播放。</p>
   </div>

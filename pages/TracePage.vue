@@ -278,20 +278,6 @@ onBeforeUnmount(() => {
       <template #icon><Waypoints :size="400" class="text-blue-500" /></template>
     </Hero>
     <main class="w-full px-4 sm:px-6 lg:px-8 mt-8 text-sm text-slate-700 space-y-6">
-      <ul v-if="candidates.length" class="divide-y divide-slate-100 rounded border border-slate-200 bg-white" aria-label="符合的人物">
-        <li v-for="p in candidates" :key="p.id">
-          <button type="button" class="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left hover:bg-slate-50" @click="go(p.id)">
-            <span class="font-medium text-slate-900">{{ p.name }}</span>
-            <span class="text-xs text-slate-500">{{ [p.party, p.region, p.current_position].filter(Boolean).join('・') }}</span>
-          </button>
-        </li>
-      </ul>
-
-      <p v-if="notice" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">{{ notice }}</p>
-      <p v-if="partial" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">部分時段讀不到，畫面上的事件可能不完整。</p>
-      <p v-if="unavailable" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">重播功能正在更新，請幾分鐘後再試。</p>
-      <LoadError v-if="failed" inline message="暫時讀不到資料，請稍後重試" @retry="run(route.params.id as string | undefined)" />
-
       <section class="rounded-lg border border-slate-200 bg-white p-3 sm:p-4 space-y-3" aria-live="polite">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <h2 class="text-base font-semibold text-slate-900">{{ mode === 'window' ? '全站即時流動' : subject }}</h2>
@@ -318,6 +304,19 @@ onBeforeUnmount(() => {
             @all="go(null)"
             @toggle-fullscreen="toggleFullscreen"
           />
+          <ul v-if="candidates.length" class="divide-y divide-slate-100 rounded border border-slate-200 bg-white" aria-label="符合的人物">
+            <li v-for="p in candidates" :key="p.id">
+              <button type="button" class="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left hover:bg-slate-50" @click="go(p.id)">
+                <span class="font-medium text-slate-900">{{ p.name }}</span>
+                <span class="text-xs text-slate-500">{{ [p.party, p.region, p.current_position].filter(Boolean).join('・') }}</span>
+              </button>
+            </li>
+          </ul>
+
+          <p v-if="notice" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">{{ notice }}</p>
+          <p v-if="partial" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">部分時段讀不到，畫面上的事件可能不完整。</p>
+          <p v-if="unavailable" class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800" role="status">重播功能正在更新，請幾分鐘後再試。</p>
+          <LoadError v-if="failed" inline message="暫時讀不到資料，請稍後重試" @retry="run(route.params.id as string | undefined)" />
           <TraceCanvas
             :items="items"
             :mode="mode"

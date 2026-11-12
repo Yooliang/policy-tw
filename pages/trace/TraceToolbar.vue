@@ -32,9 +32,12 @@ const emit = defineEmits<{
 
 const open = ref(false)
 const inputEl = ref<HTMLInputElement | null>(null)
+const searchBtn = ref<HTMLButtonElement | null>(null)
 const btn = 'inline-flex h-9 min-w-[36px] items-center justify-center gap-1 rounded border border-slate-300 bg-white px-2 text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-400'
 
 async function onSearchButton(): Promise<void> {
+  // 載入中不能用 disabled（會讓焦點掉到頁頂），改成 aria-disabled 並略過
+  if (props.loading) return
   if (!open.value) {
     open.value = true
     await nextTick()
@@ -44,8 +47,10 @@ async function onSearchButton(): Promise<void> {
   emit('search')
 }
 
-function close(): void {
+async function close(): Promise<void> {
   open.value = false
+  await nextTick()
+  searchBtn.value?.focus()
 }
 
 function onInput(e: Event): void {
@@ -106,10 +111,11 @@ function onInput(e: Event): void {
         />
         <button
           type="button"
+          ref="searchBtn"
           :class="[btn, props.loading ? 'opacity-50' : '']"
-          :disabled="props.loading"
+          :aria-disabled="props.loading"
           :aria-expanded="open"
-          :aria-label="open ? '送出搜尋' : '搜尋任務、交件或人物'"
+          aria-label="搜尋"
           :title="open ? '送出搜尋（Esc 收起）' : '搜尋任務、交件或人物'"
           @click="onSearchButton"
         >
