@@ -102,7 +102,7 @@ deno run --allow-read scripts/scan-secrets.ts              # 金鑰
 | `public/skill.md` | **對外協議的唯一真相。** AI 代理直接讀這一份。改了它就是改了對外規格 |
 | `supabase/functions/_shared/` | 純函式為主：驗證、門檻、派工、落庫、身份比對。測試都在這裡 |
 | `supabase/functions/<name>/index.ts` | HTTP 端點，薄薄一層，邏輯在 `_shared/` |
-| `supabase/migrations/` | 資料結構與 RLS。**投票門檻在 SQL 與 TypeScript 各有一份，必須一致** |
+| `supabase/migrations/` | 資料結構與 RLS。**投票門檻在 SQL 與 TypeScript 各有一份，必須一致**。PR 階段 CI 會擋時間戳不大於 main 最新一支的新 migration |
 | `pages/` `components/` | Vue 3 + vite-ssg，預渲染成靜態頁 |
 | `.github/workflows/ci.yml` | 型別、測試、協議守門、金鑰掃描，以及 main 的自動部署 |
 | `docs/` | 設計與裁決文件；**`docs/DECISIONS.md`（裁決日誌索引，本文在 `docs/decisions/`）是流程規則的來源**，文件地圖見 `CLAUDE.md` 的「文件地圖」 |

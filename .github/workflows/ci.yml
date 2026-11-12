@@ -41,6 +41,23 @@ jobs:
           DEPLOYED=$(git rev-parse -q --verify refs/tags/edge-functions-deployed || true)
           node scripts/ci-changed-paths.mjs "$DEPLOYED" "${{ github.event.before }}" "${{ github.sha }}"
 
+  # PR 階段擋「新增 migration 的時間戳不大於 main 最新一支」（2026-11-12）：
+  # `supabase db push` 不收比遠端最新還早的檔，合併後才失敗（當天兩次）。push 到 main 不跑（已合就沒意義）。
+  migration-order:
+    name: migration 時間戳守門
+    needs: [changes]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test scripts/ci-migration-order.spec.mjs
+      - run: node scripts/ci-migration-order.mjs
+
   typecheck:
     name: 型別檢查與建置
     runs-on: ubuntu-latest
