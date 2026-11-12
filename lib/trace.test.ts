@@ -1,6 +1,6 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  speedLabel, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
+  speedLabel, nodeSubtitle, leaseReturnCount, workCardCount, sortBreakdown, COUNT_LABEL, dedupe, eventRoute, strongBreakdown, systemVoteBreakdown, eventText, gapText, indexAtOrBefore, nodeCounts, parseTarget, personOf, taskTypeOfId, timeSlices, toItems, topActive,
   type NodeId, type TraceEvent,
 } from './trace.ts'
 import { CANVAS_H, CANVAS_W, LINKS, NODE_DEFS, NODE_H, NODE_W, anchorPoint, computeLayout, pathThrough, pointAlong, polylineLength, routeBetween } from './trace-layout.ts'
@@ -248,4 +248,65 @@ Deno.test('pointAlong：起點、終點、中點', () => {
 Deno.test('speedLabel：全站 30／60／120／240 顯示 0.5／1／2／4×，指定對象照原數字', () => {
   assertEquals([30, 60, 120, 240].map((s) => speedLabel('window', s)), ['0.5×', '1×', '2×', '4×'])
   assertEquals([0.5, 1, 2, 4].map((s) => speedLabel('events', s)), ['0.5×', '1×', '2×', '4×'])
+})
+
+Deno.test('workCardCount：不同 work_key 才算，沒帶 work_key 的不算，只算到 upTo', () => {
+  const items = toItems([
+    ev({ at: '2026-11-11T02:00:00Z', kind: 'gap_opened', work_key: 'politician:a:policies:2026' }),
+    ev({ at: '2026-11-11T02:01:00Z', kind: 'lease_issued', work_key: 'politician:a:policies:2026' }),
+    ev({ at: '2026-11-11T02:02:00Z', kind: 'gap_opened', work_key: 'politician:b:policies:2026' }),
+    ev({ at: '2026-11-11T02:03:00Z', kind: 'vote', work_key: null }),
+  ])
+  assertEquals(workCardCount(items), 2)
+  assertEquals(workCardCount(items, 1), 1)
+  assertEquals(workCardCount([]), 0)
+})
+
+Deno.test('sortBreakdown：收件＝經整理的交件（不含查無），提議＝其中的任務提議', () => {
+  const items = toItems([
+    ev({ at: '2026-11-11T02:00:00Z', kind: 'submitted', detail: { type: 'policy' } }),
+    ev({ at: '2026-11-11T02:01:00Z', kind: 'submitted', detail: { type: 'task_suggestion' } }),
+    ev({ at: '2026-11-11T02:02:00Z', kind: 'submitted', detail: { type: 'no_change' } }),
+    ev({ at: '2026-11-11T02:03:00Z', kind: 'vote' }),
+  ])
+  assertEquals(sortBreakdown(items), { intake: 2, suggestions: 1 })
+  assertEquals(sortBreakdown(items, 0), { intake: 1, suggestions: 0 })
+})
+
+Deno.test('佇列格的計數是重排（gap_closed），不含租約逾時', () => {
+  assertEquals(COUNT_LABEL.queue, '重排')
+  assertEquals(nodeCounts(toItems([ev({ kind: 'gap_closed' }), ev({ kind: 'lease_expired' })])), { queue: 1 })
+})
+
+Deno.test('leaseReturnCount：逾時收回＝lease_expired＋lease_released，派出與交件不算，只算到 upTo', () => {
+  const items = toItems([
+    ev({ at: '2026-11-11T02:00:00Z', kind: 'lease_issued' }),
+    ev({ at: '2026-11-11T02:01:00Z', kind: 'lease_expired' }),
+    ev({ at: '2026-11-11T02:02:00Z', kind: 'lease_released' }),
+    ev({ at: '2026-11-11T02:03:00Z', kind: 'lease_reported' }),
+  ])
+  assertEquals(leaseReturnCount(items), 2)
+  assertEquals(leaseReturnCount(items, 1), 1)
+  assertEquals(leaseReturnCount([]), 0)
+})
+
+Deno.test('nodeSubtitle：各格副標字樣', () => {
+  const d = {
+    counts: { queue: 4, dispatcher: 9, dispute: 3, jevVote: 7, detector: 2 },
+    cards: 5, returned: 2, intake: 6, strong: { claim: 1, finalized: 0 }, supported: 4,
+  }
+  assertEquals(nodeSubtitle('queue', d), '重排 4')
+  assertEquals(nodeSubtitle('dispatcher', d), '派出 9／收回 2')
+  assertEquals(nodeSubtitle('jevVote', d), '總數 7／加分 4')
+  assertEquals(nodeSubtitle('jevSort', d), '總數 6')
+  assertEquals(nodeSubtitle('dispute', d), '裁決 3')
+  assertEquals(nodeSubtitle('card', d), '人×事 5 張')
+  assertEquals(nodeSubtitle('detector', d), '新缺口 2')
+  // 沒有動態數字的格用固定副標；官方資料就是「中選會」
+  assertEquals(nodeSubtitle('official', d, '中選會'), '中選會')
+  assertEquals(nodeSubtitle('official', d), '')
+})
+
+Deno.test('版面：官方資料格的副標是中選會', () => {
+  assertEquals(computeLayout().nodes.official.sub, '中選會')
 })

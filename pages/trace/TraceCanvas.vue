@@ -5,7 +5,7 @@
 //   events  指定對象——位置是「第幾件事」（小數＝這件事走到哪），一件一件照真實順序走
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
-  COUNT_LABEL, GROUP_COLOR, eventRoute, groupOf, indexAtOrBefore, nodeCounts, strongBreakdown,
+  GROUP_COLOR, NODE_HINT, eventRoute, nodeSubtitle, systemVoteBreakdown, groupOf, indexAtOrBefore, nodeCounts, leaseReturnCount, sortBreakdown, strongBreakdown, workCardCount,
   type NodeCounts, type NodeId, type TraceItem,
 } from '../../lib/trace'
 import { computeLayout, pathThrough, pointAlong, polylineLength, type Layout, type Pt } from '../../lib/trace-layout'
@@ -44,6 +44,10 @@ let localPos = props.position
 let dots: Dot[] = []
 let counts: NodeCounts = {}
 let strong = { claim: 0, finalized: 0, rejected: 0 }
+let cards = 0
+let returned = 0
+let sorted = { intake: 0, suggestions: 0 }
+let sysVotes = { supported: 0, notSupported: 0, cannotTell: 0, other: 0 }
 let countKey = ''
 const glow: Partial<Record<NodeId, number>> = {}
 let hidden = typeof document !== 'undefined' && document.hidden
@@ -88,6 +92,10 @@ function refreshCounts(): void {
   countKey = key
   counts = nodeCounts(props.items, idx)
   strong = strongBreakdown(props.items, idx)
+  cards = workCardCount(props.items, idx)
+  returned = leaseReturnCount(props.items, idx)
+  sorted = sortBreakdown(props.items, idx)
+  sysVotes = systemVoteBreakdown(props.items, idx)
 }
 
 // ---- 前進 ----
@@ -246,9 +254,8 @@ function draw(): void {
   // 節點
   for (const n of Object.values(layout.nodes)) {
     drawBox(c, n, glow[n.id] ?? 0, s)
-    const cl = COUNT_LABEL[n.id]
     const num = counts[n.id]
-    const second = n.id === 'strongLane' ? `認領 ${strong.claim}／定案 ${strong.finalized}` : n.id === 'dispute' ? `轉裁決 ${(num ?? 0).toLocaleString('zh-TW')}` : cl ? `${cl} ${(num ?? 0).toLocaleString('zh-TW')}` : (n.sub ?? '')
+    const second = nodeSubtitle(n.id, { counts, cards, returned, intake: sorted.intake, strong, supported: sysVotes.supported }, n.sub)
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillStyle = '#0f172a'
@@ -313,6 +320,19 @@ function drawDots(c: CanvasRenderingContext2D): void {
   }
 }
 
+// 滑鼠停在有說明的節點上時，用瀏覽器原生提示顯示（title）
+function onMove(e: MouseEvent): void {
+  const el = canvas.value
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  const x = e.clientX - r.left
+  const y = e.clientY - r.top
+  const hit = Object.values(layout.nodes).find((n) => Math.abs(x - n.cx) <= n.w / 2 && Math.abs(y - n.cy) <= n.h / 2)
+  const hint = hit ? NODE_HINT[hit.id] ?? '' : ''
+  if (el.title !== hint) el.title = hint
+}
+const hintList = Object.entries(NODE_HINT).map(([id, text]) => ({ id, name: layout.nodes[id as NodeId].label, text }))
+
 // ---- 生命週期 ----
 
 const onVisibility = (): void => {
@@ -355,6 +375,7 @@ watch(() => [props.items, props.mode, props.reduced], () => {
 <template>
   <!-- 畫布的顏色是照淺色底畫的（深色線、白底方框），深色模式下底色也固定白，不然線會看不清 -->
   <div ref="wrap" class="w-full overflow-x-auto rounded" style="background-color: #ffffff">
-    <canvas ref="canvas" role="img" :aria-label="label" class="block" style="touch-action: pan-x pan-y" />
+    <canvas ref="canvas" role="img" :aria-label="label" class="block" style="touch-action: pan-x pan-y" @mousemove="onMove" />
+    <ul class="sr-only" aria-label="節點說明"><li v-for="h in hintList" :key="h.id">{{ h.name }}：{{ h.text }}</li></ul>
   </div>
 </template>
