@@ -55,7 +55,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test scripts/ci-migration-order.test.mjs
+      - run: node --test scripts/ci-migration-order.spec.mjs
       - run: node scripts/ci-migration-order.mjs
 
   typecheck:
