@@ -32,7 +32,7 @@ const KEY_P1 = `politician:${P1}:policies:2026`;
 // ============================================================
 Deno.test("A1 新函式與權限：REVOKE PUBLIC／anon／authenticated、只給 service_role；不碰日本站；只加不刪", () => {
   const c = code(MIG);
-  for (const f of ["task_work_key_for_manual(TEXT, JSONB)", "work_card_resolve(TEXT, TEXT)", "work_card_attach(TEXT, TEXT, TEXT, BOOLEAN, TEXT)", "work_card_view_signals_sync()"]) {
+  for (const f of ["task_work_key_for_manual(TEXT, JSONB)", "work_card_resolve(TEXT, TEXT)", "work_card_attach(TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT, TEXT)", "work_card_view_signals_sync()"]) {
     assert(c.includes(`REVOKE ALL ON FUNCTION ${f} FROM PUBLIC, anon, authenticated;`), `REVOKE ${f}`);
   }
   assert(/GRANT EXECUTE ON FUNCTION[\s\S]*TO service_role;/.test(c));
@@ -109,7 +109,15 @@ async function env(mig = MIG): Promise<PGlite> {
     ${cols}
     ${tables}
     ${fnText(DEMAND, "work_card_signal_add")}
-    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, target jsonb, work_key text, boost_seconds bigint NOT NULL DEFAULT 0, cool_until timestamptz);
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, target jsonb, work_key text, boost_seconds bigint NOT NULL DEFAULT 0, cool_until timestamptz, blocked boolean NOT NULL DEFAULT false);
+    CREATE TABLE _ladder (work_key text PRIMARY KEY, closed boolean NOT NULL DEFAULT false, check_cool_until timestamptz, last_checked_at timestamptz);
+    CREATE FUNCTION work_key_ladder_state(p_work_key TEXT)
+    RETURNS TABLE (checks BIGINT, closed BOOLEAN, closed_at TIMESTAMPTZ, last_checked_at TIMESTAMPTZ, cool_until TIMESTAMPTZ, check_cool_until TIMESTAMPTZ)
+    LANGUAGE sql STABLE AS $f$
+      SELECT 0::bigint, COALESCE((SELECT l.closed FROM _ladder l WHERE l.work_key = p_work_key), false), NULL::timestamptz,
+             (SELECT l.last_checked_at FROM _ladder l WHERE l.work_key = p_work_key), NULL::timestamptz, (SELECT l.check_cool_until FROM _ladder l WHERE l.work_key = p_work_key)
+    $f$;
+    ${/CREATE TABLE IF NOT EXISTS work_card_notes[\s\S]*?\n\);\n/.exec(MIG)![0]}
     CREATE TABLE _cooling (task_id text PRIMARY KEY);
     CREATE FUNCTION task_in_check_cooldown(p_task_id text) RETURNS boolean LANGUAGE sql STABLE AS $f$ SELECT EXISTS (SELECT 1 FROM _cooling WHERE task_id = p_task_id) $f$;
     CREATE TABLE page_traffic_hot (kind text, target_id text, users integer);
@@ -221,6 +229,40 @@ Deno.test("B5 view 訊號：只算達標頁名下現有的卡；人數封頂；�
   await db.close();
 });
 
+Deno.test("B6 resolve 只併到還會被派的卡：blocked 的列、階梯已結案的卡、blocked 的手動任務都不併", async () => {
+  const db = await env();
+  await gap(db, `auto:policy_missing:${P1}`);
+  assertEquals(await one(db, `work_card_resolve('${KEY_P1}')`), `auto:policy_missing:${P1}`);
+  await db.exec(`UPDATE task_dispatches SET blocked = true`);
+  assertEquals(await one(db, `work_card_resolve('${KEY_P1}')`), null, "blocked 的缺口列不併");
+  await db.exec(`UPDATE task_dispatches SET blocked = false; INSERT INTO _ladder (work_key, closed) VALUES ('${KEY_P1}', true)`);
+  assertEquals(await one(db, `work_card_resolve('${KEY_P1}')`), null, "階梯已結案（查無第 4 次）的卡不併");
+  await db.exec(`DELETE FROM _ladder; DELETE FROM task_dispatches; INSERT INTO contribution_tasks VALUES ('${T(3)}', 'policy_missing', '{"politician_id":"${P1}"}', 'open')`);
+  await db.exec(`INSERT INTO task_dispatches (task_id, target, work_key, blocked) VALUES ('${T(3)}', '{}', '${KEY_P1}', true)`);
+  assertEquals(await one(db, `work_card_resolve('${KEY_P1}')`), null, "blocked 的手動任務不併");
+  await db.exec(`UPDATE contribution_tasks SET status = 'closed'`);
+  assertEquals(await one(db, `work_card_resolve('${KEY_P1}')`), null, "已結案的手動任務不併");
+  await db.close();
+});
+
+Deno.test("B7 attach 命中冷卻中的卡：訊號照寫、不插隊、回 cooling＋last_checked_at；冷卻結束後不再回 cooling；備註存進 work_card_notes（不算需求）", async () => {
+  const db = await env();
+  await gap(db, `auto:policy_missing:${P1}`);
+  await db.exec(`INSERT INTO _ladder VALUES ('${KEY_P1}', false, now() + interval '5 days', now() - interval '2 days')`);
+  const r = (await one(db, `work_card_attach('${KEY_P1}', 'request', 'ip1', true)`)) as Record<string, unknown>;
+  assertEquals([r.attached, r.cooling, r.signal_added, r.boosted], [true, true, true, 0]);
+  assert(typeof r.last_checked_at === "string");
+  assertEquals(Number(await one(db, `(SELECT count(*) FROM work_card_signals WHERE work_key = '${KEY_P1}')`)), 1, "冷卻中仍寫訊號（冷卻結束後 ① 的需求疊加會把它帶回前面）");
+  assertEquals(String(await one(db, `(SELECT boost_seconds FROM task_dispatches LIMIT 1)`)), "0");
+  await db.exec(`UPDATE _ladder SET check_cool_until = now() - interval '1 day'`);
+  assertEquals(((await one(db, `work_card_attach('${KEY_P1}', 'request', 'ip2', false)`)) as Record<string, unknown>).cooling, false);
+  const n = (await one(db, `work_card_attach('${KEY_P1}', NULL, 'boss', false, NULL, '補某人政見：請查 X 網站', 'manual')`)) as Record<string, unknown>;
+  assertEquals(n.attached, true);
+  assertEquals(await one(db, `(SELECT note FROM work_card_notes WHERE work_key = '${KEY_P1}')`), "補某人政見：請查 X 網站");
+  assertEquals(Number(await one(db, `(SELECT count(*) FROM work_card_signals)`)), 2, "備註不算需求訊號");
+  await db.close();
+});
+
 // ============================================================
 // C. TS：createOrAttachTask、入口
 // ============================================================
@@ -305,8 +347,8 @@ function router(opts: { taskId?: string | null }) {
     return undefined;
   };
 }
-async function post(path: string, body: unknown, r: ReturnType<typeof router>) {
-  const entry = await loadEntry(path, env2, r);
+async function post(path: string, body: unknown, r: (c: RestCall) => unknown, extraEnv: Record<string, string> = {}) {
+  const entry = await loadEntry(path, { ...env2, ...extraEnv }, r);
   try {
     const res = await entry.call(new Request("https://x/f", { method: "POST", headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.9" }, body: JSON.stringify(body) }));
     return { status: res.status, json: JSON.parse(await res.text()) as Record<string, unknown>, calls: entry.calls };
@@ -351,6 +393,55 @@ Deno.test("C8 接線：提議通過／Jev 追問走 createOrAttachTask；#912 �
   if (d912) assert(d912.includes("web_request_gap_boost"));
   assert((await rd("../console-fetch/index.ts")).includes("work_card_view_signals_sync"));
   assert((await rd("./page-traffic.ts")).includes("syncViewSignals"));
+});
+
+Deno.test("C9 request-task：併卡的請求也計入每日 20 次（數 request 訊號）", async () => {
+  const base = router({ taskId: "auto:x" });
+  const r = await post("../../request-task/index.ts", { kind: "policy", politician_id: P1 }, (c) => {
+    if (c.target === "work_card_signals") return { __count: 20 };
+    return base(c);
+  });
+  assertEquals([r.status, r.json.error], [429, "rate_limited"]);
+  assert(!r.calls.some((c) => c.target === "rpc/work_card_attach"), "超額不寫訊號");
+  const sig = r.calls.find((c) => c.target === "work_card_signals")!;
+  assert(sig.url.search.includes("kind=eq.request") && sig.url.search.includes("actor=eq."), "只數這個來源的 request 訊號");
+});
+
+Deno.test("C10 request-task：併到冷卻中的卡 → 仍寫訊號、回 recently_checked；寫訊號失敗 → 不宣稱 attached:true", async () => {
+  const cool = (c: RestCall): unknown => c.target === "rpc/work_card_attach"
+    ? { attached: true, task_id: "auto:x", work_key: KEY_P1, signal_added: true, cooling: true, last_checked_at: "2026-11-10T00:00:00Z" } : router({ taskId: "auto:x" })(c);
+  const r = await post("../../request-task/index.ts", { kind: "policy", politician_id: P1 }, cool);
+  assertEquals([r.status, r.json.status, r.json.checked_at], [200, "recently_checked", "2026-11-10T00:00:00Z"]);
+  assert(r.calls.some((c) => c.target === "rpc/work_card_attach"));
+  const f = await post("../../request-task/index.ts", { kind: "policy", politician_id: P1 }, (c) => c.target === "rpc/work_card_attach" ? null : router({ taskId: "auto:x" })(c));
+  assertEquals(f.json.status, "already_queued");
+  assertEquals(f.json.attached, false);
+});
+
+Deno.test("C11 保險絲 off：request-task 退回舊行為（撈自動缺口、對上就 already_queued auto_gap），不用 work_card 的 rpc；無缺口照舊新開", async () => {
+  {
+    const OFF = { WORK_CARD_ATTACH: "off" };
+    const gaps = [{ task_id: `auto:term_policy_missing:${P1}:2026` }];
+    const r = await post("../../request-task/index.ts", { kind: "policy", politician_id: P1 }, (c) => c.target === "rpc/contribution_auto_tasks" ? gaps : router({ taskId: null })(c), OFF);
+    assertEquals([r.json.status, r.json.reason], ["already_queued", "auto_gap"]);
+    assert(!r.calls.some((c) => c.target.startsWith("rpc/work_card") || c.target === "rpc/task_work_key_for_manual" || c.target === "work_card_signals"));
+    const r2 = await post("../../request-task/index.ts", { kind: "policy", politician_id: P1 }, (c) => c.target === "rpc/contribution_auto_tasks" ? [] : router({ taskId: null })(c), OFF);
+    assertEquals(r2.status, 201);
+  }
+});
+
+Deno.test("C12 維護者指定併卡：說明與來源存成備註（不寫需求訊號）；系統掃描（no_signal）不寫需求訊號", async () => {
+  const f = fake({ key: KEY_P1, taskId: "auto:x" });
+  await createOrAttachTask(f.supabase, { ...input, title: "補某人政見", description: "請查官網", source_url: "https://x.example" }, { source: "manual", created_by: "boss" });
+  const a = f.rpcs.find((x) => x.name === "work_card_attach")!.args;
+  assertEquals([a.p_kind, a.p_source], [null, "manual"]);
+  assertEquals(a.p_note, "補某人政見｜請查官網｜https://x.example");
+  const f2 = fake({ key: KEY_P1, taskId: "auto:x" });
+  const r2 = await createOrAttachTask(f2.supabase, input, { source: "suggested", suggested_by: "jev-bio", no_signal: true });
+  assertEquals(r2.attached, true);
+  assertEquals(f2.rpcs.find((x) => x.name === "work_card_attach")!.args.p_kind, null);
+  const so = await Deno.readTextFile(new URL("../system-one/index.ts", import.meta.url));
+  assertEquals((so.match(/no_signal: true/g) ?? []).length, 3, "system-one 三處都不寫需求訊號");
 });
 
 // ============================================================

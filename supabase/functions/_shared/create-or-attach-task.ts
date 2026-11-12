@@ -22,6 +22,15 @@ export const SOURCE_SIGNAL_KIND: Readonly<Record<string, "request" | "suggest" |
   auto_dispute: null,
 };
 
+export interface AttachResult {
+  attached: boolean;
+  task_id?: string;
+  signal_added?: boolean;
+  /** 卡在查核冷卻中：訊號已寫、沒插隊；呼叫端照「近期查過」回應 */
+  cooling?: boolean;
+  last_checked_at?: string | null;
+}
+
 export interface CreateOrAttachOptions extends CreateTaskOptions {
   /** 維護者指定任務專用：true＝不查重、照開（apply create_task 的 force_new） */
   force_new?: boolean;
@@ -31,10 +40,14 @@ export interface CreateOrAttachOptions extends CreateTaskOptions {
   scope?: string | null;
   /** 併卡時對這次新增的訊號插隊一次（網站請求用，同 #912 的待遇） */
   boost?: boolean;
+  /** 系統自己的掃描（Jev 追問、jev-bio…）：只併卡、不寫需求訊號（系統掃描不算需求） */
+  no_signal?: boolean;
+  /** 併卡時存進 work_card_notes 的說明；沒給就用標題＋說明＋來源網址 */
+  note?: string | null;
 }
 
 export type CreateOrAttachResult =
-  | { attached: true; task_id: string; work_key: string; signal_added: boolean }
+  | { attached: true; task_id: string; work_key: string; signal_added: boolean; cooling: boolean; last_checked_at: string | null }
   | { attached: false; task: Obj; work_key: string | null };
 
 export const workCardAttachEnabled = (): boolean => {
@@ -43,6 +56,12 @@ export const workCardAttachEnabled = (): boolean => {
   } catch {
     return true;
   }
+};
+
+const noteOf = (input: TaskInput, options: CreateOrAttachOptions): string | null => {
+  if (options.note !== undefined) return options.note;
+  const text = [input.title, input.description, input.source_url].filter((x) => typeof x === "string" && x.trim()).join("｜");
+  return text || null;
 };
 
 const actorOf = (options: CreateOrAttachOptions): string | null =>
@@ -75,15 +94,16 @@ export async function attachSignal(
   workKey: string,
   kind: "request" | "suggest" | null,
   actor: string | null,
-  opts: { boost?: boolean; scope?: string | null } = {},
-): Promise<{ attached: boolean; task_id?: string; signal_added?: boolean } | null> {
+  opts: { boost?: boolean; scope?: string | null; note?: string | null; source?: string | null } = {},
+): Promise<AttachResult | null> {
   if (!workCardAttachEnabled()) return null;
   try {
     const { data, error } = await supabase.rpc("work_card_attach", {
       p_work_key: workKey, p_kind: actor ? kind : null, p_actor: actor ?? "", p_boost: opts.boost === true, p_scope: opts.scope ?? null,
+      p_note: opts.note ?? null, p_source: opts.source ?? null,
     });
     if (error) throw new Error(error.message);
-    return (data ?? null) as { attached: boolean; task_id?: string; signal_added?: boolean } | null;
+    return (data ?? null) as AttachResult | null;
   } catch (e) {
     console.warn("work_card_attach 失敗：", e instanceof Error ? e.message : String(e));
     return null;
@@ -95,16 +115,17 @@ export async function attachSignal(
  * force_new、保險絲關閉、任務型別不是卡的形狀、卡上沒有尚開著的任務，都走 createTask。
  */
 export async function createOrAttachTask(supabase: SupabaseLike, input: TaskInput, options: CreateOrAttachOptions): Promise<CreateOrAttachResult> {
-  const { force_new, actor: _a, scope, boost, ...createOptions } = options;
+  const { force_new, actor: _a, scope, boost, no_signal: _n, note: _note, ...createOptions } = options;
   if (force_new || !workCardAttachEnabled()) {
     return { attached: false, task: await createTask(supabase, input, createOptions), work_key: null };
   }
   const card = await workCardOf(supabase, input, scope ?? null);
   if (card?.task_id) {
-    const kind = SOURCE_SIGNAL_KIND[options.source] ?? null;
-    const res = await attachSignal(supabase, card.work_key, kind, actorOf(options), { boost, scope });
+    const kind = options.no_signal ? null : (SOURCE_SIGNAL_KIND[options.source] ?? null);
+    const res = await attachSignal(supabase, card.work_key, kind, actorOf(options), { boost, scope, note: noteOf(input, options), source: options.source });
     if (res?.attached && res.task_id) {
-      return { attached: true, task_id: res.task_id, work_key: card.work_key, signal_added: res.signal_added === true };
+      return { attached: true, task_id: res.task_id, work_key: card.work_key, signal_added: res.signal_added === true,
+        cooling: res.cooling === true, last_checked_at: res.last_checked_at ?? null };
     }
   }
   return { attached: false, task: await createTask(supabase, input, createOptions), work_key: card?.work_key ?? null };

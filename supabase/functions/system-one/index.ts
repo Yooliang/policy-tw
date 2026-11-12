@@ -180,7 +180,7 @@ async function settleSubmissionFollowup(
   const task = submissionFollowupTask(c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
   const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
   if (existing) return;
-  const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup" });
+  const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup", no_signal: true });
   if (res.attached) return; // 工作卡③：同一張卡已在隊列上，已記一筆需求訊號、不另開任務
   await clarifyNewTask(supabase, apiKey, res.task);
 }
@@ -272,7 +272,7 @@ async function settleFollowup(
     const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
     if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
     else {
-      const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup" });
+      const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup", no_signal: true });
       if (res.attached) { entry.task_id = res.task_id; entry.attached = true; }
       else { entry.task_id = res.task.id; await clarifyNewTask(supabase, apiKey, res.task); }
     }
@@ -1481,7 +1481,7 @@ Deno.serve(async (req) => {
           if (!dry) {
             const existing = await findOpenTaskForTarget(supabase, { politician_id: p.id, policy_id: null, task_type: "other" });
             if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
-            else { const r = await createOrAttachTask(supabase, bioGapTask(p, v), { source: "suggested", suggested_by: "jev-bio", created_by: "jev-bio" }); if (r.attached) { entry.task_id = r.task_id; entry.attached = true; } else { entry.task_id = r.task.id; created++; } }
+            else { const r = await createOrAttachTask(supabase, bioGapTask(p, v), { source: "suggested", suggested_by: "jev-bio", created_by: "jev-bio", no_signal: true }); if (r.attached) { entry.task_id = r.task_id; entry.attached = true; } else { entry.task_id = r.task.id; created++; } }
           }
           found.push(entry);
         } catch (e) {

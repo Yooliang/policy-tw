@@ -5,7 +5,7 @@
 -- 讓卡的優先級靠需求疊加（①）往前、不靠多開一筆平行任務。沒有卡才照舊新開。
 --   1. task_work_key_for_manual(p_type, p_target)：把 task_work_key 的 uuid 手動任務分支抽成獨立純函式（輸出逐案不變），
 --      這樣「還沒有 uuid 的請求」也能先算出卡；task_work_key 的 uuid 分支改呼叫它（守門 work-card-attach.test.ts A 對舊定義逐案比對）。
---   2. work_card_resolve(p_work_key, p_scope)：這張卡現在尚開著的任務列（task_dispatches 非驗證列，優先；其次尚未入列的 open 手動任務）。
+--   2. work_card_resolve(p_work_key, p_scope)：這張卡現在還會被派的任務（排除 blocked 與階梯已結案的卡）列（task_dispatches 非驗證列，優先；其次尚未入列的 open 手動任務）。
 --      範圍（scope）例外：請求帶 tenure 只併到 scope 相同的手動任務，不併到自動缺口（自動缺口視同 pledge）；帶 pledge 時自動缺口與 scope 相同的手動任務可併。
 --   3. work_card_attach(p_work_key, p_kind, p_actor, p_boost)：有卡→寫訊號（work_card_signal_add，冪等）、必要時套插隊（只在這次真的新增訊號時，
 --      GREATEST 至 visitor_front_seconds、查核冷卻中不插，同 #912 web_request_gap_boost）；回 {attached, task_id, work_key, signal_added}。
@@ -154,10 +154,12 @@ COMMENT ON FUNCTION task_work_key IS
 -- 優先回已在隊的（task_dispatches 非驗證列：自動缺口與已入列的手動任務），其次是還沒入列（seed 約 10 分鐘一輪）的 open 手動任務。找不到回 NULL
 CREATE OR REPLACE FUNCTION work_card_resolve(p_work_key TEXT, p_scope TEXT DEFAULT NULL) RETURNS TEXT
 LANGUAGE sql STABLE AS $$
-  WITH cand AS (
+  WITH gate AS (   -- 只併到「還會被派」的卡：查核階梯已結案（查無第 4 次）的卡不併
+    SELECT NOT COALESCE((SELECT st.closed FROM work_key_ladder_state(p_work_key) st), FALSE) AS ok
+  ), cand AS (
     SELECT d.task_id, 0 AS rk
       FROM task_dispatches d
-     WHERE p_work_key IS NOT NULL AND d.work_key = p_work_key AND d.task_id NOT LIKE 'verify:%'
+     WHERE p_work_key IS NOT NULL AND d.work_key = p_work_key AND d.task_id NOT LIKE 'verify:%' AND NOT d.blocked
     UNION ALL
     SELECT t.id::TEXT, 1
       FROM contribution_tasks t
@@ -165,26 +167,46 @@ LANGUAGE sql STABLE AS $$
        AND ((split_part(p_work_key, ':', 1) = 'politician' AND t.target->>'politician_id' = split_part(p_work_key, ':', 2))
          OR (split_part(p_work_key, ':', 1) = 'policy' AND t.target->>'policy_id' = split_part(p_work_key, ':', 2)))
        AND task_work_key_for_manual(t.task_type, t.target) = p_work_key
+       AND NOT EXISTS (SELECT 1 FROM task_dispatches d2 WHERE d2.task_id = t.id::TEXT AND d2.blocked)
   )
   SELECT c.task_id
-    FROM cand c
-   WHERE p_scope IS NULL
+    FROM cand c, gate
+   WHERE gate.ok AND (p_scope IS NULL
       OR (CASE WHEN c.task_id LIKE 'auto:%' THEN p_scope = 'pledge'
-               ELSE EXISTS (SELECT 1 FROM contribution_tasks t WHERE t.id::TEXT = c.task_id AND t.target->>'scope' = p_scope) END)
+               ELSE EXISTS (SELECT 1 FROM contribution_tasks t WHERE t.id::TEXT = c.task_id AND t.target->>'scope' = p_scope) END))
    ORDER BY c.rk, c.task_id
    LIMIT 1
 $$;
-COMMENT ON FUNCTION work_card_resolve IS '這張工作卡現在尚開著的任務（task_dispatches 非驗證列優先，其次未入列的 open 手動任務）；p_scope 給了（pledge／tenure）時，自動缺口只在 pledge 算、手動任務要 target.scope 相同。沒有回 NULL。2026-11-12';
+COMMENT ON FUNCTION work_card_resolve IS '這張工作卡現在還會被派的任務（排除 blocked 的列與階梯已結案的卡；task_dispatches 非驗證列優先，其次未入列的 open 手動任務）；p_scope 給了（pledge／tenure）時，自動缺口只在 pledge 算、手動任務要 target.scope 相同。沒有回 NULL。2026-11-12';
+
+-- 併卡時帶來的說明與來源（維護者指定、代理提議的標題／說明不因併卡而丟掉）。不算需求（不進 work_card_signals）、私有表
+CREATE TABLE IF NOT EXISTS work_card_notes (
+  id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  work_key    TEXT NOT NULL CHECK (work_key <> ''),
+  source      TEXT NOT NULL,
+  actor       TEXT,
+  note        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS work_card_notes_key_idx ON work_card_notes (work_key, created_at);
+COMMENT ON TABLE work_card_notes IS '工作卡併卡備註（20261112080000）：維護者指定、代理提議併進既有卡時帶來的標題／說明／來源，給接手的人看。私有表：RLS 開、只有 service_role。2026-11-12';
+ALTER TABLE work_card_notes ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "work_card_notes service write" ON work_card_notes;
+CREATE POLICY "work_card_notes service write" ON work_card_notes FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+REVOKE ALL ON work_card_notes FROM PUBLIC, anon, authenticated;
 
 -- ------------------------------------------------------------
 -- 4. 併卡：寫訊號、必要時插隊
 -- ------------------------------------------------------------
-CREATE OR REPLACE FUNCTION work_card_attach(p_work_key TEXT, p_kind TEXT, p_actor TEXT, p_boost BOOLEAN DEFAULT FALSE, p_scope TEXT DEFAULT NULL) RETURNS JSONB
+CREATE OR REPLACE FUNCTION work_card_attach(p_work_key TEXT, p_kind TEXT, p_actor TEXT, p_boost BOOLEAN DEFAULT FALSE, p_scope TEXT DEFAULT NULL,
+                                     p_note TEXT DEFAULT NULL, p_source TEXT DEFAULT NULL) RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_task  TEXT;
   v_added BOOLEAN := FALSE;
   v_boosted INTEGER := 0;
+  v_cool  TIMESTAMPTZ;
+  v_last  TIMESTAMPTZ;
 BEGIN
   IF COALESCE(p_work_key, '') = '' OR p_work_key LIKE 'task:%' THEN
     RETURN jsonb_build_object('attached', FALSE, 'work_key', p_work_key);
@@ -196,6 +218,15 @@ BEGIN
   IF p_kind IS NOT NULL THEN
     v_added := work_card_signal_add(p_work_key, p_kind, p_actor);
   END IF;
+  IF COALESCE(p_note, '') <> '' THEN
+    INSERT INTO work_card_notes (work_key, source, actor, note) VALUES (p_work_key, COALESCE(p_source, 'unknown'), NULLIF(p_actor, ''), left(p_note, 2000));
+  END IF;
+  -- 卡在查核冷卻中：訊號照寫（冷卻結束後 ① 的需求疊加會把它帶回前面，不用插隊），回報給呼叫端當「近期查過」
+  SELECT st.check_cool_until, st.last_checked_at INTO v_cool, v_last FROM work_key_ladder_state(p_work_key) st;
+  IF v_cool IS NOT NULL AND v_cool > now() THEN
+    RETURN jsonb_build_object('attached', TRUE, 'task_id', v_task, 'work_key', p_work_key, 'signal_added', v_added, 'boosted', 0,
+                              'cooling', TRUE, 'cool_until', v_cool, 'last_checked_at', v_last);
+  END IF;
   -- 插隊：只在這次真的新增（或續期）了訊號時，同 #912 的待遇：GREATEST（不疊加）、查核冷卻中不插
   IF p_boost AND v_added THEN
     UPDATE task_dispatches d
@@ -206,10 +237,10 @@ BEGIN
        AND d.boost_seconds < (SELECT q.visitor_front_seconds FROM queue_settings q WHERE q.id = 1);
     GET DIAGNOSTICS v_boosted = ROW_COUNT;
   END IF;
-  RETURN jsonb_build_object('attached', TRUE, 'task_id', v_task, 'work_key', p_work_key, 'signal_added', v_added, 'boosted', v_boosted);
+  RETURN jsonb_build_object('attached', TRUE, 'task_id', v_task, 'work_key', p_work_key, 'signal_added', v_added, 'boosted', v_boosted, 'cooling', FALSE);
 END;
 $$;
-COMMENT ON FUNCTION work_card_attach IS '併卡：這張卡有尚開著的任務就寫一筆需求訊號（p_kind 為 NULL＝只查不寫）、p_boost 時對這次新增的訊號插隊一次（GREATEST visitor_front_seconds，冷卻中不插），回 {attached,task_id,work_key,signal_added,boosted}；沒有卡回 attached:false，呼叫端照舊新開。2026-11-12';
+COMMENT ON FUNCTION work_card_attach IS '併卡：這張卡有尚開著的任務就寫一筆需求訊號（p_kind 為 NULL＝只查不寫）、p_boost 時對這次新增的訊號插隊一次（GREATEST visitor_front_seconds，冷卻中不插），p_note 存進 work_card_notes（不算需求）；卡在查核冷卻中仍寫訊號但不插隊、回 cooling:true（＋last_checked_at）；回 {attached,task_id,work_key,signal_added,boosted,cooling}；沒有卡回 attached:false，呼叫端照舊新開。2026-11-12';
 
 -- ------------------------------------------------------------
 -- 5. 頁面訪問訊號
@@ -241,7 +272,7 @@ COMMENT ON FUNCTION work_card_view_signals_sync IS '頁面訪問訊號：每個�
 
 REVOKE ALL ON FUNCTION task_work_key_for_manual(TEXT, JSONB) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION work_card_resolve(TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION work_card_attach(TEXT, TEXT, TEXT, BOOLEAN, TEXT) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION work_card_attach(TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION work_card_view_signals_sync() FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION task_work_key_for_manual(TEXT, JSONB), work_card_resolve(TEXT, TEXT), work_card_attach(TEXT, TEXT, TEXT, BOOLEAN, TEXT),
+GRANT EXECUTE ON FUNCTION task_work_key_for_manual(TEXT, JSONB), work_card_resolve(TEXT, TEXT), work_card_attach(TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT, TEXT),
   work_card_view_signals_sync() TO service_role;

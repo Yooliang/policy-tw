@@ -181,3 +181,8 @@ export function decideRequest(input: RequestDecisionInput): RequestDecision {
   if (input.duplicateAuditTask) return { action: "already_queued", task_id: input.duplicateAuditTask.id, reason: "duplicate_url" };
   return { action: "create" };
 }
+
+/** 保險絲關閉（WORK_CARD_ATTACH=off）時的舊行為：撈全部自動缺口、找對應目標那一筆。尾巴比對補上 term_policy_missing:<人>:<屆> 的形狀 */
+export function matchLegacyAutoGap(gaps: Array<{ task_id: string }>, targetId: string): { task_id: string } | null {
+  return gaps.find((g) => g.task_id.endsWith(`:${targetId}`) || g.task_id.includes(`:${targetId}:`)) ?? null;
+}
