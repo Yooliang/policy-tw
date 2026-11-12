@@ -24,6 +24,7 @@ Deno.test("A1 contribution_queue_row：前一版只換掉插票那一段，其�
 `;
   assertEquals(prev.split(insert).length - 1, 1, "前一版的插票段變了：要以最新定義為底重做");
   const swapped = `    -- 一人一包：還在包裡、不是 0 號的條目沒有自己的票，票在載體（0 號）上
+    -- （有 bundle_id 而 bundle_index 為 NULL 的列已被 contributions_bundle_index_check 擋掉，這裡遇不到）
     IF NEW.bundle_id IS NOT NULL AND NEW.bundle_index > 0 AND NEW.bundle_released_at IS NULL THEN
       RETURN NEW;
     END IF;
@@ -48,13 +49,24 @@ CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), statu
   created_at timestamptz NOT NULL DEFAULT now(),
   bundle_id uuid, bundle_index smallint, bundle_released_at timestamptz);
 `;
-const TRIGGER = "CREATE TRIGGER trg_contribution_queue_row AFTER INSERT ON contributions FOR EACH ROW EXECUTE FUNCTION contribution_queue_row();";
+// 約束與索引直接取 migration 裡的原句，不在測試裡另寫一份
+const grab = (re: RegExp): string => {
+  const m = re.exec(MIG);
+  assert(m, `migration 找不到 ${re}`);
+  return m[0];
+};
+const CONSTRAINTS = [
+  grab(/CREATE UNIQUE INDEX IF NOT EXISTS idx_contributions_bundle_index [^\n]*;/),
+  grab(/ALTER TABLE contributions ADD CONSTRAINT contributions_bundle_index_check [^\n]*? NOT VALID;/),
+].join("\n");
+const TRIGGER ="CREATE TRIGGER trg_contribution_queue_row AFTER INSERT ON contributions FOR EACH ROW EXECUTE FUNCTION contribution_queue_row();";
 
 /** withNew=false：改前（前一版觸發器，沒有包欄位也不管它）；mutateFn 給還原驗證改壞 queue_row */
 async function env(withNew: boolean, mutateRow: (s: string) => string = (s) => s): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(SCHEMA);
   if (withNew) {
+    await db.exec(CONSTRAINTS);
     await db.exec(fnText(MIG, "verify_ticket_enqueue"));
     await db.exec(mutateRow(fnText(MIG, "contribution_queue_row")));
     await db.exec(fnText(MIG, "bundle_pick_carrier"));
@@ -143,6 +155,27 @@ Deno.test("B4 bundle_pick_carrier：票交給還在包裡、pending、序號最�
   assertEquals((await db.query<{ p: string | null }>(`SELECT bundle_pick_carrier('${BUNDLE}') AS p`)).rows[0]!.p, null);
   assertEquals((await db.query<{ p: string | null }>(`SELECT bundle_pick_carrier('99999999-9999-4999-8999-999999999999') AS p`)).rows[0]!.p, null);
   await db.close();
+});
+
+Deno.test("B5 同包序號不重複；有 bundle_id 必須有 >=0 的 bundle_index（NULL、負數都被擋，不會失敗開放）；沒包的列不受影響", async () => {
+  const db = await env(true);
+  await add(db, { bundle: true, index: 0 });
+  let err = "";
+  try { await add(db, { bundle: true, index: 0 }); } catch (e) { err = String(e); }
+  assert(/idx_contributions_bundle_index|unique/i.test(err), `重複序號要被擋：${err}`);
+  err = "";
+  try { await db.exec(`INSERT INTO contributions (bundle_id, bundle_index) VALUES ('${BUNDLE}', NULL)`); } catch (e) { err = String(e); }
+  assert(/contributions_bundle_index_check/.test(err), `index NULL 要被擋：${err}`);
+  err = "";
+  try { await db.exec(`INSERT INTO contributions (bundle_id, bundle_index) VALUES ('${BUNDLE}', -1)`); } catch (e) { err = String(e); }
+  assert(/contributions_bundle_index_check/.test(err), `負數要被擋：${err}`);
+  await add(db); await add(db); // 沒包的多列（bundle_id/index 皆 NULL）不衝突
+  assertEquals(await tickets(db), 3);
+  await db.close();
+});
+
+Deno.test("B6 bundle_pick_carrier 先取包的鎖，同包一次只有一個交易在移轉；MIG 文字守住", () => {
+  assert(/FUNCTION bundle_pick_carrier[\s\S]*?pg_advisory_xact_lock\(hashtext\(p_bundle_id::text\)\)[\s\S]*?SELECT c\.id INTO v_id/.test(MIG));
 });
 
 // ============================================================

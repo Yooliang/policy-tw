@@ -13,6 +13,12 @@ COMMENT ON COLUMN contributions.bundle_id IS '一人一包：同一包（policy_
 COMMENT ON COLUMN contributions.bundle_index IS '一人一包：條目在包裡的序號，0 起算；每包只有 0 號預設持有驗證票（載體）';
 COMMENT ON COLUMN contributions.bundle_released_at IS '一人一包：NULL＝還在包裡（跟著載體的票）；有值＝已釋放成個別條目，自己走驗證票';
 CREATE INDEX IF NOT EXISTS idx_contributions_bundle ON contributions (bundle_id) WHERE bundle_id IS NOT NULL;
+-- 同一包的序號不重複；有 bundle_id 就一定要有 >= 0 的 bundle_index（index 為 NULL 會讓 contribution_queue_row 的早退「失敗開放」，所以直接擋掉）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contributions_bundle_index ON contributions (bundle_id, bundle_index) WHERE bundle_id IS NOT NULL;
+ALTER TABLE contributions DROP CONSTRAINT IF EXISTS contributions_bundle_index_check;
+ALTER TABLE contributions ADD CONSTRAINT contributions_bundle_index_check CHECK (bundle_id IS NULL OR (bundle_index IS NOT NULL AND bundle_index >= 0)) NOT VALID;
+ALTER TABLE contributions VALIDATE CONSTRAINT contributions_bundle_index_check;
+-- bundle_id 刻意不設 FK 指向 policy_bundles：交件寫入的先後（先包後條目、或同交易）不該因外鍵卡住，包的存在由交件端保證；孤兒條目只是不屬於任何包的 pending，不影響計分
 
 -- ------------------------------------------------------------
 -- 2. policy_bundles：只記「這是一包」這件事；狀態都在逐條的 contributions
@@ -30,6 +36,7 @@ CREATE TABLE IF NOT EXISTS policy_bundles (
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE policy_bundles IS '一人一包：一次交件的一包政見（同人、同公報）。只記包這個事實；計分、狀態都在逐條 contributions。';
+CREATE INDEX IF NOT EXISTS idx_policy_bundles_task ON policy_bundles (task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_policy_bundles_politician ON policy_bundles (politician_id) WHERE politician_id IS NOT NULL;
 ALTER TABLE policy_bundles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role all" ON policy_bundles;
@@ -74,6 +81,7 @@ LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.status = 'pending' THEN
     -- 一人一包：還在包裡、不是 0 號的條目沒有自己的票，票在載體（0 號）上
+    -- （有 bundle_id 而 bundle_index 為 NULL 的列已被 contributions_bundle_index_check 擋掉，這裡遇不到）
     IF NEW.bundle_id IS NOT NULL AND NEW.bundle_index > 0 AND NEW.bundle_released_at IS NULL THEN
       RETURN NEW;
     END IF;
@@ -89,6 +97,8 @@ CREATE OR REPLACE FUNCTION bundle_pick_carrier(p_bundle_id UUID) RETURNS UUID
 LANGUAGE plpgsql AS $$
 DECLARE v_id UUID;
 BEGIN
+  -- 同一包的載體移轉一次只有一個交易在做，確保一包只有一張票
+  PERFORM pg_advisory_xact_lock(hashtext(p_bundle_id::text));
   SELECT c.id INTO v_id
     FROM contributions c
    WHERE c.bundle_id = p_bundle_id AND c.bundle_released_at IS NULL AND c.status = 'pending'
