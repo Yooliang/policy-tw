@@ -33,8 +33,10 @@
 --   4. 一次性重算現有 task_dispatches 任務列的 priority_seconds（觸發器跟著重算 queue_at），前後各量一次最小 queue_at（見檔尾）
 --   不升協議版號、不改 TS。
 --
--- 不是這支的事：已在佇列裡的驗證票（verify:…）。它們的基準在入列時已凍結（20261104120000），這支不重算；之後新入列的票才吃到選舉年。
---   （驗證票＝母任務位置 − 14 天，母任務在這支之後被派出時 dispatch_base_at 才含選舉年；要回頭重排驗證票是另一個裁決。）
+-- 已在佇列裡的驗證票（verify:…）：基準 dispatch_base_at 在入列時已凍結（20261104120000），不會自己吃到選舉年，所以尾段的一次性重算也把它們套上
+--   （2026-11-12 協調者要求：佇列裡約 1,010 張 2022 公報政見的驗證票佔住隊頭，只重算任務列等於沒解）：依該票交件的選舉（payload.election_id，沒有就看母任務列的
+--   target.election_id，再沒有當 2026）把 election_year_priority_seconds 從基準往前減（排序鍵＝基準 − 14 天 − 插隊 ＋ 步長 × 領走次數；基準的其他部分、−14 天、步長、插隊都保留，只加這項），
+--   priority_seconds 同步加上（記錄用），觸發器重算 queue_at。已被領走過（dispatch_count > 0）的票也套：隊頭那批大多是領走過又回隊的，只套未領走的票等於沒解。
 
 -- ------------------------------------------------------------
 -- 1. 選舉年優先秒數
@@ -52,9 +54,12 @@ COMMENT ON FUNCTION election_year_priority_seconds IS
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION verify_ticket_election_seconds(p_verify_task_id TEXT) RETURNS BIGINT
 LANGUAGE sql STABLE AS $$
-  SELECT election_year_priority_seconds((SELECT election_id_or_null(b.payload->>'election_id') FROM contributions b WHERE b.id = uuid_or_null(substr(p_verify_task_id, 8))))
+  SELECT election_year_priority_seconds((
+    SELECT COALESCE(election_id_or_null(b.payload->>'election_id'),
+                    (SELECT election_id_or_null(p.target->>'election_id') FROM task_dispatches p WHERE p.task_id = COALESCE(b.task_id, b.payload->>'task_id')))
+      FROM contributions b WHERE b.id = uuid_or_null(substr(p_verify_task_id, 8))))
 $$;
-COMMENT ON FUNCTION verify_ticket_election_seconds IS '一張驗證票（task_id＝verify:<貢獻 id>）那份交件的選舉年優先秒數：交件 payload.election_id 對到的選舉年；沒有選舉 id＝2026。只給 verify_ticket_base 的「沒有母任務位置可沿用」分支用。2026-11-12';
+COMMENT ON FUNCTION verify_ticket_election_seconds IS '一張驗證票（task_id＝verify:<貢獻 id>）那份交件的選舉年優先秒數：交件 payload.election_id，沒有就看母任務列的 target.election_id；都沒有＝2026。只給 verify_ticket_base 的「沒有母任務位置可沿用」分支用。2026-11-12';
 
 -- 以 20261104120000 的現行定義為底，只差兩處（標 >>> 選舉年優先）：新增型與沒有基準的退路，建立時間再減選舉年秒數
 CREATE OR REPLACE FUNCTION verify_ticket_base(p_verify_task_id TEXT) RETURNS TIMESTAMPTZ
@@ -242,7 +247,7 @@ UPDATE election_task_config SET enabled = false, updated_at = now(), note = COAL
 
 -- ------------------------------------------------------------
 -- 4. 一次性重算現有任務列的 priority_seconds（觸發器 task_dispatches_queue_key 跟著重算 queue_at）
---    驗證列（verify:）不動（見檔頭）；task_id 不是 verify: 開頭的全部是任務列，沒有選舉 id 的當 2026。
+--    先重算任務列（task_id 不是 verify: 開頭的全部是任務列）；驗證票見下，沒有選舉 id 的當 2026。
 --    前後各量一次「未插隊、未被擋、有最小 queue_at」的 2026 件與 2022 件（正式庫唯讀實測 2026-11-12，同一個公式）：
 --      2026 件（含沒有選舉 id 的）：最小 queue_at 2026-10-14 10:30 → 2019-09-01 10:30，中位數 2026-10-30 20:10 → 2019-09-17 20:10（15,583 件）
 --      2022 件：                    最小 queue_at 2026-10-11 03:50 → 2020-10-02 03:50，中位數 2026-11-27 10:20 → 2020-11-18 10:20（1,495 件）
@@ -250,9 +255,22 @@ UPDATE election_task_config SET enabled = false, updated_at = now(), note = COAL
 --    重算前 2022 件的最小 queue_at（10-11）比 2026 件（10-14）還早＝2022 排在 2026 前面；重算後 2022 的最小（2020-10-02）晚於 2026 的最小（2019-09-01），而且 2022 全體（中位數 2020-11-18）
 --    排在 2026 的中位數（2019-09-17）之後。這個結果也由下面的 NOTICE 在套用當下印出（前、後各一次）。
 -- ------------------------------------------------------------
+--
+--    驗證票（verify:，task_id 開頭）同一段一併重算：基準 dispatch_base_at 減選舉年秒數、priority_seconds 加同一項，觸發器照 verify_ticket_key 重算 queue_at。
+--    前後各量一次「未插隊的驗證票」按選舉年的最小／中位 queue_at（正式庫唯讀實測 2026-11-12）：
+--      2022：1,010 張，最小 2026-10-28 21:10 → 2020-10-19 21:10，中位數 2026-11-04 18:23 → 2020-10-26 18:23
+--      2024：  122 張，最小 2026-10-28 22:18 → 2020-04-02 22:18，中位數 2026-11-04 18:10 → 2020-04-09 18:10
+--      2026：   31 張（含無選舉 id），中位數 2026-11-04 12:14 → 2019-09-22 12:14
+--    （目前佇列共 1,194 張驗證票：未領走 279、領走過 915，全部套用；重算後 2022 票的中位數晚於 2026 票。）
 DO $$
 DECLARE r RECORD; v_n INTEGER;
 BEGIN
+  FOR r IN SELECT (verify_ticket_election_seconds(d.task_id) / 86400)::INTEGER AS days, count(*) AS n, min(d.queue_at) AS min_q,
+                  percentile_disc(0.5) WITHIN GROUP (ORDER BY d.queue_at) AS med_q
+             FROM task_dispatches d WHERE d.task_id LIKE 'verify:%' AND d.boost_seconds = 0 GROUP BY 1 ORDER BY 1 LOOP
+    RAISE NOTICE '重算前 驗證票 選舉年優先 % 天：% 張，最小 queue_at %，中位 %', r.days, r.n, r.min_q, r.med_q;
+  END LOOP;
+
   FOR r IN SELECT y.yr, count(*) AS n, min(d.queue_at) AS min_q
              FROM task_dispatches d
              CROSS JOIN LATERAL (SELECT COALESCE((SELECT EXTRACT(YEAR FROM e.election_date)::INTEGER FROM elections e WHERE e.id = election_id_or_null(d.target->>'election_id')), 2026) AS yr) y
@@ -273,6 +291,21 @@ BEGIN
             WHERE d.task_id NOT LIKE 'verify:%' AND d.boost_seconds = 0 AND NOT d.blocked
             GROUP BY y.yr ORDER BY y.yr LOOP
     RAISE NOTICE '重算後 選舉年 %：% 件，最小 queue_at %', r.yr, r.n, r.min_q;
+  END LOOP;
+
+  -- 現有驗證票：基準往前減選舉年秒數（沒有基準的舊列先用現在的 queue_at 反推，同觸發器的退路），priority_seconds 同步加
+  UPDATE task_dispatches v
+     SET dispatch_base_at = COALESCE(v.dispatch_base_at, verify_ticket_freeze_base(v.queue_at, v.dispatch_count, v.boost_seconds, verify_ticket_step_seconds(v.task_id)))
+                            - make_interval(secs => verify_ticket_election_seconds(v.task_id)),
+         priority_seconds = v.priority_seconds + verify_ticket_election_seconds(v.task_id)
+   WHERE v.task_id LIKE 'verify:%';
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RAISE NOTICE '重算 % 張驗證票的基準', v_n;
+
+  FOR r IN SELECT (verify_ticket_election_seconds(d.task_id) / 86400)::INTEGER AS days, count(*) AS n, min(d.queue_at) AS min_q,
+                  percentile_disc(0.5) WITHIN GROUP (ORDER BY d.queue_at) AS med_q
+             FROM task_dispatches d WHERE d.task_id LIKE 'verify:%' AND d.boost_seconds = 0 GROUP BY 1 ORDER BY 1 LOOP
+    RAISE NOTICE '重算後 驗證票 選舉年優先 % 天：% 張，最小 queue_at %，中位 %', r.days, r.n, r.min_q, r.med_q;
   END LOOP;
 
   -- 自我檢查：任務列的 queue_at 仍是排序鍵（觸發器已重算）

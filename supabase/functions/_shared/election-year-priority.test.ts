@@ -249,15 +249,13 @@ Deno.test("B6 cool_until 行為不變：冷卻結束時間仍是下限（選舉�
   await db.close();
 });
 
-Deno.test("B7 一次性重算區塊：priority_seconds 加選舉年、queue_at 由觸發器跟著重算、驗證列不動、結束時自我檢查通過", async () => {
+Deno.test("B7 一次性重算區塊：priority_seconds 加選舉年、queue_at 由觸發器跟著重算、結束時自我檢查通過", async () => {
   const db = await env();
   // 舊狀態：priority_seconds 還沒有選舉年（raw）
   const a22 = await task(db, { entered: "2026-10-05", election: 2022, raw: true });
   const a26 = await task(db, { entered: "2026-10-05", election: 2026, raw: true });
   const aNone = await task(db, { entered: "2026-10-05", election: null, raw: true, prio: 3 * DAY });
   const bst = await task(db, { entered: "2026-10-05", election: 2022, raw: true, boost: BOOST });
-  await db.exec(`INSERT INTO task_dispatches (task_id, dispatch_count, priority_seconds) VALUES ('verify:keepme', 0, 123)`);
-  const verifyBefore = await at(db, "verify:keepme");
   assert(await at(db, a22) === await at(db, a26), "重算前 2022 與 2026 同位置");
   const m = /DO \$\$\nDECLARE r RECORD; v_n INTEGER;[\s\S]*?\n\$\$;/.exec(MIG);
   assert(m, "找得到一次性重算的 DO 區塊");
@@ -266,9 +264,40 @@ Deno.test("B7 一次性重算區塊：priority_seconds 加選舉年、queue_at �
   assertEquals(await prio(a22), 2200 * DAY);
   assertEquals(await prio(a26), 2600 * DAY);
   assertEquals(await prio(aNone), 2600 * DAY + 3 * DAY, "沒有選舉 id＝2026，原本的 +3 天保留");
-  assertEquals(await at(db, "verify:keepme"), verifyBefore);
   assertEquals(days(await at(db, a22), await at(db, a26)), 400, "2022 排到 2026 後面 400 天");
   assertEquals(await at(db, bst), iso("2026-10-05", -2200 - BOOST / DAY), "插隊秒數照舊");
+  await db.close();
+});
+
+Deno.test("B8 既有 verify 票（沒有選舉年的舊基準）重算後：2022 排在 2026 後面，−14 天、領走次數、插隊照舊保留；領走過的票也套", async () => {
+  // 舊狀態：選舉年函式還回 0，票的基準沒有選舉年
+  const db = await env({ noElection: true });
+  const sub = async (payload: Record<string, unknown>, extra = ""): Promise<string> => {
+    const id = `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+    await db.exec(`INSERT INTO contributions (id, contribution_type, payload, created_at) VALUES ('${id}', 'policy', '${q(JSON.stringify(payload))}', '2026-10-20T00:00:00Z')`);
+    if (extra) await db.exec(extra.replaceAll("$ID", `verify:${id}`));
+    return `verify:${id}`;
+  };
+  const v22 = await sub({ election_id: 2022 });
+  const v26 = await sub({ election_id: 2026 });
+  const vNone = await sub({});
+  const v22taken = await sub({ election_id: 2022 }, `SELECT task_dispatched('$ID')`); // 領走過一次（＋7 天）
+  const v22boost = await sub({ election_id: 2022 }, `UPDATE task_dispatches SET boost_seconds = ${BOOST} WHERE task_id = '$ID'`);
+  const before = { v22: await at(db, v22), v26: await at(db, v26), taken: await at(db, v22taken), boost: await at(db, v22boost) };
+  assertEquals(before.v22, before.v26, "重算前 2022 與 2026 的票同位置（隊頭被 2022 佔住的原因）");
+  // 套上真的選舉年函式，跑一次性重算區塊
+  await db.exec(fnText(MIG, "election_year_priority_seconds"));
+  const m = /DO \$\$\nDECLARE r RECORD; v_n INTEGER;[\s\S]*?\n\$\$;/.exec(MIG);
+  assert(m);
+  await db.exec(m[0]);
+  const after = { v22: await at(db, v22), v26: await at(db, v26), none: await at(db, vNone), taken: await at(db, v22taken), boost: await at(db, v22boost) };
+  assertEquals(days(after.v22, after.v26), 400, "重算後 2022 的票排在 2026 的票後面 400 天");
+  assertEquals(after.none, after.v26, "沒有選舉 id＝2026");
+  assertEquals(days(after.v26, before.v26), -2600, "2026 的票整體前移 2600 天（−14 天基準保留）");
+  assertEquals(days(after.taken, before.taken), -2200, "領走過的票也套，領走次數的 ＋7 天保留");
+  assertEquals(days(after.boost, before.boost), -2200, "插隊的票保留插隊秒數，只加選舉年");
+  assertEquals(await at(db, v22, "dispatch_base_at"), iso("2026-10-20", -2200), "基準 = 交件建立時間 − 選舉年");
+  assert(after.v22 > after.v26 && after.taken > after.v26);
   await db.close();
 });
 
