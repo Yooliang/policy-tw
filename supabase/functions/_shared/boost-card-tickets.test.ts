@@ -18,12 +18,14 @@ const PREV = await latestFn("task_boost", MIG_NAME);
 const code = (s: string) => s.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
 const norm = (s: string) => code(s).split("\n").map((l) => l.trim()).filter((l) => l !== "").join("\n");
 
-const BLOCK_RE = /  -- >>> 同卡驗證票[\s\S]*?-- <<< 同卡驗證票\n/;
+const BLOCK_RE = /  -- >>> 同卡驗證票[\s\S]*?-- <<< 同卡驗證票\n/g;
 
 Deno.test("A1 task_boost：拿掉帶票區塊與三處回傳調整後，等於前一版（去註解）", () => {
   assert(BLOCK_RE.test(NEW), "新定義要有 >>> 同卡驗證票 區塊");
   let back = NEW.replace(BLOCK_RE, "");
-  back = back.replace(" v_cards INTEGER := 0;", "");
+  back = back.replace(" v_cards INTEGER := 0; v_card_ids TEXT[] := '{}';", "");
+  back = back.replace(" AND h.kind <> 'card_verify';", ";");
+  back = back.replace(", card_ticket_ids = v_card_ids", "");
   back = back.replace(" AND h.kind <> 'card_verify'", "");
   back = back.replace(", 'card_tickets', v_cards", "");
   assertEquals(norm(back), norm(PREV));
@@ -36,7 +38,7 @@ Deno.test("A2 task_boost 最新定義：沒有 seed、不碰 priority_seconds", 
 });
 
 const SCHEMA = `
-CREATE TABLE task_boosts (id BIGSERIAL PRIMARY KEY, label TEXT, filter JSONB, agent_name TEXT, ip_hash TEXT, matched_tasks INTEGER, matched_verifies INTEGER);
+CREATE TABLE task_boosts (id BIGSERIAL PRIMARY KEY, label TEXT, filter JSONB, agent_name TEXT, ip_hash TEXT, matched_tasks INTEGER, matched_verifies INTEGER, card_ticket_ids TEXT[]);
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, last_dispatched_at timestamptz);
 CREATE TABLE queue_settings (id INT PRIMARY KEY, boost_seconds BIGINT);
 INSERT INTO queue_settings VALUES (1, 1000);
@@ -53,17 +55,18 @@ INSERT INTO task_dispatches (task_id, work_key) VALUES
   ('auto:b', 'politician:p2:policies:2026'), ('verify:v3', 'politician:p2:policies:2026'), ('verify:v4', NULL);
 `;
 type R = { id: number; matched_tasks: number; matched_verifies: number; card_tickets: number; queue_at: string };
-async function run(def: string, filter: Record<string, unknown>) {
+async function run(def: string, filter: Record<string, unknown>, times = 1) {
   const db = new PGlite();
   try {
     await db.exec(SCHEMA);
     await db.exec(def);
     const before = (await db.query<{ task_id: string; q: number }>(`SELECT task_id, extract(epoch FROM queue_at)::float8 AS q FROM task_dispatches`)).rows;
-    const r = (await db.query<{ r: R }>(`SELECT task_boost('t', $1::jsonb, 'x', 'ip') AS r`, [JSON.stringify(filter)])).rows[0]!.r;
+    let r!: R;
+    for (let i = 0; i < times; i++) r = (await db.query<{ r: R }>(`SELECT task_boost('t', $1::jsonb, 'x', 'ip') AS r`, [JSON.stringify(filter)])).rows[0]!.r;
     const rows = (await db.query<{ task_id: string; boost_seconds: string; q: number }>(`SELECT task_id, boost_seconds::text, extract(epoch FROM queue_at)::float8 AS q FROM task_dispatches ORDER BY 1`)).rows;
     const shift = Object.fromEntries(rows.map((x) => [x.task_id, before.find((b) => b.task_id === x.task_id)!.q - x.q]));
     const boosts = Object.fromEntries(rows.map((x) => [x.task_id, x.boost_seconds]));
-    const rec = (await db.query<{ matched_verifies: number }>(`SELECT matched_verifies FROM task_boosts`)).rows[0]!;
+    const rec = (await db.query<{ matched_verifies: number; card_ticket_ids: string[] }>(`SELECT matched_verifies, card_ticket_ids FROM task_boosts ORDER BY id DESC LIMIT 1`)).rows[0]!;
     return { r, shift, boosts, rec };
   } finally {
     await db.close();
@@ -81,6 +84,27 @@ Deno.test("B 插隊任務：同卡驗證票一起前移且差值＝boost；不�
   assertEquals(new Date(r.queue_at).getTime(), Date.parse("2026-01-01T00:00:00Z") - 1000 * 1000, "queue_at 是 filter 命中列的鍵（任務），票不影響");
 });
 
+Deno.test("B2 同一任務連插兩次：票吃同一份（boost 等於任務列的，不是兩倍）；帶動的 task_id 記在 task_boosts", async () => {
+  const { boosts, shift, rec } = await run(NEW, { task_ids: ["auto:a"] }, 2);
+  assertEquals([boosts["auto:a"], boosts["verify:v1"], boosts["verify:v2"]], ["2000", "2000", "2000"]);
+  assertEquals([shift["verify:v1"], shift["verify:v2"]], [2000, 2000]);
+  assertEquals(rec.card_ticket_ids, ["verify:v1", "verify:v2"]);
+});
+
+Deno.test("B3 票現值比任務高時不被拉低", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(SCHEMA);
+    await db.exec(NEW);
+    await db.exec(`UPDATE task_dispatches SET boost_seconds = 5000 WHERE task_id = 'verify:v1'`);
+    await db.query(`SELECT task_boost('t', '{"task_ids":["auto:a"]}'::jsonb)`);
+    const b = Object.fromEntries((await db.query<{ task_id: string; b: string }>(`SELECT task_id, boost_seconds::text AS b FROM task_dispatches`)).rows.map((x) => [x.task_id, x.b]));
+    assertEquals([b["verify:v1"], b["verify:v2"]], ["5000", "1000"]);
+  } finally {
+    await db.close();
+  }
+});
+
 Deno.test("C1 card_tickets=false 只插任務", async () => {
   const { r, shift } = await run(NEW, { task_ids: ["auto:a"], card_tickets: false });
   assertEquals(r.card_tickets, 0);
@@ -92,6 +116,7 @@ Deno.test("C2 已被 filter 命中的票不重複加（一份）；matched_verif
   assertEquals([r.matched_tasks, r.matched_verifies, r.card_tickets], [1, 1, 1]);
   assertEquals([shift["verify:v1"], shift["verify:v2"]], [1000, 1000]);
   assertEquals(rec.matched_verifies, 1);
+  assertEquals(rec.card_ticket_ids, ["verify:v2"]);
 });
 
 Deno.test("D 還原驗證：拿掉帶票區塊 B 翻面；拿掉去重 C2 的張數翻面", async () => {
