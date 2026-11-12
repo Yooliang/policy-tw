@@ -22,7 +22,7 @@ import { VERIFY_BINDING_DAYS } from "./dispatch.ts";
 import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
 import { disputeNoUnsureMessage, disputeVotesNow } from "./dispute-verify.ts";
 import { candNoItems } from "./cand-numbers.ts";
-import { BUNDLE_VOTE_REQUIRED_MESSAGE, handleBundleVerify } from "./bundle-verify.ts";
+import { adjustedVerifyUsed, BUNDLE_VOTE_REQUIRED_MESSAGE, handleBundleVerify } from "./bundle-verify.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -123,7 +123,9 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     .from("contribution_votes").select("id", { count: "exact", head: true })
     .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
   if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
-  if ((used ?? 0) >= vq.limit) {
+  // 一人一包：包票一包算一次額度（一包 N 條票不是 N 次）；只在到上限時重算
+  const usedNow = (used ?? 0) >= vq.limit ? await adjustedVerifyUsed(supabase, vq, windowStart.toISOString(), used ?? 0) : (used ?? 0);
+  if (usedNow >= vq.limit) {
     return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每個時段最多驗 ${vq.limit} 筆`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() } };
   }
 

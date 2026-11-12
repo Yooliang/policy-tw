@@ -17,6 +17,7 @@ import { autoApplyContribution } from "./auto-apply.ts";
 import { BUNDLE_NOTE_MIN, bundleInputProblem, handleBundleVerify, loadBundleItem, mentionsPage } from "./bundle-verify.ts";
 import { handleVerify } from "./verify-handler.ts";
 import { PROTOCOL_VERSION } from "./protocol.ts";
+import { resetQuotaCache } from "./quota-settings.ts";
 import type { VerifyInput } from "./contribution-schema.ts";
 
 const FAN_NAME = "20261112065000_bundle_vote_fanout.sql";
@@ -466,4 +467,64 @@ Deno.test("E2 協議 1.131.0：版號、skill.md 與 skill-types.md 都講到整
   assert(skill.includes(`**版本**：${PROTOCOL_VERSION}`));
   for (const k of ["item.bundle", "bundle_id", "bundle:true", "bundle_vote_required", "except", "reasons"]) assert(skill.includes(k) || types.includes(k), k);
   for (const k of ["bundle_note_too_short", "bundle_except_need_reason", "bundle_rate_limited", "auto_excepted"]) assert(types.includes(k) || skill.includes(k), k);
+});
+
+// ============================================================
+// F. 驗證額度一包算一次（審查 #945 ①）
+// ============================================================
+Deno.test("F1 每時段驗證額度：一包 N 條只算一次；一般票仍各算一次，到上限照 429", async () => {
+  resetQuotaCache();
+  const db = await env();
+  await db.exec(`CREATE TABLE quota_settings (site text, per_ip_submit int, per_ip_verify int, per_ditrust_submit int, per_ditrust_verify int);
+    INSERT INTO quota_settings VALUES ('tw', 100, 10, 100, 100);`);
+  const NET = "ip-shared-net";
+  const vote = async (cid: string, agent: string, bundleId: string | null) => {
+    await dispatched(db, cid, agent, NET);
+    return await handleVerify(pgClient(db), { contribution_id: cid, verdict: "agree", agent_name: agent, note: NOTE + agent, ...(bundleId ? { bundle_id: bundleId } : {}) }, NET, applyFn as never);
+  };
+  // 5 包 × 3 條 ＝ 15 張條票，但只算 5 次額度（上限 10）
+  for (let i = 0; i < 5; i++) {
+    const bid = `aaaaaaaa-0000-4000-8000-00000000000${i}`;
+    const [c0] = await bundle3(db, bid);
+    const r = await vote(c0!, `bundler${i}`, bid);
+    assertEquals(r.status, 201, `第 ${i} 包：${JSON.stringify(r.body)}`);
+  }
+  assertEquals(Number((await db.query<{ c: string }>(`SELECT count(*) AS c FROM contribution_votes WHERE via='bundle'`)).rows[0]!.c), 15);
+  // 再 5 張一般票湊滿 10 次
+  for (let i = 0; i < 5; i++) {
+    const plain = uid();
+    await db.query(`INSERT INTO contributions (id, payload, source_urls) VALUES ($1, '{"title":"一般"}'::jsonb, ARRAY['https://example.test/a'])`, [plain]);
+    const r = await vote(plain, `plainer${i}`, null);
+    assertEquals(r.status, 201, `一般票 ${i}：${JSON.stringify(r.body)}`);
+  }
+  const last = uid();
+  await db.query(`INSERT INTO contributions (id, payload, source_urls) VALUES ($1, '{"title":"一般"}'::jsonb, ARRAY['https://example.test/a'])`, [last]);
+  const over = await vote(last, "plainer-over", null);
+  assertEquals([over.status, over.body.error], [429, "rate_limited"]);
+  resetQuotaCache();
+  await db.close();
+});
+
+// ============================================================
+// G. 盲反對（審查 #945 ②）
+// ============================================================
+Deno.test("G1 整包 disagree 的理由是打不開／確認不了、且 evidence_url 就是公報本身：改記 unsure，不對每條記 −1", async () => {
+  resetQuotaCache();
+  const db = await env();
+  const [c0, c1, c2] = await bundle3(db);
+  const blindNote = NOTE + "但是公報網址目前打不開，讀不到內容。";
+  const r = await report(db, c0!, "alice", { verdict: "disagree", evidence_url: BULLETIN, note: blindNote });
+  assertEquals(r.status, 201, JSON.stringify(r.body));
+  assertEquals([r.body.verdict, r.body.downgraded_from, r.body.voted], ["unsure", "disagree", 3]);
+  for (const id of [c0!, c1!, c2!]) assertEquals((await st(db, id)).score, 0, "unsure 不記反對分");
+  const verdicts = (await db.query<{ verdict: string }>(`SELECT DISTINCT verdict FROM contribution_votes`)).rows.map((x) => x.verdict);
+  assertEquals(verdicts, ["unsure"]);
+  assertEquals((await db.query<{ verdict: string }>(`SELECT verdict FROM bundle_votes`)).rows[0]!.verdict, "unsure");
+  // 有實質矛盾的反對照記：同樣提到打不開，但寫出與公報不符
+  const B2 = "22222222-2222-4222-8222-222222222222";
+  const [d0] = await bundle3(db, B2);
+  const real = await report(db, d0!, "alice", { verdict: "disagree", evidence_url: "https://example.test/other-source", note: NOTE + "公報網址偶爾打不開，但另一來源寫的是不同的內容，與這包不符。" }, B2);
+  assertEquals(real.status, 201, JSON.stringify(real.body));
+  assertEquals(real.body.verdict, "disagree");
+  await db.close();
 });

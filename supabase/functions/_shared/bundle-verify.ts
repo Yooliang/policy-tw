@@ -10,7 +10,7 @@
  */
 import type { HandlerResult } from "./contribute-handler.ts";
 import { type ApplyFn, autoApplyContribution, shouldAutoApply } from "./auto-apply.ts";
-import { isRepeatedNote, voterKey } from "./consensus.ts";
+import { BLIND_DISAGREE_NOTE, isBlindDisagree, isRepeatedNote, voterKey } from "./consensus.ts";
 import { checkIdentityPick } from "./identity-pick-gate.ts";
 import { sharedBulletinUrl } from "./policy-bundle.ts";
 import type { VerifyInput } from "./contribution-schema.ts";
@@ -164,7 +164,12 @@ export async function handleBundleVerify(ctx: BundleVerifyCtx): Promise<HandlerR
   const problem = bundleInputProblem(input, rows.map((r) => r.bundle_index), prevNote);
   if (problem) return problem;
 
-  if (input.verdict === "disagree" && await disagreeRateLimited(supabase, key, carrier)) {
+  // 盲反對（比照一般票）：disagree 的理由是「打不開／確認不了」、沒有反證，改記 unsure，不對整包每一條各記 −1
+  const carrierRow = rows.find((r) => r.id === carrier.id)!;
+  const blind = input.verdict === "disagree" && isBlindDisagree(input.note, { evidenceUrl: input.evidence_url, sourceUrls: carrierRow.source_urls ?? [] });
+  const verdict = blind ? "unsure" : input.verdict;
+  const recordNote = blind ? `${BLIND_DISAGREE_NOTE}${input.note ?? ""}` : (input.note ?? null);
+  if (verdict === "disagree" && await disagreeRateLimited(supabase, key, carrier)) {
     return bad(429, "bundle_rate_limited", `同一個提交者的整包，你 ${BUNDLE_DISAGREE_WINDOW_HOURS} 小時內已經整包反對過一次了；這次送的票沒有計入。請改用 except 只點名有問題的條目（投 agree），或稍後再試。`);
   }
 
@@ -186,7 +191,7 @@ export async function handleBundleVerify(ctx: BundleVerifyCtx): Promise<HandlerR
 
   const { data: res, error } = await supabase.rpc("bundle_vote_fanout", {
     p_carrier: carrier.id, p_bundle: carrier.bundle_id, p_agent: input.agent_name, p_actor: actor.actor_id, p_ip: ipHash,
-    p_verdict: input.verdict, p_except: except, p_reasons: reasons, p_note: input.note ?? null,
+    p_verdict: verdict, p_except: except, p_reasons: reasons, p_note: recordNote,
     p_evidence: input.evidence_url ?? null, p_tool: input.agent_tool ?? null, p_via: via,
   });
   if (error) throw new Error(`bundle_vote_fanout: ${error.message}`);
@@ -209,7 +214,8 @@ export async function handleBundleVerify(ctx: BundleVerifyCtx): Promise<HandlerR
       success: true,
       bundle_id: carrier.bundle_id,
       contribution_id: carrier.id,
-      verdict: input.verdict,
+      verdict,
+      ...(blind ? { downgraded_from: "disagree", downgrade_reason: "備註是「無法開啟／確認不了」：那是 unsure，不是反對。整包反對要寫出哪裡與公報矛盾或附反證網址；已改記 unsure（不對每一條各記反對）" } : {}),
       voted: out.voted ?? 0,
       skipped: out.skipped ?? 0,
       released: out.released ?? 0,
@@ -221,4 +227,26 @@ export async function handleBundleVerify(ctx: BundleVerifyCtx): Promise<HandlerR
       ...(mentionsPage(note) ? {} : { notice: "備註沒有提到頁碼：整包票請寫出你核對的公報頁碼，之後才分得出這張票是查過還是沒查過。" }),
     },
   };
+}
+
+/**
+ * 驗證額度（每時段）對包票「一包算一次」：contribution_votes 的計數把 via='bundle' 的票（一包 N 條）扣掉，改加「這個時段扇出了幾包」。
+ * 一次扇出在同一個交易、created_at 相同，所以以 created_at 去重當包數（最多讀 1000 列，遠大於任何額度）。
+ * 只在 used 已經到上限、本來要回 429 時才呼叫（平常路徑不多一次查詢）。回調整後的已用數。
+ */
+export async function adjustedVerifyUsed(
+  supabase: SupabaseLike,
+  quota: { column: string; value: string },
+  windowStartIso: string,
+  used: number,
+): Promise<number> {
+  const { count: bundleVotes, error: cErr } = await supabase.from("contribution_votes").select("id", { count: "exact", head: true })
+    .eq(quota.column, quota.value).eq("via", "bundle").gte("created_at", windowStartIso);
+  if (cErr) throw new Error(`bundle quota count: ${cErr.message}`);
+  if (!bundleVotes) return used;
+  const { data, error } = await supabase.from("contribution_votes").select("created_at")
+    .eq(quota.column, quota.value).eq("via", "bundle").gte("created_at", windowStartIso).limit(1000);
+  if (error) throw new Error(`bundle quota rows: ${error.message}`);
+  const bundles = new Set(((data ?? []) as Array<{ created_at: string }>).map((r) => new Date(r.created_at).getTime())).size;
+  return used - bundleVotes + bundles;
 }
