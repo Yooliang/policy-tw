@@ -1,5 +1,5 @@
 /**
- * 一人一包 PR3：交件端 bundle:true（migration 20261112030000；docs/PLAN-bundle-policies.md 第 2 節）。
+ * 一人一包 PR3：交件端 bundle:true（migration 20261112110000；docs/PLAN-bundle-policies.md 第 2 節）。
  *
  *   A. 純函式 policy-bundle.ts：各種 400 條件
  *   B. handleContribute 端到端（假 supabase）：合格包落庫、各 400、旗標關忽略、配額、併掉剩太少
@@ -246,7 +246,7 @@ Deno.test("B7 配額每條算一筆：已用 71＋這包 10 條＝81 > 80 → 42
 });
 
 // ---------------- C. 在途計數 ----------------
-const MIG_NAME = "20261112030000_bundle_enabled_flag.sql";
+const MIG_NAME = "20261112110000_bundle_enabled_flag.sql";
 const MIG = (await Deno.readTextFile(new URL(`../../migrations/${MIG_NAME}`, import.meta.url))).replace(/\r\n/g, "\n");
 const PREV = (await Deno.readTextFile(new URL("../../migrations/20261111100000_work_key.sql", import.meta.url))).replace(/\r\n/g, "\n");
 

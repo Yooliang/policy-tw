@@ -81,7 +81,7 @@ LANGUAGE sql STABLE AS $$
     -- <<< 合格：查無回報在等票
     -- >>> 合格：在途未額滿
     -- 這個任務底下在等票（pending／verified／disputed）的貢獻到 5 筆（TASK_INFLIGHT_CAP）就先不再派（filterSaturatedTasks）；
-    -- 一人一包（20261112030000）：同一包只算一筆（DISTINCT coalesce(bundle_id, id)），一包 30 條不會讓任務瞬間額滿
+    -- 一人一包（20261112110000）：同一包只算一筆（DISTINCT coalesce(bundle_id, id)），一包 30 條不會讓任務瞬間額滿
     AND (SELECT count(DISTINCT coalesce(f.bundle_id, f.id)) FROM contributions f
       WHERE f.task_id = d.task_id AND f.status IN ('pending', 'verified', 'disputed')) < 5
     -- <<< 合格：在途未額滿
