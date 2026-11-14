@@ -2,13 +2,13 @@
  * 插隊改天級（migration 20261114020000_boost_days_level.sql，維護者 2026-11-14 拍板；網站請求依目標選舉階段分選前／選後，小良哥 #683）。
  *
  *   boost_seconds（/boost）5 年→30 天、manual_front_seconds（維護者建的）5 年→30 天；
- *   網站請求／公民提問：目標選舉投票日 ≥ 今天＝選前 100 天（visitor_front_pre_election_seconds），其餘（選後、沒有選舉）＝50 天（visitor_front_seconds）；
+ *   網站請求／公民提問：目標選舉投票日 ≥ 今天＝選前 100 天（visitor_front_pre_election_seconds），投票日已過、真的對不上選舉＝50 天（visitor_front_seconds）；沒有 election_id 的件沿用選舉年優先的歸屬（當 2026 年）；
  *   既有佇列上的 boost_seconds 縮放（號次拉前的 20／25／30 年不縮；網站請求來源的 10 年依目標選舉階段）；
  *   號次拉前不再讀 visitor_front_seconds，改寫死原值。
  *
  *   A. 文字層：新值、四個讀 visitor_front_seconds 的函式只差登記的替換、號次函式只差一處、縮放規則
  *   B. PGlite：整支 migration 套用（設定、縮放、冪等）、visitor_front_seconds_for、號次值不動
- *   C. 排序：選前請求提前 100 天、選後 50 天、無選舉 50 天、/boost 30 天；跨屆次序
+ *   C. 排序：選前請求提前 100 天、選後 50 天、真的對不上選舉 50 天、無 election_id 歸 2026 的 100 天、/boost 30 天；跨屆次序
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
@@ -130,11 +130,11 @@ Deno.test("B1 套用：設定變 30／30 天、選後 50 天、選前 100 天；
   await db.close();
 });
 
-Deno.test("B2 10 年的列：網站請求來源依目標選舉階段（選前 100／選後與無選舉 50），分不出來源的按 /boost 比例縮成 60 天", async () => {
+Deno.test("B2 10 年的列：網站請求來源依目標選舉階段（選前 100／選後 50；無 election_id 歸 2026＝選前 100），分不出來源的按 /boost 比例縮成 60 天", async () => {
   const db = await applied();
   assertEquals(await boostOf(db, U(1)), 100 * DAY, "網站請求、目標 2026（投票日 11-28 ≥ 今天）→ 選前");
   assertEquals(await boostOf(db, U(2)), 50 * DAY, "網站請求、目標 2022（已投票）→ 選後");
-  assertEquals(await boostOf(db, U(3)), 50 * DAY, "公民提問、沒有選舉 → 50 天");
+  assertEquals(await boostOf(db, U(3)), 100 * DAY, "公民提問、沒有 election_id → 沿用選舉年優先的歸屬（2026，投票日 11-28 ≥ 今天）→ 選前 100 天");
   assertEquals(await boostOf(db, "auto:gap"), 100 * DAY, "缺口列標了 web_request_boost_ids、目標 2026 → 選前");
   assertEquals(await boostOf(db, "auto:b"), 60 * DAY, "分不出來源的 10 年（可能兩次 /boost）→ 60 天");
   await db.close();
@@ -154,7 +154,7 @@ Deno.test("B3 冪等：重跑不再縮；新建欄位預設值是新值", async 
   await db.close();
 });
 
-Deno.test("B4 visitor_front_seconds_for：選前 100 天；投票日當天算選前；投票日已過、沒有選舉、查無這場選舉都是 50 天；兩個值都能 UPDATE", async () => {
+Deno.test("B4 visitor_front_seconds_for：選前 100 天；投票日當天算選前；投票日已過 50 天；沒有 election_id／查無這場選舉沿用選舉年優先的歸屬（2026）；兩個值都能 UPDATE", async () => {
   const db = await applied();
   const f = async (t: string) => Number((await db.query<{ s: string }>(`SELECT visitor_front_seconds_for('${t}'::jsonb) AS s`)).rows[0]!.s) / DAY;
   assertEquals(await f('{"election_id":2026}'), 100);
@@ -162,11 +162,14 @@ Deno.test("B4 visitor_front_seconds_for：選前 100 天；投票日當天算選
   assertEquals(await f('{"election_id":2027}'), 100, "投票日＝今天（11-14）算選前");
   assertEquals(await f('{"election_id":2028}'), 50, "投票日昨天（11-13）算選後");
   assertEquals(await f('{"election_id":2022}'), 50);
-  assertEquals(await f("{}"), 50);
-  assertEquals(await f('{"election_id":999}'), 50, "查無這場選舉");
+  assertEquals(await f("{}"), 100, "沒有 election_id → 當 2026（同選舉年優先）→ 2026 年的投票日 11-28 ≥ 今天");
+  assertEquals(await f('{"election_id":999}'), 100, "查無這場選舉 → 同上，與選舉年優先把查無當 2026 一致");
   await db.exec(`UPDATE queue_settings SET visitor_front_pre_election_seconds = ${120 * DAY}, visitor_front_seconds = ${40 * DAY} WHERE id = 1`);
   assertEquals(await f('{"election_id":2026}'), 120);
-  assertEquals(await f("{}"), 40);
+  assertEquals(await f("{}"), 120);
+  await db.exec(`DELETE FROM elections WHERE EXTRACT(YEAR FROM election_date) = 2026`);
+  assertEquals(await f("{}"), 40, "真的找不到任何 2026 年的選舉才給選後值");
+  assertEquals(await f('{"election_id":2022}'), 40);
   await db.close();
 });
 
@@ -176,7 +179,7 @@ Deno.test("B5 manual_front_seconds：網站請求依目標選舉階段、維護�
   const m = async (n: number) => Number((await db.query<{ s: string }>(`SELECT manual_front_seconds('${U(n)}') AS s`)).rows[0]!.s) / DAY;
   assertEquals(await m(1), 100, "網站請求、目標 2026 → 選前");
   assertEquals(await m(2), 50, "網站請求、目標 2022 → 選後");
-  assertEquals(await m(3), 50, "公民提問、沒有選舉");
+  assertEquals(await m(3), 100, "公民提問、沒有 election_id → 當 2026 → 選前");
   assertEquals(await m(4), 30, "維護者建的手動任務");
   assertEquals(await m(5), 0, "投太多輪的裁決任務");
   await db.close();
@@ -218,12 +221,14 @@ const front = async (db: PGlite, target: string): Promise<number> =>
 const settingsBoost = async (db: PGlite, col: string): Promise<number> =>
   Number((await db.query<{ v: string }>(`SELECT ${col} AS v FROM queue_settings WHERE id = 1`)).rows[0]!.v);
 
-Deno.test("C1 網站請求件：選前排序鍵提前 100 天、選後 50 天、沒有選舉 50 天（不是 10 年）", async () => {
+Deno.test("C1 網站請求件：選前排序鍵提前 100 天、選後 50 天、無 election_id 歸 2026 也是 100 天（不是 10 年）；真的對不上選舉才 50 天", async () => {
   const db = await keyEnv();
   const plain = await keyAt(db, 2603, 0);
   assertEquals((plain - await keyAt(db, 2603, await front(db, '{"election_id":2026}'))) / DAY, 100);
   assertEquals((plain - await keyAt(db, 2603, await front(db, '{"election_id":2022}'))) / DAY, 50);
-  assertEquals((plain - await keyAt(db, 2603, await front(db, "{}"))) / DAY, 50);
+  assertEquals((plain - await keyAt(db, 2603, await front(db, "{}"))) / DAY, 100, "沒有 election_id 的網站請求歸 2026（選舉年優先同一套）→ 選前");
+  await db.exec(`DELETE FROM elections WHERE EXTRACT(YEAR FROM election_date) = 2026`);
+  assertEquals((plain - await keyAt(db, 2603, await front(db, "{}"))) / DAY, 50, "真的找不到 2026 年的選舉 → 選後值");
   await db.close();
 });
 
@@ -252,5 +257,20 @@ Deno.test("C4 跨屆次序：2022 有請求（50 天）的件，排在 2026 沒�
   const plain26 = await keyAt(db, 3 + 2600, 0);
   assert(plain26 < req22, "2026 沒請求的件比 2022 有請求的件先（選舉年差 400 天大於 50 天）");
   assert(req22 < plain22, "2022 有請求的件比 2022 沒請求的件先");
+  await db.close();
+});
+
+Deno.test("C5 與選舉年優先同一套歸屬：選舉年優先把「沒有 election_id／查無」當 2026，這裡取 2026 年那場的投票日（網站請求 → 100 天）", async () => {
+  const db = await base();
+  await db.exec(fnText(await readMig("20261112005000_election_year_priority.sql"), "election_year_priority_seconds"));
+  await db.exec(MIG);
+  const yr = async (t: string) => Number((await db.query<{ s: string }>(`SELECT election_year_priority_seconds(election_id_or_null('${t}'::jsonb->>'election_id')) AS s`)).rows[0]!.s) / (100 * DAY);
+  const f = async (t: string) => Number((await db.query<{ s: string }>(`SELECT visitor_front_seconds_for('${t}'::jsonb) AS s`)).rows[0]!.s) / DAY;
+  for (const t of ["{}", '{"election_id":999}']) {
+    assertEquals(await yr(t), 26, `${t}：選舉年優先當 2026`);
+    assertEquals(await f(t), 100, `${t}：插隊依 2026 年那場選舉（11-28 ≥ 今天）→ 100 天`);
+  }
+  assertEquals(await yr('{"election_id":2022}'), 22);
+  assertEquals(await f('{"election_id":2022}'), 50);
   await db.close();
 });

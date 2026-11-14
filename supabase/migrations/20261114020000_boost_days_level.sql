@@ -10,7 +10,7 @@
 --   網站請求、公民提問第一次進佇列、固定時段拉回、請求併入缺口、併卡插隊：依「目標對應那一屆選舉」的階段分兩個值，不再是單一的 10 年——
 --     visitor_front_pre_election_seconds  （新欄）預設 8640000（100 天）：選前，目標選舉的投票日 ≥ 今天（台北日期，投票日當天算選前）
 --     visitor_front_seconds               （舊欄 315360000＝10 年，改成選後／預設值）預設 4320000（50 天）：選後（投票日 < 今天），
---                                          以及對不上任何選舉的目標（沒有 election_id、查無這場選舉、公民提問…）
+--                                          以及真的對不上任何選舉的目標（沒有 election_id 的件沿用選舉年優先的歸屬＝當 2026 年，所以通常算 2026 年那場）
 --   兩個值都能 UPDATE 調整。判斷集中在新函式 visitor_front_seconds_for(target)，四個讀 visitor_front_seconds 的地方
 --   （manual_front_seconds、manual_front_pull、web_request_gap_boost、work_card_attach）都改呼叫它；選舉用 target.election_id → elections.election_date。
 -- 回退：見 docs/decisions/2026-11-14-派工優先依選舉類別提前天數.md 的「插隊改天級」段（舊值、回退 SQL）。
@@ -24,7 +24,7 @@
 -- 既有佇列上的 boost_seconds 一次性縮放（冪等：queue_settings.boost_days_applied_at 有值就整段跳過）：
 --   · 一般比例：新值 ＝ 舊值 × 2592000 ÷ 157680000（5 年→30 天、10 年→60 天、15 年→90 天；分不出來源的，例如兩次 /boost 疊成的 10 年，一律用這個比例）
 --   · 例外一（網站請求來源）：值正好是 10 年（315360000）、而且是網站請求／公民提問的手動任務（manual_task_is_visitor），
---     或缺口列上有 opened_by.web_request_boost_ids（請求併入缺口時標的）→ 改成「依該件目標選舉階段」的值（選前 100 天、選後與對不上 50 天）
+--     或缺口列上有 opened_by.web_request_boost_ids（請求併入缺口時標的）→ 改成「依該件目標選舉階段」的值（選前 100 天、選後與真的對不上 50 天）
 --   · 例外二（號次拉前）：20／25／30 年（630720000、788400000、946080000）不縮（正式庫唯讀實測 2026-11-14：全是驗證票，20 年 17 張、25 年 4 張）
 --   縮放前後的分布由 NOTICE 在套用當下印出。觸發器 task_dispatches_queue_key 跟著重算 queue_at；cooling 由 refresh_dispatch_blocked 十分鐘內重算。
 --   正式庫唯讀實測 2026-11-14（縮放前，任務列：5 年 805 列、10 年 4 列、15 年 1 列；驗證票：20 年 17 張、25 年 4 張）：
@@ -35,22 +35,26 @@ ALTER TABLE queue_settings ALTER COLUMN manual_front_seconds  SET DEFAULT 259200
 ALTER TABLE queue_settings ALTER COLUMN visitor_front_seconds SET DEFAULT 4320000;
 ALTER TABLE queue_settings ADD COLUMN IF NOT EXISTS visitor_front_pre_election_seconds BIGINT NOT NULL DEFAULT 8640000 CHECK (visitor_front_pre_election_seconds >= 0);
 COMMENT ON COLUMN queue_settings.boost_seconds IS '/boost 插隊一次加幾秒（2026-11-14 起 30 天，原 5 年）；插兩次加兩份；任務列派出就歸零';
-COMMENT ON COLUMN queue_settings.visitor_front_seconds IS '網站請求／公民提問的插隊秒數，選後與對不上選舉的目標用這個值（2026-11-14 起 50 天，原 10 年）；選前用 visitor_front_pre_election_seconds。判斷在 visitor_front_seconds_for(target)';
+COMMENT ON COLUMN queue_settings.visitor_front_seconds IS '網站請求／公民提問的插隊秒數，選後與真的對不上選舉的目標用這個值（2026-11-14 起 50 天，原 10 年）；選前用 visitor_front_pre_election_seconds。判斷在 visitor_front_seconds_for(target)';
 COMMENT ON COLUMN queue_settings.visitor_front_pre_election_seconds IS '網站請求／公民提問的插隊秒數，目標選舉的投票日 ≥ 今天（選前）用這個值（100 天）。2026-11-14，小良哥 #683 裁示';
 COMMENT ON COLUMN queue_settings.manual_front_seconds IS '維護者建的手動任務與裁決第一次進佇列的插隊秒數（2026-11-14 起 30 天，原 5 年）';
 
 ALTER TABLE queue_settings ADD COLUMN IF NOT EXISTS boost_days_applied_at TIMESTAMPTZ;
 COMMENT ON COLUMN queue_settings.boost_days_applied_at IS '插隊改天級（20261114020000）的一次性縮放做完的時間；有值＝已套用，重跑 migration 不再縮。2026-11-14';
 
--- 網站請求的插隊秒數：看目標對應的那一屆選舉。target.election_id → elections.election_date；投票日 ≥ 今天（台北日期）＝選前，其餘（選後、沒有選舉、查無）＝選後值
+-- 網站請求的插隊秒數：看目標對應的那一屆選舉。target.election_id → elections.election_date；投票日 ≥ 今天（台北日期）＝選前，投票日已過＝選後。
+-- target 沒有 election_id（或查無這個 id）時，沿用「選舉年優先」（20261112005000 election_year_priority_seconds）同一套歸屬：它把這類件當 2026 年，
+-- 所以這裡取 2026 年那場選舉的投票日（elections 裡 2026 年投票日最晚的一場）再判斷；真的找不到任何 2026 年的選舉才給選後值。
 CREATE OR REPLACE FUNCTION visitor_front_seconds_for(p_target JSONB) RETURNS BIGINT
 LANGUAGE sql STABLE AS $$
-  SELECT CASE WHEN e.election_date IS NOT NULL AND e.election_date >= activity_today() THEN q.visitor_front_pre_election_seconds ELSE q.visitor_front_seconds END
+  SELECT CASE WHEN d.dt IS NOT NULL AND d.dt >= activity_today() THEN q.visitor_front_pre_election_seconds ELSE q.visitor_front_seconds END
     FROM queue_settings q
-    LEFT JOIN elections e ON e.id = election_id_or_null(p_target->>'election_id')
+    CROSS JOIN LATERAL (SELECT COALESCE(
+        (SELECT e.election_date FROM elections e WHERE e.id = election_id_or_null(p_target->>'election_id')),
+        (SELECT max(e.election_date) FROM elections e WHERE EXTRACT(YEAR FROM e.election_date) = 2026)) AS dt) d
    WHERE q.id = 1
 $$;
-COMMENT ON FUNCTION visitor_front_seconds_for IS '網站請求／公民提問的插隊秒數（20261114020000）：目標選舉（target.election_id）投票日 ≥ 今天＝visitor_front_pre_election_seconds（100 天），投票日已過、沒有選舉、查無這場選舉＝visitor_front_seconds（50 天）。2026-11-14，小良哥 #683 裁示';
+COMMENT ON FUNCTION visitor_front_seconds_for IS '網站請求／公民提問的插隊秒數（20261114020000）：目標選舉（target.election_id）投票日 ≥ 今天＝visitor_front_pre_election_seconds（100 天），投票日已過＝visitor_front_seconds（50 天）；沒有 election_id 或查無這場選舉時沿用選舉年優先的歸屬（當 2026 年，取 2026 年投票日最晚的一場）再判斷，找不到任何 2026 年選舉才給 50 天。2026-11-14，小良哥 #683 裁示';
 
 
 CREATE OR REPLACE FUNCTION manual_front_seconds(p_task_id TEXT) RETURNS BIGINT
