@@ -252,7 +252,7 @@ async function frontPull(mutateSql?: (s: string) => string) {
   const fn = tail.slice(0, tail.indexOf("$$;", tail.indexOf("$$") + 2) + 3);
   await db.exec(`
     CREATE TABLE queue_settings (id integer PRIMARY KEY, visitor_front_seconds bigint);
-    INSERT INTO queue_settings VALUES (1, 100);
+    INSERT INTO queue_settings VALUES (1, 315360000);
     CREATE TABLE task_dispatches (task_id text PRIMARY KEY, target jsonb, boost_seconds bigint NOT NULL DEFAULT 0, cooling boolean NOT NULL DEFAULT true);
     CREATE TABLE contributions (id integer PRIMARY KEY, status text, contribution_type text, payload jsonb);
     CREATE FUNCTION activity_today() RETURNS date LANGUAGE sql AS $$ SELECT date '2026-10-31' $$;
@@ -275,7 +275,7 @@ async function frontPull(mutateSql?: (s: string) => string) {
 
 Deno.test("cand_no_front_pull：補號次缺口的 no_change 驗證票拉到 3 ×；別的 no_change、重查任務的、已結案的不動", async () => {
   const b = await frontPull();
-  assertEquals(b["verify:1"], 300);
+  assertEquals(b["verify:1"], 946080000);
   assertEquals(b["verify:2"], 0);
   assertEquals(b["verify:3"], 0);
   assertEquals(b["verify:4"], 0);

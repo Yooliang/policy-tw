@@ -52,7 +52,7 @@ Deno.test("A. 名字帶 cand_no/cand_num 的貢獻型別都被 cand_no_front_pul
   assert(fn.includes("c.contribution_type = 'candidacy' AND c.payload ? 'cand_no'"));
 });
 
-const Y = 100;
+const Y = 315360000; // 號次拉前寫死的基準（20261114020000）
 
 async function run(rows: Array<{ id: number; type: string; payload: Record<string, unknown> }>, gaps: string[]): Promise<Record<string, number>> {
   const db = new PGlite();
