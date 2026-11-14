@@ -47,11 +47,34 @@ export function participationLabel(e: ParticipationLike): string {
   }
 }
 
+/** 參選描述：候選人、參選、擬參選、登記參選、爭取連任（代理常把參選身分填進現職欄） */
+const CANDIDACY_RE = /候選人|參選|爭取連任|尋求連任|競選連任/
+
+export function isCandidacyText(v: string): boolean {
+  return CANDIDACY_RE.test(v)
+}
+
+/** 依「、，,；;」切段，括號（全形半形）裡的分隔符不切 */
+function splitSegments(v: string): string[] {
+  const out: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of v) {
+    if (ch === '（' || ch === '(') depth++
+    else if ((ch === '）' || ch === ')') && depth > 0) depth--
+    if (depth === 0 && '、，,；;'.includes(ch)) { out.push(cur); cur = '' } else cur += ch
+  }
+  out.push(cur)
+  return out.map((s) => s.trim()).filter(Boolean)
+}
+
 /**
  * 現職欄存的是選舉名稱（「111年直轄市議員選舉」）就不當職稱顯示：879 位是早期匯入填錯的，
  * 補基本資料任務會把它當缺派出去，代理補上真的現職後自然就顯示了。
+ * 存的是參選描述（「里長候選人（2026 年…）」，全庫約 17,000 筆）也不顯示；多段時只拿掉參選那幾段。
  */
 export function displayCurrentPosition(v?: string | null): string | undefined {
   if (!v || /選舉\s*$/.test(v)) return undefined
-  return v
+  const kept = splitSegments(v).filter((seg) => !isCandidacyText(seg))
+  return kept.length ? kept.join('、') : undefined
 }
