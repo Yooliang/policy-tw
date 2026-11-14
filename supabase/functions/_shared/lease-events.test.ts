@@ -200,7 +200,7 @@ Deno.test("E2 其他 migration 不得讀 lease_events 而沒有時限（只有�
   assert(Number.isFinite(retention), "抽不出 lease_events_days 預設值");
   const seen: string[] = [];
   for await (const f of Deno.readDir(new URL("../../migrations/", import.meta.url))) {
-    if (f.name === MIG_NAME || f.name === MIG2_NAME) continue;
+    if (f.name === MIG_NAME || f.name === MIG2_NAME || f.name === BREAKER_MIG) continue; // 斷路器／重派冷卻的讀者另有 E2c
     const sql = await Deno.readTextFile(new URL(`../../migrations/${f.name}`, import.meta.url));
     if (!/\b(FROM|JOIN)\s+(public\.)?lease_events\b/i.test(sql)) continue;
     seen.push(f.name);
@@ -208,6 +208,21 @@ Deno.test("E2 其他 migration 不得讀 lease_events 而沒有時限（只有�
     assertEquals(leaseReaderProblems(f.name, sql, retention), []);
   }
   assertEquals(seen.sort(), [...REGISTERED_READERS].sort(), "登記的讀者都應該真的存在");
+});
+
+/** 代理斷路器與重派冷卻（20261114080000）也讀 lease_events：每一處都要有秒數時限，而且設定的 CHECK 上限 86400 秒（1 天）遠小於保留天數（lease_events_days 下限 8） */
+const BREAKER_MIG = "20261114080000_agent_breaker_skip_cooldown.sql";
+Deno.test("E2c 斷路器與重派冷卻對 lease_events 的每一處讀取都有秒數時限（上限 86400 秒），CHECK 擋住設定超過 24 小時", async () => {
+  const sql = (await Deno.readTextFile(new URL(`../../migrations/${BREAKER_MIG}`, import.meta.url))).replace(/\r\n/g, "\n");
+  const code = sql.split("\n").map((l) => l.replace(/--.*$/, "")).join("\n");
+  const reads = [...code.matchAll(/\bFROM\s+lease_events\s+(\w+)/gi)];
+  assert(reads.length >= 4, `抽到 ${reads.length} 處讀取`);
+  for (const r of reads) {
+    const rest = code.slice(r.index!, r.index! + 700);
+    assert(new RegExp(String.raw`\b${r[1]}\.at\s*>\s*now\(\)\s*-\s*make_interval\(secs\s*=>`).test(rest), `FROM lease_events ${r[1]} 沒有秒數時限`);
+  }
+  assert(/redispatch_cooldown_seconds INTEGER NOT NULL DEFAULT 14400 CHECK \(redispatch_cooldown_seconds BETWEEN 0 AND 86400\)/.test(sql));
+  assert(/breaker_window_seconds     INTEGER NOT NULL DEFAULT 7200  CHECK \(breaker_window_seconds BETWEEN 60 AND 86400\)/.test(sql));
 });
 
 Deno.test("E2b 還原驗證：登記的讀者拿掉時限、回看放大到超過保留、換別名拿掉 → 都要抓得到", async () => {

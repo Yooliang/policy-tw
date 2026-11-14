@@ -452,14 +452,17 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   assertEquals(consts.VERIFY_BINDING_DAYS, 7);
   // 寫入端不算讀者；skips 沒有任何讀者（正式庫 2026-10-08 查：沒有函式、視圖引用它）
   assertEquals(of(ts.readers, "public", "contribution_task_skips").length, 0, "skips 在程式裡只有 upsert");
-  assertEquals(of(sql.readers, "public", "contribution_task_skips").length, 0, "skips 最後一版的函式／視圖／排程都不讀它");
+  // 2026-11-14（20261114080000）：斷路器 agent_breaker_state 數「回報」讀一次，回看期 LEAST(…, 86400) ＝ 24 小時
+  assertEquals(of(sql.readers, "public", "contribution_task_skips").map((r) => r.hours), [24], "skips 只有斷路器讀（24 小時上限）");
   assertEquals(of(ts.readers, "public", "verify_dispatches").length, 1, "程式端 verify_dispatches 的讀者只有派工綁定");
   // 2026-11-09 驗證池多一個讀者：握著人數（30 分鐘內派到、未投票；20261109170000）
   assertEquals(find(sql.readers, "public", "verify_dispatches", "contribution_verify_pool")?.hours !== undefined, true);
   assertEquals(of(sql.readers, "public", "verify_dispatches").filter((r) => r.hours === 30 / 60).length, 1, "驗證池：握著人數的 30 分鐘");
   // 2026-11-11 /trace 重播頁的 trace_events()：近 7 天（派工綁定的 7 天，保留天數 14 ＋ 邊際足夠）
   assertEquals(find(sql.readers, "public", "verify_dispatches", "trace_events")?.hours, 7 * 24, "trace_events：近 7 天");
-  assertEquals(of(sql.readers, "public", "verify_dispatches").length, 4, "SQL 端有驗證池（15 分鐘、30 分鐘兩處）、dispatch_recent 與 trace_events");
+  // 2026-11-14（20261114080000）再加四處：驗證池的重派冷卻、斷路器的領走數、agent_breaker_status 視圖、agent_cooldown_thaw_seconds，回看期都是 LEAST(…, 86400)＝24 小時
+  assertEquals(of(sql.readers, "public", "verify_dispatches").length, 8, "SQL 端：驗證池（15 分鐘、30 分鐘、重派冷卻）、dispatch_recent、trace_events、斷路器、視圖、冷卻解凍");
+  assertEquals(of(sql.readers, "public", "verify_dispatches").filter((r) => r.hours === 24).length, 4, "新增的四處都是 24 小時上限");
   // public 的讀者不含日本站的檔案（jp-next 的路徑含 next/index.ts，沒分 schema 就會被當成 /next）
   assert(!ts.readers.some((r) => r.schema === "public" && /jp-next|_shared\/jp\//.test(r.where)), "日本站的檔案不能算進 public");
 
@@ -544,6 +547,8 @@ CREATE TABLE contributions (id uuid PRIMARY KEY, contribution_type text DEFAULT 
   created_at timestamptz DEFAULT now(), score int DEFAULT 0, target_score int, voter_ips int DEFAULT 0, actor_id text, needs_identity_pick boolean NOT NULL DEFAULT false);
 CREATE TABLE contribution_votes (id bigserial PRIMARY KEY, contribution_id uuid, verifier_ip_hash text, agent_name text, actor_id text, created_at timestamptz DEFAULT now());
 CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, source text);
+CREATE TABLE queue_settings (id int PRIMARY KEY, redispatch_cooldown_seconds int NOT NULL DEFAULT 14400);
+INSERT INTO queue_settings (id) VALUES (1);
 CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, agent_name text, ip_hash text, leased_until timestamptz);
 CREATE TABLE task_dispatches (task_id text PRIMARY KEY, queue_at timestamptz NOT NULL DEFAULT now(), verify_target int);
 CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, record_id text NOT NULL, field text NOT NULL, old_value jsonb, new_value jsonb,
@@ -721,8 +726,8 @@ Deno.test("C2 派工綁定的時限改成 30 天，或把 .gte 拿掉（變成�
 
 Deno.test("C4 SQL 端回看期改大：驗證池 15 分鐘→30 天、dispatch_recent 上限 240→100000 分鐘，紅", () => {
   const poolMig = finalDefs(REAL.migs).get(defKey("function", "public", "contribution_verify_pool"))!.file; // 驗證池最後一版在哪支就改哪支
-  // 2026-11-04 起正見與日本站的驗證池都在 20261104130000：同一支 migration 裡 15 分鐘出現兩次，用「FROM 哪張表」當錨點只改 public 那一處
-  const pool = mutateMig(REAL, poolMig, "FROM verify_dispatches vd\n      WHERE vd.contribution_id = c.id AND vd.ip_hash = p_ip_hash\n        AND (p_agent_name IS NULL OR lower(vd.agent_name) = lower(p_agent_name))\n        AND vd.dispatched_at > now() - interval '15 minutes'", "FROM verify_dispatches vd\n      WHERE vd.contribution_id = c.id AND vd.ip_hash = p_ip_hash\n        AND (p_agent_name IS NULL OR lower(vd.agent_name) = lower(p_agent_name))\n        AND vd.dispatched_at > now() - interval '30 days'");
+  // 2026-11-14 起驗證池最後一版在 20261114080000（只有一處 15 分鐘，日本站的複本在別的檔）
+  const pool = mutateMig(REAL, poolMig, "AND vd.dispatched_at > now() - interval '15 minutes'", "AND vd.dispatched_at > now() - interval '30 days'");
   assert(hasProblem(allProblems(pool), "contribution_verify_pool"), allProblems(pool).join("\n"));
   const recent = mutateMig(REAL, "20260924000007_dispatch_recent.sql", "COALESCE(p_minutes, 30), 1), 240))\n  ORDER BY 4", "COALESCE(p_minutes, 30), 1), 100000))\n  ORDER BY 4");
   assert(hasProblem(allProblems(recent), "dispatch_recent"), allProblems(recent).join("\n"));

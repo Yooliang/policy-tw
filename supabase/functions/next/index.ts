@@ -31,6 +31,7 @@ import { CAND_NO_DUP_MODEL_PREFIX, candNoCheckForVerify } from "../_shared/cand-
 import { fetchDisputeContext } from "../_shared/dispute-verify.ts";
 import { BUNDLE_HOW_TO, loadBundleItem } from "../_shared/bundle-verify.ts";
 import { minutesUntilReset, QUOTA_WINDOW_NOTE, quotaWindowEnd, quotaWindowFields, quotaWindowStart, taipeiClock } from "../_shared/quota-window.ts";
+import { parseBreakerState, pausedFields, redispatchCooldownFields } from "../_shared/agent-breaker.ts";
 import { createSecretWarner, dispatchTokenSecretFrom, issueDispatchToken, logDispatchBinding } from "../_shared/dispatch-token.ts";
 
 /**
@@ -147,7 +148,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // （ballyhoo-4d 2026-09-21 實測：兩隻代理共用一個代號，合計 16 任務／10 驗證，
     // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
-    const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes] = await Promise.all([
+    const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes, breakerRes] = await Promise.all([
       timed("pool", pendingQuery),
       timed("counts", supabase.rpc("contribution_queue_task_counts", { p_region: region }) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單 */),
       timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
@@ -183,6 +184,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           .order("created_at", { ascending: true }).range(from, to))),
       timed("skips", // skip 不再按 IP 排除（2026-09-20）：這裡只是佔位，保留解構順序
       Promise.resolve({ data: [], error: null })),
+      timed("breaker", // 代理斷路器（20261114080000）：視窗內領走多件卻沒有任何回報就暫停；查不到（函式還沒上線）當成沒暫停，不擋派工
+      Promise.resolve(supabase.rpc("agent_breaker_state", { p_agent: agentName })).catch((e: unknown) => ({ data: null, error: { message: e instanceof Error ? e.message : String(e) } }))),
     ]);
     for (const r of [pendingRes, countsRes, ipContribRes, ipVoteRes, skipsRes]) {
       if (r.error) throw new Error(r.error.message);
@@ -381,6 +384,14 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 一般派工絕對不會派這種任務（contribution_queue_tasks 排除）。邏輯在 _shared/strong-lane-claim.ts。
     if (url.searchParams.get("lane") === "strong") {
       return await serveStrongLane({ supabase, req, url, agentName, agentTool, ipHash, base, tokenFor, json, retryAfterMin: RETRY_AFTER_MIN });
+    }
+
+    // 斷路器暫停中：不派任何東西。skip 已在上面記成「回報」，所以帶 skip 的請求不會剛好被自己擋住
+    if (breakerRes.error) console.error("agent_breaker_state:", breakerRes.error.message);
+    const breaker = breakerRes.error ? null : parseBreakerState(breakerRes.data);
+    if (breaker?.paused) {
+      console.log(JSON.stringify({ event: "agent_breaker_paused", agent_name: agentName, leases: breaker.leases, reports: breaker.reports, retry_after_seconds: breaker.retry_after_seconds }));
+      return json({ ...base, ...pausedFields(breaker) });
     }
 
     // 驗證只試一次認領（2026-10-14）：隊頭是驗證但全被同網段的並行請求認領走了，就改派任務；最後的「任務給不出來退回驗證」不再重試
@@ -686,6 +697,15 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         if (served) return served;
       }
       const all = queueRaw;
+      // 佇列與驗證池都空、而且這個代理有重派冷卻中的件（被派過沒回報、或 skip 過）：多半是可派的都在它自己的冷卻裡，告訴它最早幾秒後解凍（20261114080000）
+      if (all.length === 0 && candidates.length === 0) {
+        try {
+          const { data: thaw, error: thawErr } = await supabase.rpc("agent_cooldown_thaw_seconds", { p_agent: agentName });
+          if (thawErr) console.error("agent_cooldown_thaw_seconds:", thawErr.message);
+          const cooled = thawErr ? null : redispatchCooldownFields(thaw);
+          if (cooled) return json({ ...base, ...cooled });
+        } catch (e) { console.error("agent_cooldown_thaw_seconds:", e instanceof Error ? e.message : String(e)); }
+      }
       const reason = all.length > 0
         ? "這一輪抽到的任務對你都不合格（你交過在等票、剛跳過、或裁決跟你有關），驗證池也空了；幾分鐘後再來會抽到別的"
         : (openTasks > 0 ? "目前所有缺口任務都在別人手上或已飽和，驗證池也空了；幾分鐘後再來" : "目前沒有待驗證、也沒有缺口任務");
