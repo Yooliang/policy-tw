@@ -9,7 +9,7 @@
     - robots.txt：對一般爬蟲 Allow；Cloudflare 內容訊號 `search=yes、ai-train=no、use=reference`；ClaudeBot、anthropic-ai、Claude-Web、GPTBot 等訓練爬蟲被 Disallow。
   - **灰區（要讓下一個人知道）**：
     1. 站方沒有任何照片授權聲明；它也不是照片的原始權利人（權利在公報與候選人）。這點與 elections.olc.tw 等其他第三方來源同性質。
-    2. 我們存的是照片網址、前端直接連它的圖檔（熱連結），不是下載後訓練。用途接近 `search／use=reference`，但站方沒明講允許。ClaudeBot 被 robots Disallow，是針對訓練爬蟲；代理是人為指派去查單頁，不是批次爬站，仍請維持「看單頁、不大量抓」。
+    2. 我們存的是照片網址（avatar_url 保留 ipdb 原圖網址）。前端優先顯示自家公開桶 avatar-thumbs 裡的縮圖（2026-10-31 縮圖機制，ipdb 300 筆中 296 筆已有），查不到縮圖或載入失敗才退回直連 ipdb 圖檔；不是下載後訓練。用途接近 `search／use=reference`，但站方沒明講允許。ClaudeBot 被 robots Disallow，是針對訓練爬蟲；代理是人為指派去查單頁，不是批次爬站，仍請維持「看單頁、不大量抓」。
     3. 站是個人實驗專案，圖檔可能搬家或下架，存庫的網址會失效。
-  - **另案建議（本 PR 不做）**：把已採用的第三方照片轉存到我們自己的 storage，一次解掉熱連結與失效兩個風險；轉存前要先決定授權立場，可先問站方。
+  - **另案建議（本 PR 不做）**：縮圖已轉存（avatar-thumbs），但 avatar_url 仍是外部原圖網址，沒有「下載原圖、改成自家網址」的流程；原圖若下架，既有縮圖還在，但縮圖路徑以原圖網址的 sha256 為鍵，新來源失效後無法重做。若要連原圖也轉存，要先決定授權立場，可先問站方。
   - 範圍外、沒改：協議（`public/skill.md`、`skill-types.md`）對照片來源本來就沒有「只准官方公報」的規定，這次也不加。
