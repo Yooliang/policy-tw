@@ -73,7 +73,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
 ]
 // 每個標籤一律四個字；「全部型別」固定排頭（它是「不篩選」，不是一種型別）。
 // 2026-09-18：長短交錯的按鈕列看起來是亂的，字數一致才整齊。
-const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
+const TYPE_OPTIONS_RAW: Array<{ key: string; label: string }> = [
   { key: '', label: '全部型別' },
   { key: 'policy', label: '新增政見' },
   { key: 'no_change', label: '查無異動' },
@@ -98,6 +98,12 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'lineage_status', label: '脈絡現況' },
   { key: 'party_info', label: '政黨資訊' },
   { key: 'adjudication', label: '強模型裁決' },
+]
+// 排序（小良哥 #747）：四個字的標籤排前面、其餘（三字或五字以上）排後面，同長度內維持上面的原順序；「全部型別」永遠第一。
+const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
+  ...TYPE_OPTIONS_RAW.filter(t => !t.key),
+  ...TYPE_OPTIONS_RAW.filter(t => t.key && t.label.length === 4),
+  ...TYPE_OPTIONS_RAW.filter(t => t.key && t.label.length !== 4),
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
