@@ -64,11 +64,13 @@ const headerOf = (fn: string) => fn.slice(0, fn.indexOf("$function$") >= 0 ? fn.
 // 村里長臂在 2026-10-29 又被 20261029030000 重定義（名冊批次上限 150 → 80，只換說明文字一句）：它成了村里長臂的最後一版，
 // 本檔的 20261019120000 是它的前一版；raw 的最後一版仍是 20261019120000。
 const VIL_CAP_MIG = "20261029030000_roster_batch_cap_80.sql";
+// raw 之後只允許 profile_gap 加 ipdb.tw 這一支（profile-gap-hint-ipdb.test.ts 逐字守）
+const RAW_LAST_MIG = "20261115010000_profile_gap_hint_ipdb.sql";
 const CAP_FROM = "一次最多 150 筆（整批都是 candidacy";
 const CAP_TO = "一次最多 80 筆（整批都是 candidacy";
 
-Deno.test("A1 前一版是對的：兩支臂的新定義緊接著現行版；raw 的最後一版是本 migration，村里長臂的最後一版是其後的 20261029030000（之後有人改了，要以最新那版為底重做）", async () => {
-  for (const [fn, prev, last] of [[RAW, PREV_RAW_MIG, MIG_NAME], [VIL, PREV_VIL_MIG, VIL_CAP_MIG]] as const) {
+Deno.test("A1 前一版是對的：兩支臂的新定義緊接著現行版；raw 的最後一版是其後的 20261115010000，村里長臂的最後一版是其後的 20261029030000（之後有人改了，要以最新那版為底重做）", async () => {
+  for (const [fn, prev, last] of [[RAW, PREV_RAW_MIG, RAW_LAST_MIG], [VIL, PREV_VIL_MIG, VIL_CAP_MIG]] as const) {
     const defining: string[] = [];
     for (const n of await migrationNames()) if ((await readMig(n)).includes(`CREATE OR REPLACE FUNCTION ${fn}(`)) defining.push(n);
     assertEquals(defining.at(-1), last, `${fn} 的最後一版應該是 ${last}`);
