@@ -25,7 +25,7 @@ async function latestFn(): Promise<string> {
   return fn;
 }
 
-const Y = 100; // 2 × = 200、2.5 × = 250、3 × = 300
+const Y = 315360000; // 號次拉前寫死 2×、2.5×、3 × 這個值（20261114020000 起不讀 visitor_front_seconds）
 
 async function build(types: string[]): Promise<PGlite> {
   const db = new PGlite();

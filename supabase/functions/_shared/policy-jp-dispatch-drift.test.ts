@@ -334,7 +334,7 @@ const PAIRS: Pair[] = [
   // 20261011360000 新增的複本（SEC_NEW）
   { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
-  { name: "manual_front_seconds" },
+  { name: "manual_front_seconds", before: "20261114020000_boost_days_level.sql", note: "取台灣插隊改天級（20261114020000，2026-11-14，日本站暫不跟：網站請求插隊依目標選舉階段分選前／選後，日本站沒有）之前的版本" },
   // 20261102230000 新增的複本（OV_NEW）
   ...OV_NEW.map((name) => ({ name })),
   { name: "verify_inherited_priority_seconds" },

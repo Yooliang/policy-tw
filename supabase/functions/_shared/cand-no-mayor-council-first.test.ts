@@ -25,7 +25,7 @@ async function latestFn(): Promise<string> {
   return fn;
 }
 
-const Y = 100; // visitor_front_seconds 的測試值：2 × = 200、3 × = 300
+const Y = 315360000; // 號次拉前寫死 2×、3 × 這個值（20261114020000 起不讀 visitor_front_seconds）
 
 async function build(): Promise<PGlite> {
   const db = new PGlite();
@@ -45,7 +45,7 @@ async function build(): Promise<PGlite> {
   await gap("gap-village", "村里長");
   await gap("gap-town", "鄉鎮市長");
   await db.query(`INSERT INTO task_dispatches (task_id, target, boost_seconds) VALUES ('other', '{"kind":"other"}', 5)`);
-  await db.query(`INSERT INTO task_dispatches (task_id, target, boost_seconds) VALUES ('gap-council-high', '{"kind":"cand_no","election_type":"縣市議員"}', 999)`);
+  await db.query(`INSERT INTO task_dispatches (task_id, target, boost_seconds) VALUES ('gap-council-high', '{"kind":"cand_no","election_type":"縣市議員"}', ${4 * Y})`);
   const c = (id: number, et: string, withNo: boolean) =>
     db.query(`INSERT INTO contributions VALUES ($1, 'pending', 'candidacy', $2::jsonb)`, [id, JSON.stringify(withNo ? { election_type: et, cand_no: 3 } : { election_type: et })]);
   await c(1, "縣市長", true); await c(2, "村里長", true); await c(3, "縣市議員", false);
@@ -66,6 +66,6 @@ Deno.test("縣市長／縣市議員的號次缺口與驗證列拉到 3 ×，其�
   assertEquals(b["verify:2"], 2 * Y); // 村里長號次驗證票
   assertEquals(b["verify:3"], 0); // 沒帶號次的驗證票不動
   assertEquals(b["other"], 5);
-  assertEquals(b["gap-council-high"], 999); // 已經更高的不降
+  assertEquals(b["gap-council-high"], 4 * Y); // 已經更高的不降
   assert(b["gap-mayor"] > b["gap-village"] && b["gap-council"] > b["gap-town"]);
 });
