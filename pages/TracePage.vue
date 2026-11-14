@@ -10,6 +10,7 @@ import Hero from '../components/Hero.vue'
 import LoadError from '../components/LoadError.vue'
 import { usePageHead } from '../composables/usePageHead'
 import { fetchNames, fetchScoped, fetchWindow, probeUuid, searchPeople, type PersonHit, type Scope, type TraceResult } from '../lib/trace-api'
+import { displayCurrentPosition } from '../lib/participation-label'
 import {
   COUNT_LABEL, nodeCounts, parseTarget, strongBreakdown, systemVoteBreakdown, personFromTaskId, taipeiFull, taskTypeOfId, toItems, topActive,
   type Active, type NodeId, type TraceItem,
@@ -313,7 +314,7 @@ onBeforeUnmount(() => {
             <li v-for="p in candidates" :key="p.id">
               <button type="button" class="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-left hover:bg-slate-50" @click="go(p.id)">
                 <span class="font-medium text-slate-900">{{ p.name }}</span>
-                <span class="text-xs text-slate-500">{{ [p.party, p.region, p.current_position].filter(Boolean).join('・') }}</span>
+                <span class="text-xs text-slate-500">{{ [p.party, p.region, displayCurrentPosition(p.current_position)].filter(Boolean).join('・') }}</span>
               </button>
             </li>
           </ul>
