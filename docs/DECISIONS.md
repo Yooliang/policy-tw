@@ -9,6 +9,10 @@
 新增後跑 `deno run --allow-read --allow-write scripts/decisions-index.ts` 重寫這份索引（rebase 撞到這份時也是重跑，不用手解）。
 守門測試會比對索引與目錄。條目本文就是原本的 `- **標題**｜裁決｜理由｜錯了的代價` 那一段。
 
+## 2026-11-15
+
+- [profile_gap 的 hint_sources 對當屆村里長、鄉鎮市民代表、直轄市山地原住…](decisions/2026-11-15-hint_sources加ipdb.md)
+
 ## 2026-11-14
 
 - [代理斷路器與同一代理重派冷卻（2026-11-14，維護者「做」，協議 1.138.0，`202…](decisions/2026-11-14-代理斷路器與skip冷卻.md)
