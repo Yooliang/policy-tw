@@ -13,6 +13,7 @@
 
 - [profile_gap 的 hint_sources 對當屆村里長、鄉鎮市民代表、直轄市山地原住…](decisions/2026-11-15-hint_sources加ipdb.md)
 - [contribution_queue_tasks 函式層級關掉 seq scan，止住 /nex…](decisions/2026-11-15-queue_tasks關seqscan.md)
+- [型別說明補五句提醒，不加新機制、不加伺服器檢查（協議 1.138.1，只改文字）](decisions/2026-11-15-型別說明補五句提醒不加機制.md)
 - [政見三要素等當選後再派（2026-11-15，維護者，正見VM 群組 #773，`2026111…](decisions/2026-11-15-政見三要素等當選後再派.md)
 - [政見三要素選後 50 天自動開、只派當選者（2026-11-15，維護者，正見VM 群組 #77…](decisions/2026-11-15-政見三要素選後50天自動開只派當選者.md)
 
