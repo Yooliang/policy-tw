@@ -11,6 +11,7 @@
 
 ## 2026-11-15
 
+- [CLAUDE.md 同步規則加 CI 守門，PR 沒處理就紅（2026-11-15，小良哥同意 …](decisions/2026-11-15-CLAUDE.md同步加CI守門.md)
 - [profile_gap 的 hint_sources 對當屆村里長、鄉鎮市民代表、直轄市山地原住…](decisions/2026-11-15-hint_sources加ipdb.md)
 - [contribution_queue_tasks 函式層級關掉 seq scan，止住 /nex…](decisions/2026-11-15-queue_tasks關seqscan.md)
 - [政見三要素等當選後再派（2026-11-15，維護者，正見VM 群組 #773，`2026111…](decisions/2026-11-15-政見三要素等當選後再派.md)
