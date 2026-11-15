@@ -190,6 +190,26 @@ export async function fetchAllRows<T = Record<string, unknown>>(tableName: strin
   let to = 999
   let finished = false
 
+  // 依 id 排序、結果帶 id 時改用「接著上一頁最後一個 id 往後讀」（keyset）：OFFSET 越後面越慢，
+  // politicians_with_elections 最後一頁 6.3 秒，超過匿名角色 statement_timeout 3 秒，預渲染建置會逾時（2026-11-15 實測；keyset 同一頁 0.34 秒）。
+  const keyset = orderBy === 'id' && (selectStr === '*' || selectStr.split(',').map((s) => s.trim()).includes('id'))
+  if (keyset) {
+    let lastId: unknown = null
+    while (!finished) {
+      const after = lastId
+      const { data } = await withTimeoutAndRetry(`${tableName} id>${after ?? '-'}`, (signal) => {
+        let q = opts.notRemoved ? supabase.from(tableName).select(selectStr).is('removed_at', null) : supabase.from(tableName).select(selectStr)
+        if (after !== null) q = q.gt('id', after as string)
+        return q.order('id').limit(1000).abortSignal(signal).throwOnError()
+      })
+      const rows = (data ?? []) as T[]
+      allData.push(...rows)
+      if (rows.length < 1000) finished = true
+      else lastId = (rows[rows.length - 1] as Record<string, unknown>).id
+    }
+    return allData
+  }
+
   while (!finished) {
     // supabase-js 不會 reject，網路錯誤與中止都包在 error 裡回來；要 throwOnError 重試才看得到
     const { data } = await withTimeoutAndRetry(`${tableName} ${from}-${to}`, (signal) =>
