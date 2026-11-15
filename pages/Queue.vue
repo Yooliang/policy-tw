@@ -201,6 +201,10 @@ const isStopped = (it: { stopped?: boolean; status?: string }) => it.stopped ===
 const overvoted = computed(() => state.value?.overvoted ?? null)
 const overItems = computed(() => (Array.isArray(overvoted.value?.items) ? overvoted.value!.items! : []))
 const overTotal = computed(() => overvoted.value?.total ?? overItems.value.length)
+// 維護者 11-15：已標出、各票意見一致的不用一直列，只列有爭議的（已停派轉裁決，或各票意見不一致）
+const isContested = (o: { stopped?: boolean; status?: string; verdicts?: { verdict?: string }[] }) =>
+  isStopped(o) || new Set((o.verdicts ?? []).map((v) => v.verdict ?? '')).size > 1
+const overShown = computed(() => overItems.value.filter(isContested))
 const overTypeLabel = (t: string) => VERIFY_LABEL[t] ?? taskTypeLabel(t)
 const sourceLabel = (s: string) => SOURCE_LABEL[s] ?? s
 const headTypeLabel = (r: { kind?: string; task_type: string }) => r.kind === 'verify' ? (VERIFY_LABEL[r.task_type] ?? r.task_type) : taskTypeLabel(r.task_type)
@@ -398,8 +402,9 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       </section>
 
       <section v-if="overvoted && (overTotal > 0 || overItems.length)" class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-        <h2 class="font-black text-navy-900 mb-3">投太多輪 <span class="ml-2 text-xs font-normal text-slate-500 tabular-nums">平均每筆 {{ num2(overvoted.baseline) }} 票；超過 {{ num2(overvoted.flag_votes) }} 票標出、超過 {{ num2(overvoted.stop_votes) }} 票停派；共 {{ fmt(overTotal) }} 筆</span></h2>
-        <div class="overflow-x-auto">
+        <h2 class="font-black text-navy-900 mb-3">投太多輪 <span class="ml-2 text-xs font-normal text-slate-500 tabular-nums">平均每筆 {{ num2(overvoted.baseline) }} 票；超過 {{ num2(overvoted.flag_votes) }} 票標出、超過 {{ num2(overvoted.stop_votes) }} 票停派；共 {{ fmt(overTotal) }} 筆，下面只列有爭議的 {{ fmt(overShown.length) }} 筆</span></h2>
+        <p v-if="!overShown.length" class="text-slate-400">沒有爭議的</p>
+        <div v-else class="overflow-x-auto">
           <table class="w-full min-w-[44rem]">
             <thead class="text-left text-xs text-slate-500">
               <tr>
@@ -411,7 +416,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(o, i) in overItems" :key="o.contribution_id ?? i" class="border-t border-slate-100 align-top" :style="isStopped(o) ? { background: '#fef2f2' } : undefined">
+              <tr v-for="(o, i) in overShown" :key="o.contribution_id ?? i" class="border-t border-slate-100 align-top" :style="isStopped(o) ? { background: '#fef2f2' } : undefined">
                 <td class="py-1 pr-2 whitespace-nowrap">{{ o.contribution_type ? overTypeLabel(o.contribution_type) : '—' }}</td>
                 <td class="py-1 pr-2 max-w-[14rem] truncate" :title="o.subject">{{ o.subject || '—' }}</td>
                 <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(o.votes ?? 0) }}</td>
