@@ -1,0 +1,41 @@
+# CLAUDE.md 同步守門（2026-11-15，小良哥同意 #770 ②）。
+#
+# PR 動到 supabase/migrations、supabase/functions/_shared/protocol.ts 或 docs/decisions 時，
+# CLAUDE.md 要在同一張 PR 一起改，或在 PR 描述寫「CLAUDE.md 無需更新」，否則這個檢查紅。
+# 改 PR 描述（edited）會重跑。判斷邏輯在 scripts/ci-claude-md-sync.mjs，測試在 ci-claude-md-sync.spec.mjs。
+# 只用 actions/checkout 與 gh；PR 描述經環境變數傳入，不內插進 script。
+name: CLAUDE.md 同步檢查
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  claude-md-sync:
+    name: CLAUDE.md 同步檢查
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test scripts/ci-claude-md-sync.spec.mjs
+      - name: 取得 PR 改到的檔案清單
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # 用 API 分頁取，不受 gh pr diff 的 300 檔上限影響；改名的檔把舊路徑也算進去。
+          gh api --paginate "repos/$REPO/pulls/$PR_NUMBER/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/changed-files.txt"
+      - name: 檢查
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          CHANGED_FILES="$(cat "$RUNNER_TEMP/changed-files.txt")" node scripts/ci-claude-md-sync.mjs
