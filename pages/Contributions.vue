@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { shortUrlsIn } from '../lib/url' // hostOf 這頁自己有一份
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Hero from '../components/Hero.vue'
 
 import ScoreBar from '../components/ScoreBar.vue'
@@ -12,6 +12,7 @@ import { usePageHead } from '../composables/usePageHead'
 import { onPaneShown } from '../composables/usePane'
 import { activityText, relativeTime } from '../lib/activity'
 import { taskIdLabel } from '../lib/task-id-label'
+import { adjudicatedId, isAdjudication, verdictLabel } from '../lib/adjudication-display'
 import {
   Bot, Loader2, AlertCircle, ExternalLink, ChevronDown, ChevronUp, Milestone, Database, Link as LinkIcon, Inbox, AlertTriangle,
   ThumbsUp, ThumbsDown, HelpCircle,
@@ -72,7 +73,7 @@ const STATUS_TABS: Array<{ key: StatusKey; label: string }> = [
 ]
 // 每個標籤一律四個字；「全部型別」固定排頭（它是「不篩選」，不是一種型別）。
 // 2026-09-18：長短交錯的按鈕列看起來是亂的，字數一致才整齊。
-const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
+const TYPE_OPTIONS_RAW: Array<{ key: string; label: string }> = [
   { key: '', label: '全部型別' },
   { key: 'policy', label: '新增政見' },
   { key: 'no_change', label: '查無異動' },
@@ -96,6 +97,13 @@ const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'lineage_link', label: '脈絡上下級' },
   { key: 'lineage_status', label: '脈絡現況' },
   { key: 'party_info', label: '政黨資訊' },
+  { key: 'adjudication', label: '強模型裁決' },
+]
+// 排序（小良哥 #747）：四個字的標籤排前面、其餘（三字或五字以上）排後面，同長度內維持上面的原順序；「全部型別」永遠第一。
+const TYPE_OPTIONS: Array<{ key: string; label: string }> = [
+  ...TYPE_OPTIONS_RAW.filter(t => !t.key),
+  ...TYPE_OPTIONS_RAW.filter(t => t.key && t.label.length === 4),
+  ...TYPE_OPTIONS_RAW.filter(t => t.key && t.label.length !== 4),
 ]
 const STATUS_KEYS = new Set<string>(STATUS_TABS.map(t => t.key))
 const TYPE_KEYS = new Set<string>(TYPE_OPTIONS.map(t => t.key))
@@ -323,7 +331,7 @@ usePageHead({
                   {{ statusLabel(it) }}
                 </span>
                 <!-- 拉鋸條（使用者 2026-09-21）：畫法抽成共用元件，查核履歷也用同一個 -->
-                <ScoreBar v-if="!(it.status === 'applied' && it.review_notes?.startsWith('中選會自動查證通過'))" :score="it.score" :target="it.target_score" :agree="it.agree_count" :disagree="it.disagree_count" :unsure="it.unsure_count" />
+                <ScoreBar v-if="!isAdjudication(it.contribution_type) && !(it.status === 'applied' && it.review_notes?.startsWith('中選會自動查證通過'))" :score="it.score" :target="it.target_score" :agree="it.agree_count" :disagree="it.disagree_count" :unsure="it.unsure_count" />
                 <span class="text-[11px] text-slate-400 ml-auto whitespace-nowrap" :title="`提交於 ${fmtTime(it.created_at)}`">{{ relativeTime(it.last_activity_at ?? it.created_at) ?? fmtTime(it.created_at) }}</span>
               </div>
               <p class="text-navy-900 leading-snug break-words">{{ shortUrlsIn(it.summary) }}</p>
@@ -332,7 +340,8 @@ usePageHead({
               <div class="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                 <span>{{ it.agent_name }}<span v-if="it.agent_tool" class="text-slate-400">・{{ it.agent_tool }}</span></span>
                 <!-- 票數膠囊拿掉了（2026-09-21）：分數制下「幾個讚」不是有意義的量，拉鋸條才是；票數留在它的 title -->
-                <span class="tabular-nums" :class="(it.score ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700'">{{ (it.score ?? 0) > 0 ? '+' : '' }}{{ it.score ?? 0 }} 分</span>
+                <span v-if="isAdjudication(it.contribution_type)" class="font-bold text-violet-700" data-testid="feed-verdict">裁決：{{ verdictLabel(it.payload) ?? '已裁決' }}</span>
+                <span v-else class="tabular-nums" :class="(it.score ?? 0) >= 0 ? 'text-emerald-700' : 'text-red-700'">{{ (it.score ?? 0) > 0 ? '+' : '' }}{{ it.score ?? 0 }} 分</span>
                 <span v-if="it.source_urls.length" class="inline-flex items-center gap-1"><LinkIcon :size="12" />{{ hostOf(it.source_urls[0]) }}<template v-if="it.source_urls.length > 1"> 等 {{ it.source_urls.length }} 個</template></span>
                 <component :is="expanded.has(it.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
               </div>
@@ -347,9 +356,10 @@ usePageHead({
                   </li>
                 </ul>
               </div>
-              <div v-if="it.politician_url || it.policy_url" class="flex flex-wrap gap-3">
+              <div v-if="it.politician_url || it.policy_url || (isAdjudication(it.contribution_type) && adjudicatedId(it.payload))" class="flex flex-wrap gap-3">
                 <a v-if="it.politician_url" :href="it.politician_url" class="text-blue-700 underline underline-offset-2 text-xs font-bold">看政治人物頁{{ it.target_name ? `（${it.target_name}）` : '' }}</a>
                 <a v-if="it.policy_url" :href="it.policy_url" class="text-blue-700 underline underline-offset-2 text-xs font-bold">看政見頁</a>
+                <RouterLink v-if="isAdjudication(it.contribution_type) && adjudicatedId(it.payload)" :to="`/trace/${adjudicatedId(it.payload)}`" class="text-blue-700 underline underline-offset-2 text-xs font-bold" data-testid="feed-adjudicated-link">看被裁決的原貢獻</RouterLink>
               </div>
               <div v-if="it.review_notes">
                 <p class="text-xs font-bold text-slate-400 mb-1">審核備註</p>
@@ -371,7 +381,7 @@ usePageHead({
               </div>
               <!-- 票數門檻只在還在等票時講。撤回／退件／還原的已經退出驗證池，不會有人被派到，
                    照印「需要 2 票同意」會讓人以為撤回還要等人投票（2026-09-21 使用者看動態牆發現）。 -->
-              <p class="text-[11px] text-slate-400"><span v-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied' && it.review_notes?.startsWith('中選會自動查證通過')" data-testid="feed-auto-verified">中選會自動查證通過，不經投票</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-else-if="it.status === 'rejected'">跌到 −{{ it.target_score }} 分退件</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} {{ it.contribution_type === 'removal' ? '移除' : '上線' }}</span><span v-if="it.task_id" :title="it.task_id" data-testid="feed-task-label">・任務：{{ taskIdLabel(it.task_id) }}</span></p>
+              <p class="text-[11px] text-slate-400"><span v-if="isAdjudication(it.contribution_type)" data-testid="feed-adjudication-footer">強模型裁決，不經投票<span v-if="verdictLabel(it.payload)">：{{ verdictLabel(it.payload) }}</span></span><span v-else-if="it.status === 'pending'">目標 {{ it.target_score }} 分，目前 {{ it.score }} 分</span><span v-else-if="it.status === 'withdrawn'">提交者自行撤回，不需要驗證</span><span v-else-if="it.status === 'applied' && it.review_notes?.startsWith('中選會自動查證通過')" data-testid="feed-auto-verified">中選會自動查證通過，不經投票</span><span v-else-if="it.status === 'applied'">以 {{ it.score }} 分通過（目標 {{ it.target_score }}）</span><span v-else-if="it.status === 'rejected'">跌到 −{{ it.target_score }} 分退件</span><span v-if="it.applied_at">・{{ fmtTime(it.applied_at) }} {{ it.contribution_type === 'removal' ? '移除' : '上線' }}</span><span v-if="it.task_id" :title="it.task_id" data-testid="feed-task-label">・任務：{{ taskIdLabel(it.task_id) }}</span></p>
             </div>
           </li>
         </ul>
