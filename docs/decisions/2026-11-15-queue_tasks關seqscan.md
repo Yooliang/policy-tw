@@ -1,0 +1,7 @@
+- **contribution_queue_tasks 函式層級關掉 seq scan，止住 /next 的「auto tasks: statement timeout」（2026-11-15，team-lead 交辦，不升協議版，`20261115070000`，守門 `queue-tasks-enable-seqscan.test.ts`）**：
+  - 緣由：`/next` 讀派工佇列的 `contribution_queue_tasks(p_type,p_region,p_limit,p_seed,p_ip_hash,p_agent)` 在 PostgREST 的非常數參數下，planner 對 `task_dispatches` 選 Seq Scan，15,811 列裡 11,810 列逐筆跑完過濾子查詢才排序取 30（估 rows=1、實際 11,810）。走 `task_dispatches_queue_at_idx` 的成本 666,657 對 Seq Scan 661,784 幾乎平手，統計一動就翻。實測同一句不帶 region 3.5 秒、屏東縣 1.4 秒，加 `enable_seqscan=off` 後 20 毫秒；參數寫死成字面值 5～50 毫秒。PostgREST 呼叫 4.3 萬次平均 428 毫秒、最大 7,986 毫秒，撞 authenticator 的 8 秒上限。與 10-02 事故同型。
+  - 做法：一行 `ALTER FUNCTION public.contribution_queue_tasks(text,text,integer,text,text,text) SET enable_seqscan = off;`。只影響這支函式內的計畫，不動全域設定與函式本體；可重跑。
+  - **這是治標**。#963／#964 最多是觸發點（一次收回約 3% 的列，之後統計改變），沒有直接證據。根治另開：把昂貴的 NOT EXISTS 子查詢改成預先算好的 blocked／parked 欄位（`refresh_dispatch_blocked` 已是這做法），並查 seed 為何從約 40 秒變慢到 70～116 秒。不調高 statement_timeout（治標且加重連線佔用）。
+  - **重建函式會清掉這個設定**：`CREATE OR REPLACE FUNCTION` 會把函式的 SET 設定換成新語句寫的，沒寫就清空。之後任何 migration 重建這支函式，要在定義裡加 `SET enable_seqscan = off`，或在其後再下一次 ALTER。守門測試檢查「最後一次 CREATE OR REPLACE 之後必須有對應的 SET」，且簽名一致。
+  - 回滾：`ALTER FUNCTION public.contribution_queue_tasks(text,text,integer,text,text,text) RESET enable_seqscan;`
+  - 不動：Edge Function 程式、其他 migration、規則 33 設定。
