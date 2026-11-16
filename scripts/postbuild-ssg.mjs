@@ -122,6 +122,7 @@ const META_FILE = path.join(DIST, '.sitemap-meta.json')
 const sitemapMeta = fs.existsSync(META_FILE) ? JSON.parse(fs.readFileSync(META_FILE, 'utf8')) : { lastmod: {}, skip: [] }
 if (fs.existsSync(META_FILE)) fs.unlinkSync(META_FILE)
 const sitemapSkip = new Set(sitemapMeta.skip)
+const sitemapPriority = new Set(sitemapMeta.priority ?? [])
 
 // 1. 殼
 for (const shell of SHELL_FILES) {
@@ -273,6 +274,8 @@ if (politicianSample && politicianSample.stateKb > 200) fail(`政治人物頁 in
 // 5. sitemap：按內容拆份，sitemap.xml 是索引（2026-09-23 維護者：Search Console 才看得出哪一類沒被收錄）
 //    提交的網址不變，一樣是 /sitemap.xml。2026-10-05 選舉頁（全台、縣市、鄉鎮，約上千頁）另拆一份，鄉鎮頁有沒有被收錄才看得出來。
 const SITEMAP_GROUPS = [
+  // 優先子網站地圖（2026-11-16）：焦點屆別有號次且有政見或簡介的候選人，排在索引最前面；沒有優先名單就不產這一份
+  ...(sitemapPriority.size > 0 ? [{ file: sitemapMeta.priorityFile, match: (r) => sitemapPriority.has(r) }] : []),
   { file: 'sitemap-politicians.xml', match: (r) => r.startsWith('/politician/') },
   // 政策脈絡頁（/lineage/，#349）跟政見同一份：上線初期是 0 條，自己一份會是空檔
   { file: 'sitemap-policies.xml', match: (r) => r.startsWith('/policy/') || r.startsWith('/analysis/') || r.startsWith('/lineage/') },

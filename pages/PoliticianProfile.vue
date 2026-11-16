@@ -18,6 +18,7 @@ import Hero from '../components/Hero.vue'
 import HistoryPanel from '../components/history/HistoryPanel.vue'
 import { MapPin, GraduationCap, Briefcase, CheckCircle2, Megaphone, ThumbsUp, User, ChevronLeft, ChevronRight, Loader2, Sparkles, Search, CheckCircle, XCircle, Vote, Calendar, FileText, Camera, LayoutGrid, Table2, Users } from 'lucide-vue-next'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
+import { candidacyHeadWhat, personHeadDescription, personHeadTitle } from '../lib/person-head'
 import MdDrawer, { type MdPick } from '../components/MdDrawer.vue'
 import { HERO_ACTION_BASE, HERO_ACTION_IDLE, HERO_ACTION_SIZE } from '../lib/hero-action-styles'
 import AiLookupInline from '../components/AiLookupInline.vue'
@@ -29,7 +30,7 @@ import type { PersonCrumb } from '../composables/useMobileHeader'
 import type { BreadcrumbItem } from '../composables/usePageHead'
 import { personShareImage, personTrackingText, publicImageUrl } from '../lib/seo'
 import { electionPeers, primaryElection } from '../lib/election-peers'
-import { ballotLabel, ballotNoOfElection, nameWithBallot } from '../lib/ballot-number'
+import { ballotLabel, ballotNoOfElection } from '../lib/ballot-number'
 import { electionRegionPath, isCounty } from '../lib/election-regions'
 import { levelCountyLinkGroups, LEVEL_TAB_TYPES } from '../lib/desk-level-groups'
 import { useDeskNav } from '../composables/useDeskNav'
@@ -463,6 +464,17 @@ const otherCurrentPosition = computed(() => {
 // 這一屆的號次（中選會抽籤後才有）：姓名旁的徽章、標題與摘要都用；沒有就一律不顯示
 const ballot = computed(() => ballotNoOfElection(politician.value?.elections, thisElectionId.value))
 const identity = computed(() => titles.value.join('、') || (candidacy.value?.running ? `${candidacy.value.what}候選人` : ''))
+// 標題用字：這一屆還沒投票且沒退選／落選才用參選職位；否則 headWhat 空字串，標題維持現職格式
+const headInput = computed(() => {
+  const id = thisElectionId.value
+  const running = !!candidacy.value?.running && id != null && !isElectionPast(id)
+  return {
+    name: politician.value?.name ?? '',
+    ballot: ballot.value,
+    identity: identity.value,
+    headWhat: running ? candidacyHeadWhat(politician.value?.elections?.find((e) => e.electionId === id)) : '',
+  }
+})
 const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
 
 const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', pledgeElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
@@ -478,11 +490,19 @@ usePageHead({
   // 標題與摘要用 identity（現任職稱優先，其次這一屆的參選），不用 position——
   // position 是最近一筆參選紀錄，落選的人也會有，拿來當標題等於對外宣稱他是現任（2026-10-04）
   // 有號次就帶「（2 號）」：選前「某某 號次」是高搜尋量的詞（#460）
-  title: () => politician.value ? [nameWithBallot(politician.value.name, ballot.value), identity.value].filter(Boolean).join('｜') : undefined,
+  // 這一屆有在選（還沒投票、沒退選）：標題寫「2026 新竹縣長候選人政見」，不再只寫現職（2026-11-16 流量體檢，lib/person-head.ts）
+  title: () => politician.value ? personHeadTitle(headInput.value) : undefined,
   description: () => politician.value
-    ? (politician.value.slogan || politician.value.bio
-        ? `${politician.value.name}（${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}）：${politician.value.slogan || politician.value.bio}`
-        : `${politician.value.name}，${[ballotLabel(ballot.value), politician.value.party, identity.value || politician.value.region].filter(Boolean).join('，')}。${personTrackingText(campaignPledges.value.length, historicalPolicies.value.length)}`)
+    ? personHeadDescription({
+        ...headInput.value,
+        party: politician.value.party,
+        region: politician.value.region,
+        slogan: politician.value.slogan,
+        bio: politician.value.bio,
+        policyCount: campaignPledges.value.length + historicalPolicies.value.length,
+        policyTitles: [...campaignPledges.value, ...historicalPolicies.value].map((p) => p.title),
+        trackingText: personTrackingText(campaignPledges.value.length, historicalPolicies.value.length),
+      })
     : undefined,
   // 2026-09-23：給搜尋引擎與 AI 讀的結構化資料；政見清單放 subjectOf，每筆帶固定網址，AI 轉述時才引得回來
   jsonLd: () => politician.value ? {
@@ -511,7 +531,7 @@ usePageHead({
 
 <template>
   <div v-if="politician" class="bg-slate-50 min-h-screen">
-    <Hero auto-height>
+    <Hero auto-height title-tag="div">
       <template #icon><User :size="400" class="text-violet-500" /></template>
       <template #title>
         <div class="flex flex-col md:flex-row gap-8 items-start">
