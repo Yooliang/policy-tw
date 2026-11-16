@@ -1,5 +1,6 @@
 import { FEATURED_LOCAL_ELECTION_ID } from './election-regions'
 import { isLineageListed } from './lineage'
+import { ballotNoOfElection } from './ballot-number'
 
 /**
  * 網站地圖的內容規則（2026-10-08，#466）：誰進 sitemap-politicians.xml、各頁的 lastmod 取哪個時間。純函式，建置端
@@ -74,7 +75,27 @@ export function isSitemapPerson(policyCount: number, hasFeaturedElection = false
   return hasFeaturedElection || policyCount >= SITEMAP_MIN_POLICIES_FOR_PERSON
 }
 
-export interface SitemapPerson { id: string | number; elections?: ReadonlyArray<{ electionId: number | string }> | null }
+export interface SitemapPerson {
+  id: string | number
+  elections?: ReadonlyArray<{ electionId: number | string; candNo?: number | null; candidacyStatus?: string | null }> | null
+  bio?: string | null
+  slogan?: string | null
+}
+
+/**
+ * 優先子網站地圖（2026-11-16，流量體檢：九成流量是 Google 搜候選人名字）：焦點屆別已有號次（沒退選）、
+ * 而且有政見或有簡介（簡介／口號）的人，拆成 sitemap-<屆別>-candidates.xml 排在索引最前面。
+ * 只是「分檔」：網址總數不變，不刪任何網址；這些人本來就在 sitemap-politicians.xml 的收錄範圍裡（有參選紀錄一律收）。
+ */
+export function isPriorityCandidate(person: SitemapPerson, policyCount: number, electionId: number | string = FEATURED_LOCAL_ELECTION_ID): boolean {
+  if (ballotNoOfElection((person.elections ?? []).map((e) => ({ ...e, electionId: Number(e.electionId) })), Number(electionId)) === undefined) return false
+  return policyCount > 0 || !!(person.bio?.trim() || person.slogan?.trim())
+}
+
+/** 優先子網站地圖的檔名 */
+export function priorityCandidatesFile(electionId: number | string = FEATURED_LOCAL_ELECTION_ID): string {
+  return `sitemap-${electionId}-candidates.xml`
+}
 
 /** 有沒有焦點屆別的參選紀錄（不看參選狀態） */
 export function hasElection(person: SitemapPerson, electionId: number | string = FEATURED_LOCAL_ELECTION_ID): boolean {
@@ -85,6 +106,10 @@ export function hasElection(person: SitemapPerson, electionId: number | string =
 export interface SitemapMeta {
   lastmod: Record<string, string>
   skip: string[]
+  /** 優先子網站地圖收的網址（人物頁）；沒給或空陣列＝不拆這一份 */
+  priority?: string[]
+  /** 優先子網站地圖的檔名 */
+  priorityFile?: string
 }
 
 export function buildSitemapMeta(input: {
@@ -99,12 +124,15 @@ export function buildSitemapMeta(input: {
 }): SitemapMeta {
   const lastmod: Record<string, string> = {}
   const skip: string[] = []
+  const priority: string[] = []
+  const featured = input.featuredElectionId ?? FEATURED_LOCAL_ELECTION_ID
   const stats = policyStatsByPolitician(input.policies)
   for (const person of input.politicians) {
     const s = stats.get(String(person.id))
     const route = `/politician/${person.id}`
     if (!isSitemapPerson(s?.count ?? 0, hasElection(person, input.featuredElectionId))) { skip.push(route); continue }
     if (s?.lastmod) lastmod[route] = s.lastmod
+    if (isPriorityCandidate(person, s?.count ?? 0, featured)) priority.push(route)
   }
   const policyById = new Map(input.policies.map((p) => [String(p.id), p]))
   for (const p of input.policies) {
@@ -121,5 +149,5 @@ export function buildSitemapMeta(input: {
     const iso = toLastmod(l.updatedAt)
     if (iso) lastmod[`/lineage/${l.id}`] = iso
   }
-  return { lastmod, skip }
+  return { lastmod, skip, priority, priorityFile: priorityCandidatesFile(featured) }
 }

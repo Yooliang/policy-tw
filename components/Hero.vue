@@ -11,6 +11,11 @@ defineProps<{
   autoHeight?: boolean
   /** 大版標題區（只有首頁用）；其他頁一律是縮小版，高度約原本的一半（2026-10-31） */
   large?: boolean
+  /**
+   * 標題插槽的外框：預設 h1（插槽內容就是頁面標題）。標題插槽裡還放了頭像、徽章、按鈕的頁面（人物頁）傳 'div'，
+   * 自己在插槽內只把名字包成 h1——不然整串「1 照片更新鄭朝方」都被搜尋引擎當成 h1（2026-11-16 流量體檢）。
+   */
+  titleTag?: 'h1' | 'div'
 }>()
 </script>
 
@@ -40,10 +45,10 @@ defineProps<{
           <!-- 標題上方的標誌（選用，例如政黨頁的黨徽） -->
           <div v-if="$slots.logo" class="mb-4"><slot name="logo" /></div>
 
-          <h1 :class="['font-black tracking-tight leading-tight', large ? 'text-4xl md:text-5xl lg:text-6xl mb-6' : 'text-[2rem] md:text-[2.7rem] lg:text-[3.4rem] mb-3']">
+          <component :is="titleTag ?? 'h1'" :class="['font-black tracking-tight leading-tight', large ? 'text-4xl md:text-5xl lg:text-6xl mb-6' : 'text-[2rem] md:text-[2.7rem] lg:text-[3.4rem] mb-3']">
 
             <slot name="title" />
-          </h1>
+          </component>
 
           <p v-if="$slots.description" :class="['text-slate-400 leading-relaxed', large ? 'text-lg lg:text-xl mb-8' : 'text-base lg:text-lg mb-3']">
             <slot name="description" />

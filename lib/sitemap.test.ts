@@ -10,6 +10,7 @@ import { assertEquals } from "jsr:@std/assert@1";
 import {
   buildSitemapMeta,
   hasElection,
+  isPriorityCandidate,
   isSitemapPerson,
   latestLastmod,
   policyStatsByPolitician,
@@ -127,4 +128,31 @@ Deno.test("接線：server-data 用 buildSitemapMeta 寫 .sitemap-meta.json，po
   assertEquals(/sitemapSkip\.has\(r\)/.test(postbuild), true);
   assertEquals(/sitemap-xml\.js/.test(postbuild), true);
   assertEquals(/taipeiDate|<lastmod>\$\{lastmod\}/.test(postbuild), false);
+});
+
+Deno.test("優先子網站地圖：焦點屆別有號次且有政見或簡介的候選人才進；網址總數不變、只是分檔", () => {
+  const meta = buildSitemapMeta({
+    politicians: [
+      { id: "numbered-policy", elections: [{ electionId: 2026, candNo: 1 }] },
+      { id: "numbered-bio", elections: [{ electionId: 2026, candNo: 2 }], bio: "簡介" },
+      { id: "numbered-empty", elections: [{ electionId: 2026, candNo: 3 }] }, // 有號次但沒政見沒簡介：不進優先
+      { id: "no-number", elections: [{ electionId: 2026 }], bio: "簡介" }, // 沒號次：不進優先
+      { id: "withdrawn", elections: [{ electionId: 2026, candNo: 4, candidacyStatus: "withdrawn" }], bio: "簡介" },
+      { id: "old", elections: [{ electionId: 2022, candNo: 1 }], bio: "簡介" },
+    ],
+    policies: many("numbered-policy", 1),
+    lineages: [],
+  });
+  assertEquals(meta.priority, ["/politician/numbered-policy", "/politician/numbered-bio"]);
+  assertEquals(meta.priorityFile, "sitemap-2026-candidates.xml");
+  // 不刪任何網址：skip 只有原本規則裡的（old 政見不足）
+  assertEquals(meta.skip, ["/politician/old"]);
+  assertEquals(isPriorityCandidate({ id: "x", elections: [{ electionId: 2030, candNo: 1 }], bio: "a" }, 0, 2030), true);
+});
+
+Deno.test("接線：postbuild 把優先名單拆成獨立子 sitemap 並排在索引最前（沒有名單就不產空檔）", async () => {
+  const postbuild = await Deno.readTextFile(new URL("../scripts/postbuild-ssg.mjs", import.meta.url));
+  assertEquals(/sitemapPriority\.size > 0 \? \[\{ file: sitemapMeta\.priorityFile/.test(postbuild), true);
+  const groupsAt = postbuild.indexOf("const SITEMAP_GROUPS = [");
+  assertEquals(postbuild.indexOf("sitemapPriority.has(r)", groupsAt) < postbuild.indexOf("sitemap-politicians.xml", groupsAt), true);
 });
