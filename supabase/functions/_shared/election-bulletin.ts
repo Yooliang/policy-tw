@@ -106,7 +106,7 @@ export function districtNumbers(rawName: string): number[] {
   // 全形數字（第２選舉區）、「第 01選舉區」的空白
   const name = rawName.replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0)).replace(/第\s+/g, "第");
   const out = new Set<number>();
-  const re = new RegExp(`第(${NUM}(?:\\s*[、.,，．\\-－~～]\\s*${NUM})*)選(?:舉)?區`, "g");
+  const re = new RegExp(`(?:第|[(（])(${NUM}(?:\\s*[、.,，．\\-－~～]\\s*${NUM})*)選(?:舉)?區`, "g");
   for (const m of name.matchAll(re)) {
     const body = m[1];
     const range = new RegExp(`^(${NUM})\\s*[\\-－~～]\\s*(${NUM})$`).exec(body);
@@ -131,7 +131,7 @@ const CATEGORY: Record<string, RegExp> = {
   "直轄市山地原住民區長": /^原住民區長$/,
   "鄉鎮市民代表": /^鄉鎮市民代表$/,
   "直轄市山地原住民區民代表": /^原住民區民代表$/,
-  "村里長": /^村里長$/,
+  "村里長": /^(村里長|里長)$/, // 高雄 115 年的資料夾叫「05里長」
   // bulletin.cec.gov.tw 的區域立委（不分區是政黨名單、原住民立委不在 cec_candidates，都不收）
   "立法委員": /^區域立法委員$/,
 };
@@ -330,4 +330,30 @@ export function matchBulletin(
     }
   }
   return { ok: false, reason: `不認得的選舉種類：${unit.election_type}` };
+}
+
+/**
+ * 公報入口網址：取 elections.bulletin_hint 「←」前面的網址；沒有 bulletin_dir（還沒有公報資料夾的屆別）或網址不是 https 就回 null。
+ * 入口與年份都由資料庫帶出，不寫在程式裡（docs/decisions/2026-10-07 公報入口讀 elections）。
+ */
+export function bulletinEntryFromHint(hint: string | null | undefined, dir: string | null | undefined): string | null {
+  if (!dir || !hint) return null;
+  const first = hint.split("←")[0].trim();
+  try {
+    return new URL(first).protocol === "https:" ? first : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 公報已上架、但系統沒推出這個人的公報網址時給代理的找法（2026-11-17）。
+ * 起因：公報索引沒涵蓋到的單位，代理對公報站目錄直連得到 403，就誤判「沒上架」回 not_found。
+ * 入口由呼叫端從 elections 帶入；路徑規則不含年份、不含站名。
+ */
+export function bulletinLookupNote(entry: string): string {
+  const site = new URL(entry).origin;
+  return `公報已經上架，只是系統沒推出這位的公報網址，不代表沒有。從入口 ${entry} 一層層點進去找（縣市／選舉別／鄉鎮市區／選區或村里的 PDF），` +
+    `或用 ${site}/?action=sitemap 的全站清單搜縣市與鄉鎮名；各縣市檔名不一樣，有的一個村里一檔、有的一個鄉鎮一檔、有的依選區分檔。` +
+    "**公報站的目錄網址直連會回 403，那不代表沒上架**，要從入口點進去。入口與清單都找過、確實沒有這位那一份，才回 not_found（checked_urls 附你點過的入口）。";
 }
