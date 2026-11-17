@@ -106,7 +106,7 @@ export function districtNumbers(rawName: string): number[] {
   // 全形數字（第２選舉區）、「第 01選舉區」的空白
   const name = rawName.replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0)).replace(/第\s+/g, "第");
   const out = new Set<number>();
-  const re = new RegExp(`第(${NUM}(?:\\s*[、.,，．\\-－~～]\\s*${NUM})*)選(?:舉)?區`, "g");
+  const re = new RegExp(`(?:第|[(（])(${NUM}(?:\\s*[、.,，．\\-－~～]\\s*${NUM})*)選(?:舉)?區`, "g");
   for (const m of name.matchAll(re)) {
     const body = m[1];
     const range = new RegExp(`^(${NUM})\\s*[\\-－~～]\\s*(${NUM})$`).exec(body);
@@ -131,7 +131,7 @@ const CATEGORY: Record<string, RegExp> = {
   "直轄市山地原住民區長": /^原住民區長$/,
   "鄉鎮市民代表": /^鄉鎮市民代表$/,
   "直轄市山地原住民區民代表": /^原住民區民代表$/,
-  "村里長": /^村里長$/,
+  "村里長": /^(村里長|里長)$/, // 高雄 115 年的資料夾叫「05里長」
   // bulletin.cec.gov.tw 的區域立委（不分區是政黨名單、原住民立委不在 cec_candidates，都不收）
   "立法委員": /^區域立法委員$/,
 };
