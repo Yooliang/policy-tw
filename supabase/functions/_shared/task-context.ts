@@ -460,11 +460,17 @@ export function shapeTaskCurrent(
   // 「這一種任務怎麼做」隨任務送出（2026-09-21）：代理只做眼前這一筆，不該先讀一份 20 種型別的目錄。
   // 依當筆資料而變的 hint 由上面各 case 自己組，組過的就不要覆蓋。
   // 不參選重查的 filing 那一種（#345 後續）收尾是 correction 改 withdrawn_after_filing，hint 另外給
-  const hint = isMultiPersonTarget(target) ? MULTI_PERSON_HINT : inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
+  const baseHint = isMultiPersonTarget(target) ? MULTI_PERSON_HINT : inner.hint ?? (isWithdrawnFilingTask(taskType, target) ? WITHDRAWN_FILING_HINT
     : isPartyGapTask(taskType, target) ? PARTY_GAP_HINT
     : ballot ? BALLOT_NUMBERS_HINT
     : recheck ? BALLOT_NUMBERS_RECHECK_HINT
     : taskType === "candidacy_source_missing" && target?.kind === "party_roster" ? PARTY_ROSTER_HINT : TASK_GUIDANCE[taskType]);
+  // 公報已上架但系統沒推出這個人的公報（索引沒涵蓋到的單位）：把入口與找法接在 hint 後面（協議的 current.hint 本來就是給代理看的做法提示），
+  // 不要因為目錄直連 403 就回查無。沒有入口（該屆沒有 bulletin_dir）不附
+  const lookupNote = (taskType === "policy_missing" || taskType === "term_policy_missing") && data.bulletin_published === true && data.bulletin_entry && !shapeBulletins(data.bulletins)
+    ? bulletinLookupNote(data.bulletin_entry)
+    : null;
+  const hint = lookupNote ? (baseHint ? `${baseHint}\n${lookupNote}` : lookupNote) : baseHint;
   // 回報的 payload 形狀也跟著送：任務說「用 correction 回報」卻不說 correction 長什麼樣，
   // 代理只能回頭翻協議或用猜的，猜錯就是一次 400、查證的工白做（2026-09-21 現場回報）。
   // 單則新聞初篩判成進度的，預設骨架給 policy_progress（其他分支在 report_templates_by_type 裡）
@@ -552,10 +558,6 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           ? `已經有 ${queued.length} 筆在等票，內容重複的不要再交；找到同一件事請改去投那一筆的票。`
           : null,
         ...(shapeBulletins(data.bulletins) ?? {}),
-        // 公報已上架但系統沒推出這個人的公報（索引沒涵蓋到的單位）：告訴代理入口與找法，不要因為目錄直連 403 就回查無
-        ...(data.bulletin_published === true && data.bulletin_entry && !shapeBulletins(data.bulletins)
-          ? { bulletins_lookup_note: bulletinLookupNote(data.bulletin_entry) }
-          : {}),
         // 公報還沒公告（false）就不用自己去公報站確認；沒查到（undefined）不給欄位
         ...(typeof data.bulletin_published === "boolean" ? { bulletin_published: data.bulletin_published } : {}),
       };

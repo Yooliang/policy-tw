@@ -254,11 +254,16 @@ Deno.test("公報入口由 elections 帶出：沒有 bulletin_dir 不附；找�
   assert(!/115|111|eebulletin/.test(note), "說明本身不寫年份與站名");
 });
 
-Deno.test("current：公報已上架但沒推出網址 → 帶找法；有推出網址、未上架、沒有入口都不帶", () => {
+Deno.test("current.hint：公報已上架但沒推出網址 → 找法接在既有 hint 後面；有推出網址、未上架、沒有入口都不接；不新開鍵", () => {
   const entry = "https://eebulletin.cec.gov.tw/?dir=115";
   const cur = (data: Record<string, unknown>) => shapeTaskCurrent("term_policy_missing", { politician: { id: "p" }, ...data } as never) as Record<string, unknown>;
-  assertStringIncludes(String(cur({ bulletin_published: true, bulletin_entry: entry }).bulletins_lookup_note), entry);
-  assertEquals(cur({ bulletin_published: true, bulletin_entry: entry, bulletins: [{ urls: ["https://x/y.pdf"], election_id: 2026, election_type: "村里長" }] }).bulletins_lookup_note, undefined);
-  assertEquals(cur({ bulletin_published: false, bulletin_entry: entry }).bulletins_lookup_note, undefined);
-  assertEquals(cur({ bulletin_published: true }).bulletins_lookup_note, undefined);
+  const note = bulletinLookupNote(entry);
+  const on = cur({ bulletin_published: true, bulletin_entry: entry });
+  assertStringIncludes(String(on.hint), note);
+  assert(String(on.hint).startsWith(String(TASK_GUIDANCE.term_policy_missing)), "既有 hint 在前、換行接上");
+  assertEquals("bulletins_lookup_note" in on, false, "不新開鍵");
+  const found = cur({ bulletin_published: true, bulletin_entry: entry, bulletins: [{ urls: ["https://x/y.pdf"], election_id: 2026, election_type: "村里長" }] });
+  assertEquals(String(found.hint).includes(note), false);
+  assertEquals(String(cur({ bulletin_published: false, bulletin_entry: entry }).hint).includes(note), false);
+  assertEquals(String(cur({ bulletin_published: true }).hint).includes(note), false);
 });
