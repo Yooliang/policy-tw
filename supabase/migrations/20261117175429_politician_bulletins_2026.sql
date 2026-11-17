@@ -6,6 +6,7 @@
 -- 怎麼改：2022／2024 的對法一個字不動（拿出來當 cec 那一段）；其餘屆別（今天只有 2026 有索引）另一段 own：
 --   參選紀錄（filed／elected／not_elected）已經用 region_id 落在某個選舉單位，直接拿 regions 的縣市／鄉鎮市區／村里
 --   對 election_bulletins 的同一組鍵，不需要姓名比對，所以也沒有「同名多人」的問題；號次用我們自己記的 politician_elections.cand_no。
+--   對的是跟索引產生時完全相同的等值（不經過任何函式，走 election_bulletins 的唯一索引；索引的值直接取自 regions，「臺東市」「霧臺鄉」照原樣）。
 --   withdrawn（退選）不列。election_bulletins 沒有那個單位的列就不給（寧可不附，不要給錯）。
 -- 欄位名稱與型別跟舊視圖一模一樣；下游（politician_bulletins_for、term_policy_missing）不用動。
 CREATE OR REPLACE VIEW politician_bulletins AS
@@ -62,9 +63,9 @@ own AS (
     JOIN regions r ON r.id = pe.region_id
     JOIN election_bulletins b
       ON b.election_id = pe.election_id AND b.election_type = pe.election_type
-     AND replace(b.region, '臺', '台') = replace(r.region, '臺', '台')
-     AND b.sub_region = replace(COALESCE(r.sub_region, ''), '臺', '台')
-     AND b.village = replace(COALESCE(r.village, ''), '臺', '台')
+     AND b.region = r.region
+     AND b.sub_region = COALESCE(r.sub_region, '')
+     AND b.village = COALESCE(r.village, '')
    WHERE pe.election_id <> ALL (ARRAY[2022, 2024])
      AND pe.candidacy_status = ANY (ARRAY['filed', 'elected', 'not_elected'])
    ORDER BY pe.politician_id, pe.election_id, pe.election_type, pe.id

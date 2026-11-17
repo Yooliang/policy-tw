@@ -15,6 +15,8 @@
  *         WHERE pe.election_id = 2026 AND pe.candidacy_status IN ('filed','elected','not_elected')
  *         GROUP BY 2,3,4,5 ORDER BY 2,3,4,5;
  *      跑的時候加 --election 2026 --wrap：只處理那一屆，並把輸出包成完整的 INSERT … ON CONFLICT 敘述（可直接當 migration）。
+ *      注意：--wrap 的輸出用 listed_on 的預設值（2022 那批的日期）；2026 的 migration 末尾那行 UPDATE listed_on = 2026-11-17 是手加的，重跑要自己補。
+ *      ON CONFLICT DO UPDATE 只更新對得到的單位，不會刪掉舊清單裡已經不存在的單位列（要清要另外寫 DELETE）。
  *   2. deno run --allow-net --allow-env --allow-read --allow-write scripts/build-election-bulletins.ts units.csv out.sql report.json
  *      （SUPABASE_URL、SUPABASE_ANON_KEY 有設就從 elections.bulletin_dir 讀公報資料夾，沒設用程式裡的後備）
  *      （抓 eebulletin.cec.gov.tw 與 bulletin.cec.gov.tw 的 ?action=sitemap 全站清單，逐一對；對不到的寫進 report.json）

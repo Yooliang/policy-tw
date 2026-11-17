@@ -15,6 +15,8 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   BULLETIN_BASE,
   buildBulletinIndex,
+  bulletinEntryFromHint,
+  bulletinLookupNote,
   bulletinRelPath,
   bulletinUrl,
   CENTRAL_BULLETIN_BASE,
@@ -202,7 +204,9 @@ const VIEW_2026 = await readMigration("20261117175429_politician_bulletins_2026.
 
 Deno.test("migration 2026：資料段每列 1～4 份、單位不重複、全是 115 年、ON CONFLICT 與 2022 同一組鍵", () => {
   const rows = [...IDX_2026.matchAll(/^\((\d{4}),'([^']*)','([^']*)','([^']*)','([^']*)',ARRAY\[([^\]]*)\],'([^']*)'\),?$/gm)];
-  assert(rows.length > 7000, `2026 資料段 ${rows.length} 列`);
+  const dataLines = IDX_2026.split("\n").filter((l) => l.startsWith("(2026"));
+  assertEquals(rows.length, dataLines.length, "每一行資料都要被格式正則認得，沒有漏掉的");
+  assertEquals(rows.length, 7344, "對到 7,344 個單位（重跑腳本後要同步改這個數字與 PR 說明）");
   const keys = new Set<string>();
   for (const r of rows) {
     assertEquals(r[1], "2026");
@@ -226,4 +230,35 @@ Deno.test("migration 2026：視圖 2022／2024 走 cec_candidates 照舊、其�
   assertStringIncludes(VIEW_2026, "JOIN regions r ON r.id = pe.region_id");
   assertStringIncludes(VIEW_2026, "pe.cand_no");
   assertStringIncludes(VIEW_2026, `WHEN u.p LIKE '01選舉公報/%' THEN '${CENTRAL_BULLETIN_BASE}' ELSE '${BULLETIN_BASE}' END || u.p`);
+});
+
+Deno.test("migration 2026：索引保留「臺」（臺東市、霧臺鄉），視圖對 region／sub_region／village 都是原值等值、不經過 replace（才走得到唯一索引）", () => {
+  assert(IDX_2026.includes("'臺東市'"), "資料段要有臺東市");
+  assert(IDX_2026.includes("'霧臺鄉'"), "資料段要有霧臺鄉");
+  // 只看 own 段，cec 段（2022／2024）本來就有 replace
+  const own = VIEW_2026.slice(VIEW_2026.indexOf("own AS ("));
+  assert(own.length > 100 && !own.includes("replace("), "own 段不能有 replace(");
+  assertStringIncludes(own, "b.region = r.region");
+  assertStringIncludes(own, "b.sub_region = COALESCE(r.sub_region, '')");
+  assertStringIncludes(own, "b.village = COALESCE(r.village, '')");
+});
+
+Deno.test("公報入口由 elections 帶出：沒有 bulletin_dir 不附；找法說明不含年份與站名", () => {
+  assertEquals(bulletinEntryFromHint("https://eebulletin.cec.gov.tw/?dir=115 ← 中選會 2026", "115"), "https://eebulletin.cec.gov.tw/?dir=115");
+  assertEquals(bulletinEntryFromHint("https://eebulletin.cec.gov.tw/?dir=115 ← x", null), null);
+  assertEquals(bulletinEntryFromHint(null, "115"), null);
+  assertEquals(bulletinEntryFromHint("not a url ← x", "115"), null);
+  const note = bulletinLookupNote("https://bulletin.cec.gov.tw/?dir=01");
+  assertStringIncludes(note, "https://bulletin.cec.gov.tw/?dir=01");
+  assertStringIncludes(note, "403");
+  assert(!/115|111|eebulletin/.test(note), "說明本身不寫年份與站名");
+});
+
+Deno.test("current：公報已上架但沒推出網址 → 帶找法；有推出網址、未上架、沒有入口都不帶", () => {
+  const entry = "https://eebulletin.cec.gov.tw/?dir=115";
+  const cur = (data: Record<string, unknown>) => shapeTaskCurrent("term_policy_missing", { politician: { id: "p" }, ...data } as never) as Record<string, unknown>;
+  assertStringIncludes(String(cur({ bulletin_published: true, bulletin_entry: entry }).bulletins_lookup_note), entry);
+  assertEquals(cur({ bulletin_published: true, bulletin_entry: entry, bulletins: [{ urls: ["https://x/y.pdf"], election_id: 2026, election_type: "村里長" }] }).bulletins_lookup_note, undefined);
+  assertEquals(cur({ bulletin_published: false, bulletin_entry: entry }).bulletins_lookup_note, undefined);
+  assertEquals(cur({ bulletin_published: true }).bulletins_lookup_note, undefined);
 });

@@ -60,26 +60,12 @@ export const MULTI_PERSON_HINT =
   "**每一筆交件都要帶 payload.person_key＝名單裡那一位的 key（照抄 target.people[].key，說明每位前面的「person_key：…」），沒帶或不在名單上伺服器回 400（person_key_required／person_key_unknown）；no_change 另外要帶那一位的 politician_election_id。**" +
   "某一位查不到或官方資料有誤就對那一位交 no_change（附你看了哪裡），不影響其他人；查無（not_found）與確認無誤（confirmed）逐位累計冷卻（查無 5／10／20 天、第 4 次起結案；確認 5／10 天、第 3 次起結案），冷卻中與結案的人不會出現在說明裡；掛錯人那種確認是同一人（confirmed）會讓那一位直接從清單移除。每位的 politician_election_id、politician_id、官方網址都在那一位的 line 裡。";
 
-/**
- * 公報已上架、但系統沒推出這位的公報（current 沒有 bulletins、target 沒有 bulletin_urls）時怎麼找（2026-11-17）。
- * 起因：2026 的公報索引還沒建好時，代理對公報站目錄直連得到 403，就誤判「沒上架」回 not_found。
- * 只是提示文字，不改協議欄位。
- */
-export const BULLETIN_NOT_INDEXED_NOTE =
-  "**current.bulletin_published 是 true、但 current 沒有 bulletins、target 也沒有 bulletin_urls**：只代表系統沒推出這位的公報，不代表公報沒上架。" +
-  "從入口 https://eebulletin.cec.gov.tw/?dir=115 進去（地方選舉在這個站，民國年資料夾：2026 是 115、2022 是 111），" +
-  "路徑規則是 /115/<編號+縣市>/<編號+選舉別>/<鄉鎮市區>/<選區或村里>.pdf，例：/115/09彰化縣/04鄉鎮市民代表/福興鄉/福興鄉第03選舉區.pdf；" +
-  "選舉別資料夾有縣市長、縣市議員、鄉鎮市長、鄉鎮市民代表、村里長（直轄市另有原住民區長、區民代表），各縣市檔名不一樣，有的一個村里一檔、有的一個鄉鎮一檔、有的依選區分檔。" +
-  "**目錄網址直連會回 403，那不代表沒上架**，要從入口一層層點進去，或用 https://eebulletin.cec.gov.tw/?action=sitemap 的全站清單搜縣市與鄉鎮名；" +
-  "入口與清單都找過、確實沒有這位那一份，才回 not_found（checked_urls 附你點過的入口）。";
-
 export const TASK_GUIDANCE: Record<string, string> = {
   policy_missing:
     "**current 有 bulletins 的先看公報**：那是系統推得出來的中選會選舉公報與號次（候選人自己登記的政見原文），照公報交那一屆的政見。" +
     "找這個人**有出處的具體政見，最多 5 筆**：每筆一個 policy、各附自己的出處。找到幾筆交幾筆，只找到 1 筆就交 1 筆——**不要為了湊數交口號、願景或個人表態**。先看 queued_policies，別人交了還在等票的不要再交。" +
     "**一則報導裡的「N 大政見」「N 箭」「N 夠力」怎麼記**：以「能不能各自查核」為準。每一項有自己的標的（哪家醫院、哪條路線、多少錢、給誰）就拆成 N 筆，各自獨立追蹤進度，同一個 source_url 重複用沒關係；只是形容詞或無法單獨查核的子項（「行政加速」「專業務實」「整合資源」）併回母筆的 description，不要單獨成筆。拆出來超過 5 筆時先交最具體的 5 筆。" +
     "**這件任務要的是 2026 這一屆的承諾**（候選人在 2026 選舉前提出的政見，election_id 填 2026）：現任任期的施政、上屆或過去選舉的政見不是這一屆的承諾，不要為了這件任務交，交了這件任務也不會結束；找不到這一屆的就用 no_change 回報你查了什麼。" +
-    BULLETIN_NOT_INDEXED_NOTE +
     gazetteImageNote + notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE + soleSourceDeferNote +
     searchFirst("policy_missing"),
 
@@ -90,7 +76,6 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "**首選中選會選舉公報**：每位候選人登記的政見原文都印在公報上，hint_sources 第一個就是那一屆的入口，依縣市、選舉別、選舉區點到 PDF；公報 PDF 的網址就是 source_urls。其次本人官網／臉書的競選政見頁、當年的新聞。" +
     // 從公報補政見（2026-10-06）：系統推得出公報就直接給，對象也擴到落選人、村里長、代表
     "**target 有 bulletin_urls 的，系統已經找到那一份公報、cand_no 是他的號次**：直接打開，依姓名與號次找到他自己那一欄，把那一欄的政見逐條交（公報上列幾條交幾條、一次交完，不受上面 5 筆的限制；口號、標語、「為民服務」不交）；那一欄確實空白或只有口號才回查無，checked_urls 要有這份公報。" +
-    BULLETIN_NOT_INDEXED_NOTE +
     gazetteImageNote +
     "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、其他屆別的政見不是這一屆的競選政見**，這個任務不要交。" +
     notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE + soleSourceDeferNote +

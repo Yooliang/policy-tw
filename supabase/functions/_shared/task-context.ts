@@ -18,6 +18,7 @@ type Obj = Record<string, unknown>;
 import { buildBranchTemplates, buildNoChangeTemplate, buildReportTemplate, MULTI_PERSON_HINT, newsItemGuidance, PAYLOAD_SHAPE, TASK_GUIDANCE } from "./task-guidance.ts";
 import { isMultiPersonTarget } from "./task-fulfilment.ts";
 import { bulletinSourceUrl, isBulletinPolicy } from "./consensus.ts";
+import { bulletinEntryFromHint, bulletinLookupNote } from "./election-bulletin.ts";
 import { shapeAvatarChoiceCurrent } from "./avatar-choice.ts";
 import { SUGGESTED_TYPE } from "./task-types.ts";
 import { missingElements } from "./policy-elements.ts";
@@ -92,6 +93,8 @@ export interface TaskContextData {
   bulletins?: Obj[];
   /** policy_missing／term_policy_missing（協議 1.136.0）：這件任務那場選舉的選舉公報上架了嗎（election_milestones 的 bulletin_published 是 done）；沒有公報里程碑的舊屆算已上架；查不到就 undefined（不給欄位） */
   bulletin_published?: boolean;
+  /** 這件任務那場選舉的公報入口網址（elections.bulletin_hint，要有 bulletin_dir 才給）；公報已上架卻沒推出網址時用來告訴代理從哪找 */
+  bulletin_entry?: string;
   /** 查證來源（2026-09-28）：依這個任務對象的政黨／縣市／選舉別自動附上的查證來源，撈不到就 undefined */
   verification_sources?: TaskSourceHint[];
   /** 政見三要素（#364）：這條政見已經有的要素列（沒有的那幾個＝未調查） */
@@ -426,7 +429,8 @@ export function shapeBulletins(rows: readonly Obj[] | undefined): { bulletins: O
     bulletins: list,
     bulletins_note: `中選會選舉公報已經找到：${first.election_id} ${first.election_type}（${first.unit}）${(first.urls as string[])[0]}，他是號次 ${first.cand_no ?? "？"}。` +
       "公報上印的是候選人自己登記的政見原文，先看公報：依姓名與號次找到他自己那一欄（圖片版要裁切放大核對，不要看成隔壁的），" +
-      "把那一欄的政見逐條交成 policy（election_id 填那一屆、source_urls 放公報網址、note 寫第幾頁第幾點）。公報那一欄確實空白才算查無。",
+      "把那一欄的政見逐條交成 policy（election_id 填那一屆、source_urls 放公報網址、note 寫第幾頁第幾點）。公報那一欄確實空白才算查無。" +
+      "公報上找不到他的名字時，先核對他登記的選舉單位對不對（網址是依他登記的單位推的，單位掛錯就會給到別人的公報），不要直接回查無。",
   };
 }
 
@@ -548,6 +552,10 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
           ? `已經有 ${queued.length} 筆在等票，內容重複的不要再交；找到同一件事請改去投那一筆的票。`
           : null,
         ...(shapeBulletins(data.bulletins) ?? {}),
+        // 公報已上架但系統沒推出這個人的公報（索引沒涵蓋到的單位）：告訴代理入口與找法，不要因為目錄直連 403 就回查無
+        ...(data.bulletin_published === true && data.bulletin_entry && !shapeBulletins(data.bulletins)
+          ? { bulletins_lookup_note: bulletinLookupNote(data.bulletin_entry) }
+          : {}),
         // 公報還沒公告（false）就不用自己去公報站確認；沒查到（undefined）不給欄位
         ...(typeof data.bulletin_published === "boolean" ? { bulletin_published: data.bulletin_published } : {}),
       };
@@ -992,11 +1000,24 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.policies_total = pol.count ?? (data.policies ?? []).length;
     data.queued_policies = queued.data ?? [];
     // 公報上架了嗎（協議 1.136.0）：沒有 target.election_id 才用這個人最新一屆的參選紀錄補查一次
+    let bulletinEid: number | null = bulStarted ? (target.election_id as number) : null;
     if (!bulStarted) {
       const firstEid = (data.elections?.[0] as Obj | undefined)?.election_id;
-      if (typeof firstEid === "number") data.bulletin_published = bulletinPublishedFrom(await bulletinMilestoneQuery(supabase, firstEid));
+      if (typeof firstEid === "number") {
+        bulletinEid = firstEid;
+        data.bulletin_published = bulletinPublishedFrom(await bulletinMilestoneQuery(supabase, firstEid));
+      }
     } else {
       data.bulletin_published = bulletinPublishedFrom(bulMs);
+    }
+    // 公報已上架卻沒推出網址時要給的入口：讀 elections（bulletin_dir＋bulletin_hint），沒有 bulletin_dir 的屆別不給；查不到不擋派工
+    if (data.bulletin_published === true && bulletinEid !== null && !(Array.isArray(data.bulletins) && data.bulletins.length > 0)) {
+      try {
+        const e = await supabase.from("elections").select("bulletin_dir, bulletin_hint").eq("id", bulletinEid).limit(1);
+        const row = !e.error && Array.isArray(e.data) ? (e.data[0] as Obj | undefined) : undefined;
+        const entry = row ? bulletinEntryFromHint(row.bulletin_hint as string | null, row.bulletin_dir as string | null) : null;
+        if (entry) data.bulletin_entry = entry;
+      } catch (_) { /* 沒有入口就不附這段 */ }
     }
   }
   // 單則新聞任務（2026-09-29）：判成進度的要看那條政見與它的時間軸；判成新承諾的要看這個人已有／等票中的政見，免得重交
