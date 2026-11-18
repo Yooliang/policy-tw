@@ -1,12 +1,12 @@
 /**
  * 查核階梯不計「公報索引上架前的查無」（migration 20261118010000_ladder_ignore_prebulletin_checks.sql，方案 D）——PGlite 真的執行新版函式：
- * task_check_prebulletin、task_check_cooldown_days_for、work_key_ladder_state。
+ * task_check_prebulletin_cutoff、task_check_cooldown_days_for、work_key_ladder_state。
  *
  *   1. 公報上架前的 4 次查無不結案、不冷卻；上架後的第一次查無從階梯第 1 格開始（5 天）
  *   2. 只排除補政見任務的 not_found：confirmed、其他任務型別、沒有公報的候選人一律照舊
- *   3. 邊界：上架日（台北）整天都算尚未上架；隔天 00:00 台北起才計
+ *   3. 邊界：截止＝上架日隔天 00:00 UTC（索引 19:00Z 才上線）；前一分鐘排除、後一分鐘計入
  *   4. 要有「那一屆」的公報才排除（工作卡的屆別對得上 politician_bulletins.election_id）
- *   5. 文字層：三個函式都在新 migration、簽名不變、不動資料列、視圖與 refresh_dispatch_blocked 沒被重寫
+ *   5. 網站請求等手動任務（uuid task_id）與 auto 共用工作卡，同樣排除；文字層：不動資料列、簽名不變
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
@@ -51,7 +51,7 @@ async function buildDb(): Promise<PGlite> {
     CREATE TABLE election_bulletins (election_id integer, election_type text, region text, sub_region text NOT NULL DEFAULT '', village text NOT NULL DEFAULT '', listed_on date NOT NULL);
     INSERT INTO election_bulletins VALUES (2026, '縣市長', '甲縣', '', '', DATE '2026-11-17'), (2022, '縣市長', '乙縣', '', '', DATE '2026-10-06');
     INSERT INTO politician_bulletins VALUES ('${P1}', 2026, '縣市長', '甲縣', '', ''), ('${P3}', 2022, '縣市長', '乙縣', '', '');
-    ${fnText(NEW, "task_check_prebulletin")}
+    ${fnText(NEW, "task_check_prebulletin_cutoff")}
     ${fnText(NEW, "task_check_cooldown_days_for")}
     ${fnText(NEW, "work_key_ladder_state")}
   `);
@@ -71,6 +71,8 @@ Deno.test("1 公報上架前的 4 次查無不結案、不計階梯；上架後�
   for (const t of ["2026-11-02", "2026-11-06", "2026-11-10", "2026-11-14"]) await at(db, pm, "not_found", `${t}T03:00:00Z`);
   const s = await state(db, `politician:${P1}:policies:2026`);
   assertEquals([s.checks, s.closed], [0, false], "4 次都在上架前：階梯累計 0、沒結案");
+  const cool = (await db.query<{ c: boolean; cc: boolean }>(`SELECT (cool_until IS NOT NULL) AS c, (check_cool_until IS NOT NULL) AS cc FROM work_key_ladder_state('politician:${P1}:policies:2026')`)).rows[0];
+  assertEquals([cool.c, cool.cc], [false, false], "被排除的列不產生冷卻（cool_until、check_cool_until 皆 NULL）");
   await at(db, pm, "not_found", "2026-11-18T05:00:00Z"); // id 5：上架後第一次
   assertEquals(await days(db, 5), 5, "上架後第一次查無＝階梯第 1 格");
   assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 1);
@@ -86,13 +88,15 @@ Deno.test("2 只排除補政見任務的 not_found：confirmed、其他任務型
   assertEquals((await state(db, `politician:${P1}:profile`)).checks, 1, "補基本資料的查無照算");
 });
 
-Deno.test("3 邊界：上架日（台北）整天算尚未上架，隔天 00:00 台北起才計", async () => {
+Deno.test("3 邊界：截止＝上架日隔天 00:00 UTC；前一分鐘排除、後一分鐘計入", async () => {
   const db = await buildDb();
   const pm = `auto:policy_missing:${P1}`;
-  await at(db, pm, "not_found", "2026-11-17T15:59:00Z"); // 11-17 23:59 台北：上架日當天 → 排除
-  await at(db, pm, "not_found", "2026-11-17T16:01:00Z"); // 11-18 00:01 台北 → 計
-  const r = (await db.query<{ p: boolean }>(`SELECT task_check_prebulletin(task_id, work_key, outcome, checked_at) AS p FROM task_checks ORDER BY id`)).rows;
+  await at(db, pm, "not_found", "2026-11-17T23:59:00Z"); // 上架日 19:00Z 之後仍在截止前 → 排除
+  await at(db, pm, "not_found", "2026-11-18T00:01:00Z"); // 截止後 → 計
+  const r = (await db.query<{ p: boolean }>(
+    `SELECT (outcome = 'not_found' AND checked_at < task_check_prebulletin_cutoff(work_key)) AS p FROM task_checks ORDER BY id`)).rows;
   assertEquals(r.map((x) => x.p), [true, false]);
+  assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 1, "只有截止後那一筆計入階梯");
 });
 
 Deno.test("4 要有「那一屆」的公報才排除：2022 有公報的人 2026 的查無照算；2022 屆上架前的才排除", async () => {
@@ -104,15 +108,15 @@ Deno.test("4 要有「那一屆」的公報才排除：2022 有公報的人 2026
   assertEquals((await state(db, `politician:${P3}:policies:2022`)).checks, 1);
 });
 
-Deno.test("5 文字層：新 migration 重寫這三個函式、不動資料列、不重寫視圖與 refresh，簽名不變", () => {
-  for (const fn of ["task_check_prebulletin", "task_check_cooldown_days_for", "work_key_ladder_state"]) {
-    assert(NEW.includes(`CREATE OR REPLACE FUNCTION ${fn}(`), fn);
-  }
+Deno.test("5 網站請求等手動任務（uuid task_id）與 auto 共用工作卡，上架前的查無同樣排除", async () => {
+  const db = await buildDb();
+  const MANUAL = "11111111-1111-4111-8111-111111111111";
+  // 手動任務的查核照現行寫法掛在同一把工作卡鍵上
+  await db.query("INSERT INTO task_checks (task_id, outcome, checked_at, work_key) VALUES ($1, 'not_found', '2026-11-10T03:00:00Z', $2)", [MANUAL, `politician:${P1}:policies:2026`]);
+  await at(db, `auto:policy_missing:${P1}`, "not_found", "2026-11-10T04:00:00Z");
+  assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 0, "手動與 auto 的上架前查無都不計");
+  await db.query("INSERT INTO task_checks (task_id, outcome, checked_at, work_key) VALUES ($1, 'not_found', '2026-11-19T03:00:00Z', $2)", [MANUAL, `politician:${P1}:policies:2026`]);
+  assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 1, "上架後的手動查無照算");
   const code = NEW.replace(/--.*$/gm, "");
   assert(!/UPDATE task_checks|DELETE FROM task_checks|INSERT INTO task_checks/.test(code), "不動資料列");
-  assert(!code.includes("FUNCTION refresh_dispatch_blocked") && !code.includes("VIEW task_ladder_closed"), "視圖與 refresh 不重寫");
-  assert(NEW.includes("RETURNS TABLE (checks BIGINT, closed BOOLEAN, closed_at TIMESTAMPTZ, last_checked_at TIMESTAMPTZ, cool_until TIMESTAMPTZ, check_cool_until TIMESTAMPTZ)"));
-  assert(NEW.includes("NOT task_check_prebulletin(tc.task_id, tc.work_key, tc.outcome, tc.checked_at)"));
-  assertEquals(NEW.split("NOT task_check_prebulletin(x.task_id, x.work_key, x.outcome, x.checked_at)").length - 1, 2, "兩處累計都排除");
-  assert(MIG.includes("work_key_ladder_state"), "舊版仍在（回滾依據）");
 });

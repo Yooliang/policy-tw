@@ -41,7 +41,7 @@ async function days(taskId: string, outcome: string, priorNotFound = 0): Promise
     INSERT INTO task_cooldown_settings VALUES (1, true, ARRAY['progress_stale','deadline_due'], 14, 30);
     CREATE TABLE task_checks (id bigint PRIMARY KEY, task_id text, outcome text, checked_at timestamptz, work_key text GENERATED ALWAYS AS ('task:' || task_id) STORED);
     CREATE FUNCTION task_work_key(t text, g jsonb) RETURNS text LANGUAGE sql AS $$ SELECT NULL::text $$;
-    CREATE FUNCTION task_check_prebulletin(a text, b text, c text, d timestamptz) RETURNS boolean LANGUAGE sql AS $$ SELECT false $$; -- 公報上架前排除（20261118010000）：這裡的任務與公報無關
+    CREATE FUNCTION task_check_prebulletin_cutoff(w text) RETURNS timestamptz LANGUAGE sql AS $$ SELECT NULL::timestamptz $$; -- 公報上架前排除（20261118010000）：這裡的任務與公報無關
     CREATE FUNCTION task_unreachable_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT 2 $$;
     CREATE FUNCTION task_check_cooldown_days() RETURNS integer LANGUAGE sql AS $$ SELECT ${TASK_CHECK_COOLDOWN_DAYS} $$;
     CREATE TABLE task_check_ladder_settings (outcome text PRIMARY KEY, days integer[] NOT NULL);
