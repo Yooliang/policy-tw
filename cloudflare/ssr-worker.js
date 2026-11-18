@@ -27,7 +27,7 @@ import { cacheTtlForPath, markFallback, renderOrFallback, sMaxAgeForPath, unavai
 import { handleMarkdown } from './markdown.js'
 import { MAP_STATS_PATH, handleMapStats } from './map-stats.js'
 import { nonPageResponse } from './render-status.js'
-import { cachedProxy } from './prerender-cache.js'
+import { cachedProxy, prerenderCacheEnabled } from './prerender-cache.js'
 import { stripShellHead } from './shell-head.js'
 import { createShellLoader, shellVersion, shouldRerender } from './shell-version.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
@@ -310,6 +310,6 @@ export default {
       }
     }
     // 其餘（預渲染頁、工具頁、靜態資源）：GET 的 HTML 頁在邊緣快取 5 分鐘（prerender-cache.js，#982），其他原樣代理
-    return cachedProxy(request, ctx, { cache: caches.default, proxy, currentShell: () => shellLoader.peek() })
+    return cachedProxy(request, ctx, { cache: caches.default, proxy, currentShell: () => shellLoader.peek(), enabled: prerenderCacheEnabled(env) })
   },
 }

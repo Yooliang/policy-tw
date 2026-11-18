@@ -3,8 +3,8 @@
  * 預渲染頁的邊緣快取（cloudflare/prerender-cache.js，#982）：
  * 首頁第二次請求命中、/skill.md 與 /assets 不快取、非 200／非 HTML／帶登入 Cookie 不快取、追蹤參數不影響快取鍵、過期先回舊的背景重抓。
  */
-import { assert, assertEquals } from "jsr:@std/assert@1";
-import { PRERENDER_CACHE_CONTROL, cachedProxy, isCacheableRequest, prerenderCacheKey } from "./prerender-cache.js";
+import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import { PRERENDER_CACHE_CONTROL, cachedProxy, isCacheableRequest, pageIsOutdated, prerenderCacheEnabled, prerenderCacheKey } from "./prerender-cache.js";
 
 const SITE = "https://xn--2lw665d.tw";
 const ctx = () => { const pending: Promise<unknown>[] = []; return { waitUntil: (p: Promise<unknown>) => { pending.push(p); }, flush: () => Promise.all(pending) }; };
@@ -35,7 +35,8 @@ Deno.test("首頁第二次請求命中快取：MISS → HIT，只打一次上游
   assertEquals(await r1.text(), "<!doctype html><title>x</title>");
   const r2 = await cachedProxy(req("/"), c, s.deps());
   assertEquals(r2.headers.get("X-Prerender-Cache"), "HIT");
-  assertEquals(r2.headers.get("Cache-Control"), "public, max-age=0, s-maxage=300, stale-while-revalidate=600");
+  assertEquals(r2.headers.get("Cache-Control"), "public, max-age=0, s-maxage=300");
+  assert(!(r2.headers.get("Cache-Control") ?? "").includes("stale-while-revalidate"), "給瀏覽器的不能帶 SWR（Chrome 會用本機舊頁）");
   assertEquals(await r2.text(), "<!doctype html><title>x</title>");
   assertEquals(s.calls(), 1);
 });
@@ -80,18 +81,18 @@ Deno.test("請求條件：只收 GET；Authorization、Range、工作階段 Cook
   assert(isCacheableRequest(req("/", { headers: { Cookie: "_ga=GA1.1.1; _ga_ABC123=GS1; _fbp=fb.1" } })));
 });
 
-Deno.test("快取鍵：追蹤參數不進鍵、其餘參數排序保留", () => {
+Deno.test("快取鍵：整個查詢字串都不進鍵（追蹤參數與亂加的參數都不灌鍵）", () => {
   assertEquals(prerenderCacheKey(`${SITE}/election/2026?utm_source=x&fbclid=1&gclid=2`).url, `${SITE}/election/2026`);
-  assertEquals(prerenderCacheKey(`${SITE}/election/2026?b=2&a=1&utm_medium=m`).url, `${SITE}/election/2026?a=1&b=2`);
+  assertEquals(prerenderCacheKey(`${SITE}/election/2026?b=2&a=1&random=${Math.random()}`).url, `${SITE}/election/2026`);
   assertEquals(prerenderCacheKey(`${SITE}/?utm_campaign=z`).url, `${SITE}/`);
 });
 
-Deno.test("帶追蹤參數的第二個請求命中同一份", async () => {
+Deno.test("帶不同追蹤／亂數參數的請求命中同一份", async () => {
   const s = setup(html);
   const c = ctx();
   await cachedProxy(req("/tracking?utm_source=fb"), c, s.deps());
   await c.flush();
-  const r = await cachedProxy(req("/tracking?fbclid=abc"), c, s.deps());
+  const r = await cachedProxy(req("/tracking?foo=abc"), c, s.deps());
   assertEquals(r.headers.get("X-Prerender-Cache"), "HIT");
   assertEquals(s.calls(), 1);
 });
@@ -126,7 +127,9 @@ Deno.test("存進快取的副本不帶 Vary（合成快取鍵沒有請求標頭�
 
 Deno.test("殼換版（部署後）：快取裡舊版的頁當沒命中、當場重抓；殼拿不到時沿用快取", async () => {
   let version = 1;
-  const s = setup(() => new Response(`v${version}`, { status: 200, headers: { "Content-Type": "text/html" } }));
+  const page = (v: number, asset: string) => `<script src="/assets/${asset}.js"></script><link rel="modulepreload" href="/assets/chunk-${v}.js">v${v}`;
+  let asset = "index-aaa";
+  const s = setup(() => new Response(page(version, asset), { status: 200, headers: { "Content-Type": "text/html" } }));
   const c = ctx();
   let shell: string | null = '<script src="/assets/index-aaa.js"></script>';
   const deps = () => ({ ...s.deps(), currentShell: () => Promise.resolve(shell) });
@@ -135,11 +138,60 @@ Deno.test("殼換版（部署後）：快取裡舊版的頁當沒命中、當場
   assertEquals((await cachedProxy(req("/tracking"), c, deps())).headers.get("X-Prerender-Cache"), "HIT");
   version = 2;
   shell = null;
-  assertEquals(await (await cachedProxy(req("/tracking"), c, deps())).text(), "v1", "拿不到殼：沿用快取");
+  assertStringIncludes(await (await cachedProxy(req("/tracking"), c, deps())).text(), "v1", "拿不到殼：沿用快取");
+  asset = "index-bbb";
   shell = '<script src="/assets/index-bbb.js"></script>';
   const r = await cachedProxy(req("/tracking"), c, deps());
   await c.flush();
   assertEquals(r.headers.get("X-Prerender-Cache"), "MISS");
-  assertEquals(await r.text(), "v2");
+  assertStringIncludes(await r.text(), "v2");
   assertEquals(s.calls(), 2);
+});
+
+Deno.test("X-Shell-Version 取自頁面自己引用的 /assets（頁面多出的 preload 不算舊；缺了殼的任何一個才算舊）", () => {
+  assertEquals(pageIsOutdated("/assets/a.js /assets/chunk-9.js", '<script src="/assets/a.js"></script>'), false);
+  assertEquals(pageIsOutdated("/assets/old.js", '<script src="/assets/a.js"></script>'), true);
+  assertEquals(pageIsOutdated(null, '<script src="/assets/a.js"></script>'), true, "舊版 Worker 存的沒有標頭");
+  assertEquals(pageIsOutdated("/assets/old.js", null), false, "拿不到殼：沿用");
+  assertEquals(pageIsOutdated("", "<html></html>"), false, "殼沒有 assets 不判舊");
+});
+
+Deno.test("Content-Encoding：內文已是明文（<）就去掉 Content-Encoding／Content-Length；不是明文就原樣保留", async () => {
+  const mk = (body: BodyInit) => () => new Response(body, { status: 200, headers: { "Content-Type": "text/html", "Content-Encoding": "br", "Content-Length": "999" } });
+  const a = setup(mk("<!doctype html>ok"));
+  const c = ctx();
+  const r = await cachedProxy(req("/"), c, a.deps());
+  await c.flush();
+  assertEquals(r.headers.get("Content-Encoding"), null);
+  assertEquals(r.headers.get("Content-Length"), null);
+  assertEquals([...a.cache.store.values()][0].headers.get("Content-Encoding"), null);
+  const b = setup(mk(new Uint8Array([0x8b, 0x1b, 0x00, 0x01])));
+  const r2 = await cachedProxy(req("/"), c, b.deps());
+  await c.flush();
+  assertEquals(r2.headers.get("Content-Encoding"), "br");
+  assertEquals([...b.cache.store.values()][0].headers.get("Content-Encoding"), "br");
+});
+
+Deno.test("/auth/ 不快取；PRERENDER_CACHE=0 整個關掉（直接代理、不寫快取）", async () => {
+  assert(!isCacheableRequest(req("/auth/callback")));
+  assertEquals(prerenderCacheEnabled({}), true);
+  assertEquals(prerenderCacheEnabled({ PRERENDER_CACHE: "0" }), false);
+  assertEquals(prerenderCacheEnabled({ PRERENDER_CACHE: "1" }), true);
+  const s = setup(html);
+  const c = ctx();
+  const r = await cachedProxy(req("/"), c, { ...s.deps(), enabled: false });
+  await c.flush();
+  assertEquals(r.headers.get("X-Prerender-Cache"), null);
+  assertEquals(s.cache.store.size, 0);
+});
+
+Deno.test("過期瞬間連打：只有一個請求背景回源", async () => {
+  const s = setup(html);
+  const c = ctx();
+  await cachedProxy(req("/"), c, s.deps());
+  await c.flush();
+  const later = () => Date.now() + 301_000;
+  await Promise.all([1, 2, 3, 4, 5].map(() => cachedProxy(req("/"), c, s.deps(later))));
+  await c.flush();
+  assertEquals(s.calls(), 2, "1 次初次 + 1 次背景重抓");
 });
