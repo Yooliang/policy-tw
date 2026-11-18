@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { buildReportBody, CAUSE_CATEGORIES, handleStrongAdjudicate, type JobRow, type JobStatus, type Repo, type StrongAdjudicateDeps, toListItem } from "./strong-adjudicate.ts";
+import { correctedSourceUrls } from "./strong-lane.ts";
 import type { VerifyResult } from "./firebase-id-token.ts";
 
 const OWNER = "owner@example.com";
@@ -9,6 +10,7 @@ const NOW = new Date("2026-11-11T12:00:00Z");
 const LANE_ITEM = { task_id: "t1", contribution_id: "c1", contribution_type: "policy", status: "disputed", subject: "王小明", votes: 5, created_at: "2026-11-08T12:00:00Z", reason: "投太多輪",
   verdicts: [{ verdict: "agree" }, { verdict: "disagree" }, { verdict: "disagree" }] };
 
+let contribStatus = "disputed";
 function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
   const rows: JobRow[] = [];
   let n = 0;
@@ -39,6 +41,7 @@ function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
     jobsSince: async (s) => rows.filter((r) => r.created_at >= s),
     logUsage: async (u) => { usage.push(u); },
     contributionTypes: async (ids) => Object.fromEntries(ids.filter((i) => i === "c1").map((i) => [i, "policy"])),
+    contributionStatus: async (id) => (id === "c1" ? contribStatus : null),
     contributionSourceUrls: async (id) => (id === "c1" ? ["https://orig.example.com/p.pdf", "https://xn--2lw665d.tw/self"] : []),
   };
   const usage: unknown[] = [];
@@ -441,4 +444,71 @@ Deno.test("守門：applyAdjudication 的 uphold_with_correction 把 corrected_f
   const fn = a.slice(i, a.indexOf("export async function closeTaskIfFulfilled", i));
   assert(fn.includes("correctedSourceUrls") && fn.includes("source_urls: correctedSourceUrls"));
   assert(fn.includes("fields.source_urls"));
+});
+
+const mkItems = (n: number) => Array.from({ length: n }, (_, i) => ({ ...LANE_ITEM, task_id: `t${i + 1}`, contribution_id: `c${i + 1}` }));
+function seedJob(s: { rows: JobRow[] }, task: string, status: JobStatus, n: number, completed = "2026-11-11T09:00:00Z") {
+  s.rows.push({ id: `seed-${task}-${n}`, task_id: task, contribution_id: "c1", status, completed_at: completed, created_at: `2026-11-1${n}T08:00:00Z`, updated_at: `2026-11-1${n}T08:00:00Z` } as JobRow);
+}
+
+Deno.test("enqueue_all：最新一筆是 returned 的件跳過（人退回的不自動再跑）", async () => {
+  const s = setup({ laneItems: mkItems(2) });
+  seedJob(s, "t1", "returned", 1);
+  const body = await (await handleStrongAdjudicate(maint({ action: "enqueue_all" }), s.deps)).json();
+  assertEquals([body.enqueued, body.skipped], [1, 1]);
+  assertEquals(body.skipped_reasons, { busy: 0, returned: 1, retry_cap: 0 });
+  assertEquals(body.jobs[0].task_id, "t2");
+});
+
+Deno.test("enqueue_all：failed／finalize_failed 各一筆可再排一次，排完累計 2 筆就不再排（retry_cap）", async () => {
+  const s = setup({ laneItems: mkItems(2) });
+  seedJob(s, "t1", "failed", 1);
+  seedJob(s, "t2", "finalize_failed", 1);
+  const first = await (await handleStrongAdjudicate(maint({ action: "enqueue_all" }), s.deps)).json();
+  assertEquals(first.enqueued, 2);
+  // 排進去的新作業做完又失敗：每件都已有 2 筆，第三次不排
+  for (const r of s.rows.filter((x) => x.status === "queued")) r.status = "finalize_failed";
+  const second = await (await handleStrongAdjudicate(maint({ action: "enqueue_all" }), s.deps)).json();
+  assertEquals(second.enqueued, 0);
+  assertEquals(second.skipped_reasons, { busy: 0, returned: 0, retry_cap: 2 });
+  // 單件 enqueue 不受上限限制（人逐件決定）
+  assertEquals((await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps)).status, 200);
+});
+
+Deno.test("enqueue_all：busy 與 returned 優先於 retry_cap 的計數；回傳三種原因加總＝skipped", async () => {
+  const s = setup({ laneItems: mkItems(4) });
+  seedJob(s, "t1", "queued", 1);
+  seedJob(s, "t2", "returned", 1);
+  seedJob(s, "t3", "failed", 1);
+  seedJob(s, "t3", "failed", 2);
+  const body = await (await handleStrongAdjudicate(maint({ action: "enqueue_all" }), s.deps)).json();
+  assertEquals(body.skipped_reasons, { busy: 1, returned: 1, retry_cap: 1 });
+  assertEquals(body.skipped, 3);
+  assertEquals(body.enqueued, 1);
+});
+
+Deno.test("更正來源：剔除正見自家網址，剔光回 null（不改頂層）", () => {
+  assertEquals(correctedSourceUrls({ source_urls: ["https://xn--2lw665d.tw/skill.md", "https://example.com/a.pdf", "ftp://x"] }), ["https://example.com/a.pdf"]);
+  assertEquals(correctedSourceUrls({ source_urls: ["https://xn--2lw665d.tw/skill.md"] }), null);
+  assertEquals(correctedSourceUrls({ title: "x" }), null);
+});
+
+Deno.test("自動定案：/report 回 409 no_strong_task 但原貢獻已 applied → 記 finalized；未 applied 仍 finalize_failed", async () => {
+  const conflict = (async () => new Response(JSON.stringify({ success: false, error: "no_strong_task" }), { status: 409 })) as typeof fetch;
+  const s = await running(conflict);
+  contribStatus = "applied";
+  const ok = await (await handleStrongAdjudicate(complete(s.rows[0].id), s.deps)).json();
+  assertEquals([ok.finalized, ok.job.status], [true, "finalized"]);
+  contribStatus = "disputed";
+  const s2 = await running(conflict);
+  const bad = await (await handleStrongAdjudicate(complete(s2.rows[0].id), s2.deps)).json();
+  assertEquals([bad.finalized, bad.job.status], [false, "finalize_failed"]);
+});
+
+Deno.test("自動定案：寫回定案結果時資料庫丟錯不讓 complete 變 500", async () => {
+  const s = await running(okFetch);
+  const real = s.deps.repo.transition;
+  s.deps.repo = { ...s.deps.repo, transition: async (id, from, patch) => { if (patch.status === "finalized") throw new Error("db down"); return real(id, from, patch); } };
+  const res = await handleStrongAdjudicate(complete(s.rows[0].id), s.deps);
+  assertEquals(res.status, 200);
 });

@@ -201,9 +201,10 @@ Authorization: Bearer <service role key>
 // enqueue：排進作業（建 queued）。404＝不在強模型待辦；409＝已有進行中或 30 分鐘內剛出爐的（回 job）
 { "action": "enqueue", "task_id": "…" }   → { "success": true, "job": { …完整 job… } }
 
-// enqueue_all：把 strong_lane_list() 裡「目前沒有 queued／running／30 分內 previewed／finalizing 作業」的任務全部排入。
-// limit 選填（1～200，預設 50），超過的不排、計入 over_limit；不在待辦或已有進行中的計入 skipped。不回 409（逐件結果在計數裡）
-{ "action": "enqueue_all", "limit": 50 }   → { "success": true, "enqueued": 3, "skipped": 2, "over_limit": 0, "jobs": [ /* 新建的 job */ ] }
+// enqueue_all：把 strong_lane_list() 裡可再排的任務排入。跳過三種：busy（queued／running／30 分內 previewed／finalizing）、
+// returned（最新一筆是人退回的，不自動再跑）、retry_cap（這件任務累計已有 2 筆作業，任何狀態都算；單件 enqueue 不受此限，人逐件決定）。
+// limit 選填（1～200，預設 50），超過的不排、計入 over_limit。不回 409（逐件結果在計數裡）
+{ "action": "enqueue_all", "limit": 50 }   → { "success": true, "enqueued": 3, "skipped": 4, "skipped_reasons": { "busy": 2, "returned": 1, "retry_cap": 1 }, "over_limit": 0, "jobs": [ /* 新建的 job */ ] }
 
 // status：單筆（adjudication_id）或某任務的歷次（task_id，新→舊）
 { "action": "status", "adjudication_id": "…" }   → { "success": true, "job": {…} }
@@ -245,7 +246,7 @@ POST … x-strong-lane-key: <STRONG_LANE_KEY>
   "checked_urls": ["https://…"] }                                  // 選填，最多 30 個 http(s)
 → { "success": true, "finalized": true, "job": { "status": "finalized" } }   // 收下後同一次呼叫自動送 /report；/report 拒收時 finalized:false、status＝finalize_failed（success 仍 true，complete 本身收下了）
 // 只有 running 的能 complete（逾時被收回要重新 claim，409）
-// 送 /report 前會把 checked_urls／來源裡正見自家網址剔除（同 /report 的 self_citation 判斷）；全剔光時改用 corrected_fields.source_urls，再不行用原貢獻的來源，不送空來源
+// 送 /report 前會把 checked_urls／來源裡正見自家網址剔除（同 /report 的 self_citation 判斷）；全剔光時改用 corrected_fields.source_urls，再不行用原貢獻的來源，不送空來源。uphold_with_correction 的 corrected_fields.source_urls 落庫時也剔除自家網址後才寫回頂層 source_urls，剔光就不改並在 review_notes 記原來源；/report 回 409 no_strong_task 但原貢獻已 applied 算 finalized
 
 // 做不出來：回報失敗（不影響任務，維護者可再 enqueue）
 { "action": "fail", "adjudication_id": "<id>", "error": "原因" }

@@ -29,7 +29,7 @@ import { createOrAttachTask } from "./create-or-attach-task.ts";
 import { isMultiPersonTarget, manualTaskIdOf, shouldCloseOnApplied } from "./task-fulfilment.ts";
 import { personCheckTaskId, resolveGroupPerson } from "./group-person.ts";
 import { closeAdjudicationTasks, closeFixTasks } from "./adjudication.ts";
-import { applyPayloadCorrection, diffText, STRONG_REVIEWER } from "./strong-lane.ts";
+import { applyPayloadCorrection, correctedSourceUrls as pickCorrectedSourceUrls, diffText, STRONG_REVIEWER } from "./strong-lane.ts";
 import { normalizeCorrection, splitNoOpChanges } from "./correction.ts";
 import { findMergeCandidacyConflict } from "./merge-candidacy-conflict.ts";
 import { councilDistrictKey, isCouncilAboriginalDistrict, isRepElectionType, legislatorDistrictKey, officialCouncilDistricts, REP_ELECTION_TYPES, regionFitFor, repDistrictKey } from "./electoral-district.ts";
@@ -2670,9 +2670,12 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
     const { payload: next, diff } = applyPayloadCorrection((original.payload ?? {}) as Obj, fields);
     correctedPayload = next;
     // 更正了來源：頂層 source_urls 也要換成更正後的（只這個欄位；驗證者與落庫都看頂層，不然更正只留在 payload 裡）
-    const cu = fields.source_urls;
-    if (Array.isArray(cu) && cu.length > 0 && cu.every((u) => typeof u === "string" && /^https?:\/\//.test(u))) correctedSourceUrls = cu as string[];
-    correctionNote = `；已更正 ${diff.length} 欄：${diffText(diff) || "（與原內容相同）"}`;
+    // 正見自家網址不能當出處（同 /report 的 self_citation）：剔除後沒剩就不改頂層
+    correctedSourceUrls = pickCorrectedSourceUrls(fields);
+    const sourceNote = Array.isArray(fields.source_urls)
+      ? `；${correctedSourceUrls ? "來源已更正" : "更正的來源不可用（空或正見自家網址），頂層來源未改"}，原來源：${(Array.isArray(original.source_urls) ? original.source_urls : []).join("、") || "（無）"}`
+      : "";
+    correctionNote = `；已更正 ${diff.length} 欄：${diffText(diff) || "（與原內容相同）"}${sourceNote}`;
     toApply = { ...(original as ContributionRow), payload: next, ...(correctedSourceUrls ? { source_urls: correctedSourceUrls } : {}) };
   }
   const outcome = await applyContribution(supabase, { ...toApply, resolved_politician_id: str(p.resolved_politician_id) });

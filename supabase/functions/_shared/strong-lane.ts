@@ -6,6 +6,8 @@
  * 授權只看鑰匙：agent_name／agent_tool 是自報的、驗不了真假，只記錄供稽核，絕不拿來判斷能不能認領或交裁決。
  */
 
+import { isSelfCitationUrl } from "./self-hosts.ts";
+
 export const STRONG_TIER = "strong";
 export const STRONG_KEY_HEADER = "x-strong-lane-key";
 /** 單一裁決定案的標記：寫在裁決那筆貢獻的 reviewed_by（只有系統程式會寫，代理的 payload 寫不進去） */
@@ -53,6 +55,14 @@ export function applyPayloadCorrection(original: Obj, fields: Obj): { payload: O
     diff.push({ field: k, before: before ?? null, after: v });
   }
   return { payload, diff };
+}
+
+/** corrected_fields.source_urls 裡可當頂層出處的網址：http(s)、剔除正見自家網址；沒有（沒給或剔光）回 null */
+export function correctedSourceUrls(fields: Obj): string[] | null {
+  const cu = fields.source_urls;
+  if (!Array.isArray(cu)) return null;
+  const ok = cu.filter((u): u is string => typeof u === "string" && /^https?:\/\//.test(u) && !isSelfCitationUrl(u));
+  return ok.length > 0 ? ok : null;
 }
 
 export function correctionProblems(fields: unknown): string | null {
