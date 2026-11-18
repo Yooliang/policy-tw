@@ -29,6 +29,7 @@ import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
 import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
 import type { PolicySummary } from '../lib/policy-summary'
+import { slicesToState, isPolicyCountsComplete, mapFromRawRows, fallbackMapFromPolicies, type PolicyCountsByElection, type PolicyCountsSlice, type RawPolicyCountRow } from '../lib/policy-counts'
 import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
@@ -614,6 +615,59 @@ export function ensureDiscussions(): Promise<void> {
 let policiesPromise: Promise<void> | null = null
 
 /**
+ * 每人每屆的承諾數／政見數對照（lib/policy-counts.ts）。選舉頁卡片與 SEO 描述讀這個，不再為了數字載整份政見清單。
+ * 預渲染的選舉頁會把這一屆的對照嵌進快照；沒有（舊 state、直接進頁）時由 ensurePolicyCounts 向視圖撈一屆。
+ */
+const policyCountsByElection = ref<PolicyCountsByElection>({})
+const policyCountsInflight = new Map<number, Promise<void>>()
+/** 這一屆的承諾數對照補撈失敗（含退路也失敗）：卡片要顯示「暫時讀不到」而不是無限「載入中」，頁面給重試 */
+const policyCountsFailed = ref<Record<number, boolean>>({})
+function setPolicyCountsFailed(electionId: number, failed: boolean): void {
+  if ((policyCountsFailed.value[electionId] ?? false) === failed) return
+  policyCountsFailed.value = { ...policyCountsFailed.value, [electionId]: failed }
+}
+/** 整份政見清單載入失敗：承諾／PK 頁籤據此顯示錯誤與重試，不能掉進「尚無承諾」 */
+const policiesLoadFailed = ref(false)
+
+/** 視圖 politician_election_policy_counts 的列（electionId 沒給＝全部屆別，建置端用）；一頁頁撈到底 */
+export async function fetchPolicyCountRows(electionId?: number): Promise<RawPolicyCountRow[]> {
+  const { rows, truncated } = await fetchAllPages<RawPolicyCountRow>('politician_election_policy_counts', (from, to) =>
+    withTimeoutAndRetry(`policy counts ${electionId ?? 'all'} ${from}-${to}`, (signal) => {
+      const q = supabase.from('politician_election_policy_counts').select('politician_id,election_id,pledge_count,policy_count')
+      return (electionId === undefined ? q : q.eq('election_id', electionId))
+        .order('election_id').order('politician_id').range(from, to).abortSignal(signal).throwOnError()
+    }) as PromiseLike<PageResponse<RawPolicyCountRow>>)
+  // 撈不完就整份當失敗：缺的人會被當成 0 項，那是無聲的錯數字
+  if (truncated) throw new Error('承諾數撈到分頁上限仍未撈完')
+  return [...rows]
+}
+
+/** 這一屆的承諾數對照：已齊就不撈；同一屆同時只飛一個請求。失敗記進全域錯誤，可重試。 */
+export function ensurePolicyCounts(electionId: number): Promise<void> {
+  if (!Number.isFinite(electionId) || isPolicyCountsComplete(policyCountsByElection.value, electionId)) return Promise.resolve()
+  const flying = policyCountsInflight.get(electionId)
+  if (flying) return flying
+  setPolicyCountsFailed(electionId, false)
+  const run = (async () => {
+    let map: ReturnType<typeof mapFromRawRows>
+    try {
+      map = mapFromRawRows(await fetchPolicyCountRows(electionId))
+    } catch (err) {
+      if (!isMissingRelation(err)) throw err
+      // 視圖還沒建（CI 部署時 Hosting 已上新前端、db push 還沒跑完的空窗）：退回舊路徑，載整份政見自己算同一份對照
+      console.warn('[承諾數] 對照視圖不存在，退回整份政見自算', err)
+      await ensurePolicies()
+      if (!policiesComplete.value) throw new Error('政見清單載入失敗，無法自算承諾數')
+      map = fallbackMapFromPolicies(policies.value, electionId)
+    }
+    policyCountsByElection.value = { ...policyCountsByElection.value, [electionId]: { complete: true, map } }
+  })().catch((err) => { setPolicyCountsFailed(electionId, true); recordFailure('承諾數', err, () => ensurePolicyCounts(electionId)) })
+    .finally(() => { policyCountsInflight.delete(electionId) })
+  policyCountsInflight.set(electionId, run)
+  return run
+}
+
+/**
  * 政見清單（257 KB）＋有政見的人物（91 KB）。列表頁與詳情頁要，公民提問頁不要。
  *
  * 跟另外三塊 ensure* 不同的是：這一塊的判斷不能看 length。預渲染的詳情頁會先嵌
@@ -623,6 +677,7 @@ let policiesPromise: Promise<void> | null = null
 export function ensurePolicies(): Promise<void> {
   if (policiesComplete.value) return Promise.resolve()
   if (!policiesPromise) {
+    policiesLoadFailed.value = false
     policiesPromise = (async () => {
       // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
       // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
@@ -636,7 +691,7 @@ export function ensurePolicies(): Promise<void> {
       // 詳情頁可能已經用 loadPolicyById 塞了幾筆進來，整份蓋過去就好（同一個來源、較新）
       policies.value = (rows || []).filter(r => !r.removed_at).map(mapPolicy)
       policiesComplete.value = true
-    })().catch((err) => { policiesPromise = null; recordFailure('政見清單', err, ensurePolicies) })
+    })().catch((err) => { policiesPromise = null; policiesLoadFailed.value = true; recordFailure('政見清單', err, ensurePolicies) })
   }
   return policiesPromise
 }
@@ -986,6 +1041,8 @@ export interface DataSnapshot {
   townshipDirectory?: DirectoryPerson[]
   /** 政見矩陣頁的資料（只有那一頁的切片有） */
   policyMatrix?: PolicyMatrix | null
+  /** 每人每屆承諾數／政見數對照（選舉頁的切片帶那一屆；建置端的 full 帶全部屆別）。沒給＝這一頁不需要，瀏覽器端要用時自己撈 */
+  policyCounts?: PolicyCountsSlice[]
   /** 政策脈絡（#349）：脈絡一覽帶整份（lineagesComplete=true）、脈絡頁帶那一條。沒給＝這一頁不需要 */
   lineages?: Lineage[]
   lineagesComplete?: boolean
@@ -1047,6 +1104,8 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
   // 快照沒帶就清空（預渲染一頁一頁套快照，前一頁的矩陣不該留到下一頁）
   policyMatrix.value = snapshot.policyMatrix ?? null
+  // 承諾數對照：同樣沒帶就清空（預渲染一頁一頁套快照）
+  policyCountsByElection.value = slicesToState(snapshot.policyCounts)
   // 政策脈絡：快照沒帶就清空（預渲染一頁一頁套快照，前一頁的脈絡不該留到下一頁）
   lineages.value = snapshot.lineages ?? []
   lineagesComplete.value = snapshot.lineagesComplete === true
@@ -1363,6 +1422,10 @@ export function useSupabase() {
     ensureDistricts,
     ensureDiscussions,
     ensurePolicies,
+    ensurePolicyCounts,
+    policyCountsByElection,
+    policyCountsFailed,
+    policiesLoadFailed,
     ensureVerificationSources,
     policiesComplete,
     getPoliciesByCategory,
