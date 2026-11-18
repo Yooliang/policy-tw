@@ -19,7 +19,7 @@ import { taipeiDay } from '../lib/election-list'
 import { RouterLink } from 'vue-router'
 import { CalendarClock } from 'lucide-vue-next'
 
-const { policies, politicians, locations, categories, loading, ensurePolicies, getElectionById, dataAsOf } = useSupabase()
+const { policies, politicians, locations, categories, loading, policiesComplete, ensurePolicies, getElectionById, dataAsOf } = useSupabase()
 const { globalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
@@ -116,7 +116,8 @@ const statusText = (p: Policy) => stageBadgeLabel(String(p.status), stageOf(p)) 
 // 畫面全白。vue-tsc 與 SSG 建置都不會紅，只有在瀏覽器裡才看得到。
 // 資料還在路上：沒有這個判斷，使用者會先看到「沒有找到符合條件的政見」再突然跳出資料，
 // 看起來像壞掉。政見是跟著首屏一起載的，所以只在真的還沒有政見時才顯示骨架。
-const stillLoading = computed(() => loading.value && policies.value.length === 0)
+// 預渲染的 /tracking 不帶政見（#982），整份清單進頁後才載：沒載完之前也要顯示骨架，不能先閃「沒有找到符合條件的政見」
+const stillLoading = computed(() => (loading.value || !policiesComplete.value) && policies.value.length === 0)
 
 // 篩得出來、卻因為找不到所屬政治人物而渲染不了的筆數。
 // 正常應該是 0（fetchAll 會把有政見的人物一起載進來）；不是 0 就要讓使用者知道，

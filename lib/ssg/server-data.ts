@@ -26,6 +26,7 @@ import type { Matrix as PolicyMatrix } from '../md/dataset'
 import { supabasePublic } from '../supabase'
 import { directoryFor, partyListFor } from './page-data'
 import { buildSitemapMeta } from '../sitemap'
+import { summarizePolicies } from '../policy-summary'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -206,7 +207,7 @@ function computeStats(politicians: Politician[], base: DataSnapshot): DataStats 
       .filter((pl) => pl.elections?.some((e) => e.electionId === election.id && isRunningCandidate(e.candidacyStatus)))
       .length
   }
-  return { totalPoliticians: politicians.length, politiciansByElection }
+  return { totalPoliticians: politicians.length, politiciansByElection, policySummary: summarizePolicies(base.policies) }
 }
 
 /** 靜態內容頁。工具頁（/verify /contributions /tasks /stats /ai /profile /auth/callback）刻意不預渲染。 */

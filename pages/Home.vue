@@ -7,7 +7,7 @@ import { useSupabase } from '../composables/useSupabase'
 const apexchart = defineAsyncComponent(() => import('vue3-apexcharts'))
 import PolicyCard from '../components/PolicyCard.vue'
 import { isLostCampaignPromise } from '../lib/policy-visibility'
-import { pledgeCounts } from '../lib/pledge-origin'
+import { recentVisiblePolicies, summarizePolicies } from '../lib/policy-summary'
 
 import Hero from '../components/Hero.vue'
 import AiContributeBanner from '../components/AiContributeBanner.vue'
@@ -18,7 +18,7 @@ import { TAIWAN_COUNTIES, electionRegionPath } from '../lib/election-regions'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, usePageHead } from '../composables/usePageHead'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
 
-const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies } = useSupabase()
+const { policies, politicians, elections, stats, getElectionPoliticianCount, getTotalPoliticianCount, getPoliciesByCategory, ensurePolicies, policiesComplete, loadPoliciesByIds, loadPoliticiansByIds } = useSupabase()
 
 // 我的關注改走 useCheckpoints（2026-09-17）：登入後會與帳號同步，未登入照舊只存瀏覽器
 const { checkpoints: checkpointIds } = useCheckpoints()
@@ -47,10 +47,18 @@ async function loadHomeStats() {
 }
 
 onMounted(() => {
-  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-  ensurePolicies()
+  // 預渲染的首頁只帶摘要統計與最新 3 筆政見（#982），不再整份嵌進 HTML，所以這裡不撈整份清單（約 70 次分頁請求）。
+  // 沒有摘要（開發模式、沒有預渲染資料）才退回整份載入。
+  if (!stats.value.policySummary) ensurePolicies()
   loadHomeStats()
 })
+
+// 我的關注：只依 id 撈那幾條政見與提出者（已在全域狀態的不重撈；清單整份載完時兩者都是 no-op）
+watch(checkpointIds, async (ids) => {
+  if (ids.length === 0) return
+  await loadPoliciesByIds(ids)
+  await loadPoliticiansByIds(policies.value.filter(p => ids.includes(p.id)).map(p => String(p.politicianId)))
+}, { immediate: true })
 
 // 當 elections 載入後再試一次
 watch(() => elections.value.length, () => {
@@ -70,11 +78,16 @@ const checkpointPolicies = computed(() =>
   policies.value.filter(p => checkpointIds.value.includes(p.id) && notLost(p)).sort(compareByPolicyDateDesc).slice(0, 3)
 )
 
+// 狀態與承諾／任內筆數：整份清單載完就用清單即時算，否則用建置時算好的摘要（兩者口徑相同，見 lib/policy-summary.ts）
+const summary = computed(() =>
+  policiesComplete.value || !stats.value.policySummary ? summarizePolicies(policies.value) : stats.value.policySummary)
+const countByStatus = (status: string) => summary.value.byStatus[status] ?? 0
+
 const statusData = computed(() => [
-  { name: '已實現', value: policies.value.filter(p => p.status === 'Achieved').length, color: '#10b981' },
-  { name: '進行中', value: policies.value.filter(p => p.status === 'In Progress').length, color: '#3b82f6' },
-  { name: '滯後', value: policies.value.filter(p => p.status === 'Stalled').length, color: '#f59e0b' },
-  { name: '提出', value: policies.value.filter(p => p.status === 'Proposed').length, color: '#94a3b8' },
+  { name: '已實現', value: countByStatus('Achieved'), color: '#10b981' },
+  { name: '進行中', value: countByStatus('In Progress'), color: '#3b82f6' },
+  { name: '滯後', value: countByStatus('Stalled'), color: '#f59e0b' },
+  { name: '提出', value: countByStatus('Proposed'), color: '#94a3b8' },
 ])
 
 // 優先 DB count → 建置時算好的統計 → 已載入清單長度
@@ -96,15 +109,14 @@ const politicians2026Count = computed(() => {
 })
 // 首頁只放筆數、不放比例（維護者 2026-10-07）：「追蹤中政見」拆成競選承諾與任內政見（任內＝不是競選承諾）兩個數字，
 // 只問 lib/pledge-origin.ts 的 isPledge，筆數直接來自目前載入的政見清單，沒有任何寫死的數字或建置快照
-const pledgeCount = computed(() => pledgeCounts(policies.value).pledge)
-const termCount = computed(() => pledgeCounts(policies.value).term)
+const pledgeCount = computed(() => summary.value.pledge)
+const termCount = computed(() => summary.value.term)
 // 狀態數字用 status 算，不用 progress：293 筆裡 252 筆是還沒開始的競選承諾，progress 平均永遠趨近 0
-const countByStatus = (status: string) => policies.value.filter(p => p.status === status).length
 const achievedCount = computed(() => countByStatus('Achieved'))
 const inProgressCount = computed(() => countByStatus('In Progress'))
 
 // 提出日期新到舊（2026-10-19；之前取資料庫 id 順序前三筆＝隨機）
-const recentPolicies = computed(() => policies.value.filter(notLost).sort(compareByPolicyDateDesc).slice(0, 3))
+const recentPolicies = computed(() => recentVisiblePolicies(policies.value, politicianOf))
 
 const barOptions = computed(() => ({
   chart: { type: 'bar' as const, toolbar: { show: false } },

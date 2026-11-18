@@ -716,8 +716,12 @@ Deno.test("首頁：只放筆數、不放比例；追蹤中政見拆成「競選
   assert(!/%/.test(stats), "首頁統計區沒有任何百分比");
   assert(!home.includes("executedAchievementRate"), "達成率的計算也一併拿掉");
   assert(!/\b964\b/.test(home), "舊建置快照的 964 不能寫死在首頁");
-  assertStringIncludes(home, "pledgeCounts(policies.value)");
-  assertStringIncludes(home, "from '../lib/pledge-origin'");
+  // 筆數一律問 lib/pledge-origin.ts 的 pledgeCounts：首頁走 summarizePolicies（#982，建置時算好摘要），摘要內部就是 pledgeCounts
+  assertStringIncludes(home, "summarizePolicies(policies.value)");
+  assertStringIncludes(home, "from '../lib/policy-summary'");
+  const summarySrc = await Deno.readTextFile(new URL("../policy-summary.ts", import.meta.url));
+  assertStringIncludes(summarySrc, "pledgeCounts(policies)");
+  assertStringIncludes(summarySrc, "from './pledge-origin'");
 });
 
 Deno.test("矩陣頁：只放筆數，不放比例", async () => {
