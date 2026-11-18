@@ -18,8 +18,9 @@ import { isProgressCase } from '../lib/policy-chain'
 import { taipeiDay } from '../lib/election-list'
 import { RouterLink } from 'vue-router'
 import { CalendarClock } from 'lucide-vue-next'
+import LoadError from '../components/LoadError.vue'
 
-const { policies, politicians, locations, categories, loading, ensurePolicies, getElectionById, dataAsOf } = useSupabase()
+const { policies, politicians, locations, categories, loading, error, policiesComplete, ensurePolicies, getElectionById, dataAsOf } = useSupabase()
 const { globalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
@@ -116,7 +117,9 @@ const statusText = (p: Policy) => stageBadgeLabel(String(p.status), stageOf(p)) 
 // 畫面全白。vue-tsc 與 SSG 建置都不會紅，只有在瀏覽器裡才看得到。
 // 資料還在路上：沒有這個判斷，使用者會先看到「沒有找到符合條件的政見」再突然跳出資料，
 // 看起來像壞掉。政見是跟著首屏一起載的，所以只在真的還沒有政見時才顯示骨架。
-const stillLoading = computed(() => loading.value && policies.value.length === 0)
+// 預渲染的 /tracking 不帶政見（#982），整份清單進頁後才載：沒載完之前也要顯示骨架，不能先閃「沒有找到符合條件的政見」
+// 部分政見（例如從首頁帶進來的 3 筆）不算載完，所以不看 policies 是否為空；取政見失敗時改顯示 LoadError，不能永遠骨架
+const stillLoading = computed(() => !policiesComplete.value && !error.value)
 
 // 篩得出來、卻因為找不到所屬政治人物而渲染不了的筆數。
 // 正常應該是 0（fetchAll 會把有政見的人物一起載進來）；不是 0 就要讓使用者知道，
@@ -267,7 +270,7 @@ usePageHead({
           <CalendarClock :size="20" class="text-amber-600" />期限已到的政見
           <span class="text-sm font-medium text-slate-500">（{{ dueRows.length }}）</span>
         </h2>
-        <p v-if="dueRows.length === 0" class="mt-4 text-sm text-slate-400">沒有找到符合條件的政見。</p>
+        <p v-if="dueRows.length === 0 && !stillLoading" class="mt-4 text-sm text-slate-400">沒有找到符合條件的政見。</p>
         <div v-else class="mt-4 overflow-x-auto -mx-5 px-5 sm:mx-0 sm:px-0">
           <table class="w-full min-w-[36rem] text-sm text-left border-collapse">
             <thead>
@@ -299,7 +302,8 @@ usePageHead({
         有 {{ unrenderablePolicies.length }} 筆政見暫時顯示不出來，重新整理通常就會出現。
       </div>
 
-      <div v-if="stillLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <LoadError v-if="error && !policiesComplete" />
+      <div v-else-if="stillLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         <div v-for="n in 6" :key="n" class="bg-white rounded-3xl border border-slate-200 p-6 animate-pulse">
           <div class="h-4 w-24 bg-slate-200 rounded mb-4"></div>
           <div class="h-5 w-full bg-slate-200 rounded mb-2"></div>

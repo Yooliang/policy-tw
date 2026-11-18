@@ -28,6 +28,7 @@ import type { DirectoryGroup, DirectoryGroupSummary } from '../lib/people-direct
 import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
 import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
+import type { PolicySummary } from '../lib/policy-summary'
 import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
@@ -176,6 +177,8 @@ const currentElectionId = ref<number | null>(null)  // 目前顯示的選舉 ID�
 export interface DataStats {
   totalPoliticians: number | null
   politiciansByElection: Record<string, number>
+  /** 全部政見的摘要（建置時算好）：首頁用它畫狀態圓餅圖與筆數，不必帶整份政見清單（#982） */
+  policySummary?: PolicySummary
 }
 const stats = ref<DataStats>({ totalPoliticians: null, politiciansByElection: {} })
 

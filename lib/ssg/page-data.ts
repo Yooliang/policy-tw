@@ -4,6 +4,7 @@ import type { Lineage, Policy, Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { taipeiToday } from '../policy-stage'
 import { isProgressCase, lineageMateIdsOf } from '../policy-chain'
+import { slimRoutePart } from './slim-routes'
 import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
 import { findElectionBySegment } from '../election-route'
@@ -98,7 +99,7 @@ function electionIdOfParam(full: DataSnapshot, param: string | undefined): numbe
 function emptySnapshot(full: DataSnapshot): PageSnapshot {
   return {
     // 基底切片的 policies 是空的或只有幾筆，一律不算完整。
-    // 只有下面明確塞 full.policies 的那三個路由會把它翻成 true。
+    // 沒有任何路由把它翻成 true（#982 起首頁、/tracking、/analysis 也不帶整份政見）；整份由客戶端 ensurePolicies() 載。
     policiesComplete: false,
     generatedAt: full.generatedAt,
     elections: full.elections,
@@ -124,18 +125,10 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
 
   switch (to.name) {
     case 'home':
-      // 統計數字要全部政見；卡片只列最新 3 筆，其政治人物要在場
-      return { ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies.slice(0, 3), full.politicians) }
-
     case 'tracking':
-      return { ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies, full.politicians) }
-
     case 'analysis':
-      // 政策脈絡一覽（#349）：整份脈絡＋原本的「進度過半的政見」要的整份政見
-      return {
-        ...base, policiesComplete: true, policies: full.policies, politicians: politiciansReferencedBy(full.policies, full.politicians),
-        lineages: full.lineages ?? [], lineagesComplete: true,
-      }
+      // 不帶整份政見（#982），見 slim-routes.ts
+      return { ...base, ...slimRoutePart(to.name, full) }
 
     case 'lineage': {
       // 政策脈絡頁（#349）：那一條＋它的政見＋提到的人（邊緣 SSR 的 loadLineagePage 算的是同一份）
