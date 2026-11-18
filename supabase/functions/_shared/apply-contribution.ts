@@ -2664,12 +2664,16 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
   let toApply = original as ContributionRow;
   let correctionNote = "";
   let correctedPayload: Obj | null = null;
+  let correctedSourceUrls: string[] | null = null;
   if (verdict === "uphold_with_correction") {
     const fields = (p.corrected_fields && typeof p.corrected_fields === "object" ? p.corrected_fields : {}) as Obj;
     const { payload: next, diff } = applyPayloadCorrection((original.payload ?? {}) as Obj, fields);
     correctedPayload = next;
+    // 更正了來源：頂層 source_urls 也要換成更正後的（只這個欄位；驗證者與落庫都看頂層，不然更正只留在 payload 裡）
+    const cu = fields.source_urls;
+    if (Array.isArray(cu) && cu.length > 0 && cu.every((u) => typeof u === "string" && /^https?:\/\//.test(u))) correctedSourceUrls = cu as string[];
     correctionNote = `；已更正 ${diff.length} 欄：${diffText(diff) || "（與原內容相同）"}`;
-    toApply = { ...(original as ContributionRow), payload: next };
+    toApply = { ...(original as ContributionRow), payload: next, ...(correctedSourceUrls ? { source_urls: correctedSourceUrls } : {}) };
   }
   const outcome = await applyContribution(supabase, { ...toApply, resolved_politician_id: str(p.resolved_politician_id) });
   if (outcome.status === "failed") throw new Error(`原貢獻落庫失敗：${outcome.message}`);
@@ -2681,6 +2685,7 @@ async function applyAdjudication(supabase: SupabaseLike, row: ContributionRow): 
   const { error: e } = await supabase.from("contributions").update({
     status: "applied", applied_at: now, applied_politician_id: outcome.politician_id ?? null, applied_policy_id: outcome.policy_id ?? null,
     ...(correctedPayload ? { payload: correctedPayload } : {}),
+    ...(correctedSourceUrls ? { source_urls: correctedSourceUrls } : {}),
     review_notes: [original.review_notes, `${stamp}${correctionNote}；${outcome.message}`].filter(Boolean).join("；"), reviewed_by: strong ? STRONG_REVIEWER : "adjudication", reviewed_at: now,
     last_error: null, next_retry_at: null,
   }).eq("id", targetId).in("status", openStatuses);

@@ -68,6 +68,12 @@ export function supabaseRepo(supabase: SupabaseLike): Repo {
       for (const r of (data ?? []) as Array<{ id: string; contribution_type: string }>) out[String(r.id)] = r.contribution_type;
       return out;
     },
+    async contributionSourceUrls(id) {
+      const { data, error } = await supabase.from("contributions").select("source_urls").eq("id", id).maybeSingle();
+      if (error) throw new Error(`contributionSourceUrls: ${error.message}`);
+      const v = (data as { source_urls?: unknown } | null)?.source_urls;
+      return Array.isArray(v) ? v.filter((u): u is string => typeof u === "string") : [];
+    },
     async logUsage(u: UsageLog) {
       // ai_usage_logs.function_type 有 CHECK（verify／contribute／search／update），裁決算「驗證」；執行者回報的用量，端點不呼叫模型
       const { error } = await supabase.from("ai_usage_logs").insert({

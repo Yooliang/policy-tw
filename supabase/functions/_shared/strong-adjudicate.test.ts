@@ -39,6 +39,7 @@ function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
     jobsSince: async (s) => rows.filter((r) => r.created_at >= s),
     logUsage: async (u) => { usage.push(u); },
     contributionTypes: async (ids) => Object.fromEntries(ids.filter((i) => i === "c1").map((i) => [i, "policy"])),
+    contributionSourceUrls: async (id) => (id === "c1" ? ["https://orig.example.com/p.pdf", "https://xn--2lw665d.tw/self"] : []),
   };
   const usage: unknown[] = [];
   return { repo, rows, usage };
@@ -127,7 +128,7 @@ Deno.test("claim：running 超過 30 分鐘自動退回 queued 可再領", async
   assertEquals(again.job.id, s.rows[0].id);
 });
 
-Deno.test("complete：驗證欄位（錯 verdict／類別／缺 corrected_fields／reasoning 太短）400；成功存 previewed 並寫用量", async () => {
+Deno.test("complete：驗證欄位（錯 verdict／類別／缺 corrected_fields／reasoning 太短）400；成功後自動送 /report 定案並寫用量", async () => {
   const s = setup({ fetchImpl: async () => NEXT_OK() });
   await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
   await handleStrongAdjudicate(lane({ action: "claim" }), s.deps);
@@ -138,7 +139,7 @@ Deno.test("complete：驗證欄位（錯 verdict／類別／缺 corrected_fields
   assertEquals(s.rows[0].status, "running");
   const ok = await handleStrongAdjudicate(lane({ action: "complete", adjudication_id: id, ...RESULT }), s.deps);
   assertEquals(ok.status, 200);
-  assertEquals(s.rows[0].status, "previewed");
+  assertEquals(s.rows[0].status, "finalized");
   assertEquals(s.usage.length, 1);
   assertEquals((await handleStrongAdjudicate(lane({ action: "complete", adjudication_id: id, ...RESULT }), s.deps)).status, 409);
 });
@@ -148,7 +149,12 @@ async function previewed(corrected = false) {
   await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
   await handleStrongAdjudicate(lane({ action: "claim" }), s.deps);
   const extra = corrected ? { verdict: "uphold_with_correction", corrected_fields: { title: "新標題" } } : {};
+  // complete 現在會自動定案；這裡讓 /report 連線失敗再把列改回 previewed，模擬「自動定案上線前留下的 previewed 舊資料」
+  const realFetch = s.deps.fetchImpl;
+  s.deps.fetchImpl = (async (u: string | URL | Request, i?: RequestInit) => { if (String(u).endsWith("/report")) throw new Error("down"); return realFetch!(u, i); }) as typeof fetch;
   await handleStrongAdjudicate(lane({ action: "complete", adjudication_id: s.rows[0].id, ...RESULT, ...extra }), s.deps);
+  s.deps.fetchImpl = realFetch;
+  Object.assign(s.rows[0], { status: "previewed", finalized_by: null, error: null, last_error: null, report_response: null });
   s.calls.length = 0;
   return s;
 }
@@ -320,4 +326,119 @@ Deno.test("summary／status／list：每件帶 contribution_type（join contribu
   assertEquals(list.items[0].contribution_type, "policy");
   s.rows[0].contribution_id = "gone";
   assertEquals((await (await handleStrongAdjudicate(maint({ action: "summary", since: "2026-11-01" }), s.deps)).json()).items[0].contribution_type, null);
+});
+
+const complete = (id: string, extra: Record<string, unknown> = {}) => lane({ action: "complete", adjudication_id: id, ...RESULT, ...extra });
+async function running(fetchImpl: typeof fetch) {
+  const s = setup({ fetchImpl });
+  await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
+  s.deps.fetchImpl = (async () => NEXT_OK()) as typeof fetch;
+  await handleStrongAdjudicate(lane({ action: "claim" }), s.deps);
+  s.deps.fetchImpl = fetchImpl;
+  s.calls.length = 0;
+  return s;
+}
+const reportBodies = (s: { calls: Calls[] }) => s.calls.filter((c) => c.url.endsWith("/report")).map((c) => JSON.parse(String(c.init!.body)));
+const okFetch = (async () => new Response(JSON.stringify({ success: true }), { status: 200 })) as typeof fetch;
+
+Deno.test("自動定案：complete 後同一次呼叫就送 /report，成功→finalized", async () => {
+  const s = await running(okFetch);
+  s.deps.fetchImpl = (async (u: string | URL | Request, i?: RequestInit) => { s.calls.push({ url: String(u), init: i }); return okFetch(u, i); }) as typeof fetch;
+  const res = await handleStrongAdjudicate(complete(s.rows[0].id), s.deps);
+  const body = await res.json();
+  assertEquals(res.status, 200);
+  assertEquals(body.finalized, true);
+  assertEquals(body.job.status, "finalized");
+  assertEquals(s.rows[0].status, "finalized");
+  assertEquals(s.rows[0].finalized_by, "console-strong-adjudicate");
+  assertEquals(reportBodies(s).length, 1);
+  assertEquals(s.usage.length, 1);
+});
+
+Deno.test("自動定案：/report 拒收→finalize_failed，error 與 last_error 都寫；連線失敗同樣；之後可退回人工", async () => {
+  const s = await running((async () => new Response(JSON.stringify({ success: false, error: "correction_invalid" }), { status: 400 })) as typeof fetch);
+  const res = await handleStrongAdjudicate(complete(s.rows[0].id), s.deps);
+  const body = await res.json();
+  assertEquals(res.status, 200); // complete 本身收下了
+  assertEquals(body.finalized, false);
+  assertEquals(body.job.status, "finalize_failed");
+  assert(String(body.job.error).includes("400") && String(body.job.last_error).includes("400"));
+  assertEquals((await handleStrongAdjudicate(maint({ action: "return_to_human", adjudication_id: s.rows[0].id, reason: "來源要人看" }), s.deps)).status, 200);
+  const s2 = await running((async () => { throw new Error("down"); }) as typeof fetch);
+  const b2 = await (await handleStrongAdjudicate(complete(s2.rows[0].id), s2.deps)).json();
+  assertEquals(b2.job.status, "finalize_failed");
+  assert(b2.job.last_error);
+});
+
+Deno.test("手動 finalize 失敗也寫 last_error（主控台讀這欄）", async () => {
+  const s = await previewed();
+  s.deps.fetchImpl = (async () => new Response(JSON.stringify({ success: false }), { status: 422 })) as typeof fetch;
+  await handleStrongAdjudicate(maint({ action: "finalize", adjudication_id: s.rows[0].id }), s.deps);
+  assertEquals(s.rows[0].status, "finalize_failed");
+  assert(String(s.rows[0].last_error).includes("422"));
+});
+
+Deno.test("自我引用剔除：checked_urls 裡的正見網址不送 /report；剔光改用 corrected_fields.source_urls，再不行用原貢獻來源", async () => {
+  const SELF = "https://xn--2lw665d.tw/skill.md";
+  const wrap = (s: { calls: Calls[]; deps: StrongAdjudicateDeps }) => {
+    s.deps.fetchImpl = (async (u: string | URL | Request, i?: RequestInit) => { s.calls.push({ url: String(u), init: i }); return okFetch(u, i); }) as typeof fetch;
+  };
+  const s = await running(okFetch);
+  wrap(s);
+  await handleStrongAdjudicate(complete(s.rows[0].id, { checked_urls: [SELF, "https://example.com/a", "https://policy-tw.web.app/x"] }), s.deps);
+  let sent = reportBodies(s)[0];
+  assertEquals(sent.payload.checked_urls, ["https://example.com/a"]);
+  assertEquals(sent.source_urls, ["https://example.com/a"]);
+
+  const s2 = await running(okFetch);
+  wrap(s2);
+  await handleStrongAdjudicate(complete(s2.rows[0].id, { verdict: "uphold_with_correction", checked_urls: [SELF], corrected_fields: { source_urls: ["https://example.com/new.pdf", SELF] } }), s2.deps);
+  sent = reportBodies(s2)[0];
+  assertEquals(sent.source_urls, ["https://example.com/new.pdf"]);
+  assertEquals(sent.payload.checked_urls, ["https://example.com/new.pdf"]);
+
+  const s3 = await running(okFetch);
+  wrap(s3);
+  await handleStrongAdjudicate(complete(s3.rows[0].id, { checked_urls: [SELF] }), s3.deps);
+  sent = reportBodies(s3)[0];
+  assertEquals(sent.source_urls, ["https://orig.example.com/p.pdf"]); // 原貢獻來源也剔除自家網址
+});
+
+Deno.test("buildReportBody：全被剔光時用備用來源；沒有任何可用來源才是空（交給 /report 講原因）", () => {
+  const base = { contribution_id: "c1", verdict: "uphold", reasoning: "r".repeat(30), model: "m", checked_urls: ["https://xn--2lw665d.tw/skill.md"], corrected_fields: null } as unknown as JobRow;
+  assertEquals((buildReportBody(base, ["https://a.example.com/"]) as { source_urls: string[] }).source_urls, ["https://a.example.com/"]);
+  assertEquals((buildReportBody(base) as { source_urls: string[] }).source_urls, []);
+});
+
+Deno.test("enqueue_all：排入沒有進行中作業的任務，回 enqueued／skipped；limit 截斷；非法 limit 400；執行者鑰匙 401", async () => {
+  const items = ["t1", "t2", "t3", "t4"].map((t, i) => ({ ...LANE_ITEM, task_id: t, contribution_id: `c${i + 1}` }));
+  const s = setup({ laneItems: items });
+  // t1 已排隊、t2 剛出爐（30 分內 previewed）、t3 出爐在兩小時前（可再排）
+  await handleStrongAdjudicate(maint({ action: "enqueue", task_id: "t1" }), s.deps);
+  s.rows.push({ ...s.rows[0], id: "jx2", task_id: "t2", status: "previewed", completed_at: "2026-11-11T11:50:00Z" });
+  s.rows.push({ ...s.rows[0], id: "jx3", task_id: "t3", status: "finalize_failed", completed_at: "2026-11-11T10:00:00Z" });
+  const res = await handleStrongAdjudicate(maint({ action: "enqueue_all" }), s.deps);
+  const body = await res.json();
+  assertEquals(res.status, 200);
+  assertEquals(body.enqueued, 2);
+  assertEquals(body.skipped, 2);
+  assertEquals(body.jobs.map((j: { task_id: string }) => j.task_id), ["t3", "t4"]);
+  assertEquals(s.rows.filter((r) => r.status === "queued").length, 3);
+  // 再按一次：全部都在排隊或剛出爐
+  const again = await (await handleStrongAdjudicate(maint({ action: "enqueue_all" }), s.deps)).json();
+  assertEquals([again.enqueued, again.skipped], [0, 4]);
+  // limit
+  const s2 = setup({ laneItems: items });
+  const lim = await (await handleStrongAdjudicate(maint({ action: "enqueue_all", limit: 3 }), s2.deps)).json();
+  assertEquals([lim.enqueued, lim.skipped, lim.over_limit], [3, 0, 1]);
+  for (const bad of [0, -1, 1.5, "5", 201]) assertEquals((await handleStrongAdjudicate(maint({ action: "enqueue_all", limit: bad }), s2.deps)).status, 400, String(bad));
+  assertEquals((await handleStrongAdjudicate(lane({ action: "enqueue_all" }), s2.deps)).status, 401);
+});
+
+Deno.test("守門：applyAdjudication 的 uphold_with_correction 把 corrected_fields.source_urls 也寫回頂層 source_urls", async () => {
+  const a = await Deno.readTextFile(new URL("./apply-contribution.ts", import.meta.url));
+  const i = a.indexOf("async function applyAdjudication");
+  const fn = a.slice(i, a.indexOf("export async function closeTaskIfFulfilled", i));
+  assert(fn.includes("correctedSourceUrls") && fn.includes("source_urls: correctedSourceUrls"));
+  assert(fn.includes("fields.source_urls"));
 });
