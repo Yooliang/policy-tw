@@ -15,6 +15,7 @@ import { sameRegionName } from '../region-name'
 import { inTownship } from '../election-townships'
 import { buildDirectory, isGroupKey, type DirectoryGroup, type DirectoryGroupSummary } from '../people-directory'
 import { partyList, partyPage, type PartySummary } from '../party-pages'
+import { sliceForElection } from '../policy-counts'
 
 /**
  * 預渲染每一頁時，全域資料狀態只放「這一頁渲染會用到」的切片。
@@ -99,7 +100,7 @@ function electionIdOfParam(full: DataSnapshot, param: string | undefined): numbe
 function emptySnapshot(full: DataSnapshot): PageSnapshot {
   return {
     // 基底切片的 policies 是空的或只有幾筆，一律不算完整。
-    // 沒有任何路由把它翻成 true（#982 起首頁、/tracking、/analysis 也不帶整份政見）；整份由客戶端 ensurePolicies() 載。
+    // 沒有任何路由把它翻成 true（#982 起首頁、/tracking、/analysis、選舉頁也不帶整份政見）；整份由客戶端 ensurePolicies() 載。
     policiesComplete: false,
     generatedAt: full.generatedAt,
     elections: full.elections,
@@ -170,10 +171,11 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
           && isRunningCandidate(e.candidacyStatus),
         ))
         .map((pl) => withElectionData(pl, electionId))
-      // 2026-09-22：快照不帶政見的話，預渲染 HTML 每張候選人卡都是「0 項政見」（爬蟲與分享預覽看到的就是這份）。
-      // 只塞該屆的（2026 屆 223 筆），policiesComplete 照舊 false，瀏覽器端 ensurePolicies() 仍會抓整份。
-      const policies = full.policies.filter((p) => p.electionId === electionId)
-      return { ...base, politicians, policies }
+      // 卡片上的「N 項承諾」：嵌這一屆的每人承諾數對照（2026 屆約 2 千列、不到 100 KB），不嵌政見本身。
+      // 2026-11-18（#982 延伸）以前這裡塞該屆全部政見（7,675 筆、預渲染 HTML 7.75 MB）。
+      // 對照是整屆、complete:true：全台頁的卡片與切到縣市後的數字都不必再向資料庫要。
+      // 政見本身（承諾頁籤、PK、依更新時間／關注度排序）進頁後按需才載（ElectionPage 的 needsFullPolicies）。
+      return { ...base, politicians, policyCounts: sliceForElection(full.policyCounts, electionId) }
     }
 
     case 'election-matrix':
@@ -220,10 +222,11 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
             }]
           : []
       })
+      // 只嵌這一頁這批人的承諾數（complete:false，瀏覽器端補撈整屆，見 lib/policy-counts.ts 的 sliceForElection）
       const ids = new Set(politicians.map((pl) => String(pl.id)))
-      const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
+      const policyCounts = sliceForElection(full.policyCounts, electionId, ids)
       const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
-      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true, townshipDirectory }
+      return { ...base, politicians, policyCounts, electoralDistrictAreas, electoralDistrictAreasPartial: true, townshipDirectory }
     }
 
     case 'election-township': {
@@ -248,9 +251,9 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
         ))
         .map((pl) => withElectionData(pl, electionId))
       const ids = new Set(politicians.map((pl) => String(pl.id)))
-      const policies = full.policies.filter((p) => p.electionId === electionId && ids.has(String(p.politicianId)))
+      const policyCounts = sliceForElection(full.policyCounts, electionId, ids)
       const electoralDistrictAreas = full.electoralDistrictAreas.filter((m) => m.region === region)
-      return { ...base, politicians, policies, electoralDistrictAreas, electoralDistrictAreasPartial: true }
+      return { ...base, politicians, policyCounts, electoralDistrictAreas, electoralDistrictAreasPartial: true }
     }
 
     case 'politician': {

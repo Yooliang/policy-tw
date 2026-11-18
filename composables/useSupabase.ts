@@ -29,6 +29,7 @@ import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
 import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
 import type { PolicySummary } from '../lib/policy-summary'
+import { slicesToState, isPolicyCountsComplete, type PolicyCountsByElection, type PolicyCountsSlice, type RawPolicyCountRow } from '../lib/policy-counts'
 import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
@@ -614,6 +615,42 @@ export function ensureDiscussions(): Promise<void> {
 let policiesPromise: Promise<void> | null = null
 
 /**
+ * 每人每屆的承諾數／政見數對照（lib/policy-counts.ts）。選舉頁卡片與 SEO 描述讀這個，不再為了數字載整份政見清單。
+ * 預渲染的選舉頁會把這一屆的對照嵌進快照；沒有（舊 state、直接進頁）時由 ensurePolicyCounts 向視圖撈一屆。
+ */
+const policyCountsByElection = ref<PolicyCountsByElection>({})
+const policyCountsInflight = new Map<number, Promise<void>>()
+
+/** 視圖 politician_election_policy_counts 的列（electionId 沒給＝全部屆別，建置端用）；一頁頁撈到底 */
+export async function fetchPolicyCountRows(electionId?: number): Promise<RawPolicyCountRow[]> {
+  const { rows, truncated } = await fetchAllPages<RawPolicyCountRow>('politician_election_policy_counts', (from, to) =>
+    withTimeoutAndRetry(`policy counts ${electionId ?? 'all'} ${from}-${to}`, (signal) => {
+      const q = supabase.from('politician_election_policy_counts').select('politician_id,election_id,pledge_count,policy_count')
+      return (electionId === undefined ? q : q.eq('election_id', electionId))
+        .order('election_id').order('politician_id').range(from, to).abortSignal(signal).throwOnError()
+    }) as PromiseLike<PageResponse<RawPolicyCountRow>>)
+  // 撈不完就整份當失敗：缺的人會被當成 0 項，那是無聲的錯數字
+  if (truncated) throw new Error('承諾數撈到分頁上限仍未撈完')
+  return [...rows]
+}
+
+/** 這一屆的承諾數對照：已齊就不撈；同一屆同時只飛一個請求。失敗記進全域錯誤，可重試。 */
+export function ensurePolicyCounts(electionId: number): Promise<void> {
+  if (!Number.isFinite(electionId) || isPolicyCountsComplete(policyCountsByElection.value, electionId)) return Promise.resolve()
+  const flying = policyCountsInflight.get(electionId)
+  if (flying) return flying
+  const run = (async () => {
+    const raw = await fetchPolicyCountRows(electionId)
+    const map: Record<string, { pledge: number; policy: number }> = {}
+    for (const r of raw) map[String(r.politician_id)] = { pledge: Number(r.pledge_count) || 0, policy: Number(r.policy_count) || 0 }
+    policyCountsByElection.value = { ...policyCountsByElection.value, [electionId]: { complete: true, map } }
+  })().catch((err) => { recordFailure('承諾數', err, () => ensurePolicyCounts(electionId)) })
+    .finally(() => { policyCountsInflight.delete(electionId) })
+  policyCountsInflight.set(electionId, run)
+  return run
+}
+
+/**
  * 政見清單（257 KB）＋有政見的人物（91 KB）。列表頁與詳情頁要，公民提問頁不要。
  *
  * 跟另外三塊 ensure* 不同的是：這一塊的判斷不能看 length。預渲染的詳情頁會先嵌
@@ -986,6 +1023,8 @@ export interface DataSnapshot {
   townshipDirectory?: DirectoryPerson[]
   /** 政見矩陣頁的資料（只有那一頁的切片有） */
   policyMatrix?: PolicyMatrix | null
+  /** 每人每屆承諾數／政見數對照（選舉頁的切片帶那一屆；建置端的 full 帶全部屆別）。沒給＝這一頁不需要，瀏覽器端要用時自己撈 */
+  policyCounts?: PolicyCountsSlice[]
   /** 政策脈絡（#349）：脈絡一覽帶整份（lineagesComplete=true）、脈絡頁帶那一條。沒給＝這一頁不需要 */
   lineages?: Lineage[]
   lineagesComplete?: boolean
@@ -1047,6 +1086,8 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
   // 快照沒帶就清空（預渲染一頁一頁套快照，前一頁的矩陣不該留到下一頁）
   policyMatrix.value = snapshot.policyMatrix ?? null
+  // 承諾數對照：同樣沒帶就清空（預渲染一頁一頁套快照）
+  policyCountsByElection.value = slicesToState(snapshot.policyCounts)
   // 政策脈絡：快照沒帶就清空（預渲染一頁一頁套快照，前一頁的脈絡不該留到下一頁）
   lineages.value = snapshot.lineages ?? []
   lineagesComplete.value = snapshot.lineagesComplete === true
@@ -1363,6 +1404,8 @@ export function useSupabase() {
     ensureDistricts,
     ensureDiscussions,
     ensurePolicies,
+    ensurePolicyCounts,
+    policyCountsByElection,
     ensureVerificationSources,
     policiesComplete,
     getPoliciesByCategory,

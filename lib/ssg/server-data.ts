@@ -11,6 +11,7 @@ import {
   ensureDistricts,
   ensureDiscussions,
   ensurePolicies,
+  fetchPolicyCountRows,
   ensureVerificationSources,
 } from '../../composables/useSupabase'
 import type { Lineage, Politician, RawLineage, RawPolitician } from '../../types'
@@ -27,6 +28,8 @@ import { supabasePublic } from '../supabase'
 import { directoryFor, partyListFor } from './page-data'
 import { buildSitemapMeta } from '../sitemap'
 import { summarizePolicies } from '../policy-summary'
+import { groupRowsByElection, rawRowsFromPolicies, type PolicyCountsSlice, type RawPolicyCountRow } from '../policy-counts'
+import type { Policy } from '../../types'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -69,6 +72,32 @@ async function withRetry<T>(label: string, run: () => Promise<T>, ok: (v: T) => 
     }
   }
   throw last instanceof Error ? last : new Error(`[ssg] ${label} 連續 ${FETCH_ATTEMPTS} 次失敗`)
+}
+
+/**
+ * 每人每屆承諾數對照（選舉頁預渲染用）：讀視圖 politician_election_policy_counts（全部屆別約 2 千多列）。
+ * 視圖還沒上線（migration 比前端晚幾分鐘套上）時，退回用已載入的政見自己算同一份，並印警告；
+ * 視圖在的時候跟政見清單對一次帳，對不上只警告（建置到結束之間資料可能剛好變動），不中止。
+ */
+async function loadPolicyCounts(policies: Policy[]): Promise<PolicyCountsSlice[]> {
+  // 視圖不存在不是暫時性失敗，不重試：run 回 null 直接走退路
+  const raw = await withRetry<RawPolicyCountRow[] | null>(
+    'politician_election_policy_counts',
+    async () => {
+      try { return await fetchPolicyCountRows() } catch (err) { if (isMissingRelation(err)) return null; throw err }
+    },
+    (r) => r === null || r.length > 0,
+  )
+  if (raw === null) {
+    console.warn('[ssg] 視圖 politician_election_policy_counts 還不存在，這次用政見清單自己算承諾數對照')
+    return groupRowsByElection(rawRowsFromPolicies(policies))
+  }
+  const sum = (rows: RawPolicyCountRow[], k: 'pledge_count' | 'policy_count') => rows.reduce((n, r) => n + r[k], 0)
+  const mine = rawRowsFromPolicies(policies)
+  if (sum(raw, 'pledge_count') !== sum(mine, 'pledge_count') || sum(raw, 'policy_count') !== sum(mine, 'policy_count')) {
+    console.warn(`[ssg] 承諾數對照跟政見清單對不上（視圖 承諾 ${sum(raw, 'pledge_count')}／政見 ${sum(raw, 'policy_count')}，清單 ${sum(mine, 'pledge_count')}／${sum(mine, 'policy_count')}）`)
+  }
+  return groupRowsByElection(raw)
 }
 
 async function loadFullDataset(): Promise<DataSnapshot> {
@@ -115,7 +144,8 @@ async function loadFullDataset(): Promise<DataSnapshot> {
   const partyRegistry = await loadPartyRegistry()
   console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length} lineages=${lineages.length} parties=${partyRegistry.parties.length}`)
   const policyMatrix = await loadPolicyMatrix()
-  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry, policyMatrix }
+  const policyCounts = await loadPolicyCounts(base.policies)
+  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry, policyMatrix, policyCounts }
 }
 
 /**

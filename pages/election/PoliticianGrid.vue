@@ -3,7 +3,8 @@ import PartyBadge from '../../components/PartyBadge.vue'
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { isMobileViewport } from '../../composables/useMobileShell'
 import { useSupabase } from '../../composables/useSupabase'
-import { PolicyStatus, type Politician, type CandidacyStatus } from '../../types'
+import type { Politician, CandidacyStatus } from '../../types'
+import { pledgeCountOf, pledgeCountKnown } from '../../lib/policy-counts'
 import { Megaphone, Check } from 'lucide-vue-next'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { thumbFor } from '../../composables/useAvatarThumb'
@@ -30,7 +31,7 @@ const props = defineProps<{
    */
 }>()
 
-const { policies, elections } = useSupabase()
+const { elections, policyCountsByElection, ensurePolicyCounts } = useSupabase()
 
 /**
  * 卡片（2026-09-28 維護者試作大頭照版，參考民眾黨候選人頁；2026-10-06 維護者：拿掉「大頭照／清單」切換，只留這種卡片）：
@@ -78,18 +79,13 @@ const portraitGridClass = computed(() => props.columns === 2
  */
 const currentTitle = (p: Politician) => officeTitles(p.offices).join('、')
 
-// 一次掃過全部政見建好「人 → 當屆承諾數」，卡片只查表（原本每張卡片各掃一次全部政見，手機追蹤裡這段自身就 4.2 秒）
-const pledgeCounts = computed(() => {
-  const m = new Map<string, number>()
-  for (const p of policies.value) {
-    if (p.status !== PolicyStatus.CAMPAIGN) continue
-    if (props.electionId !== undefined && p.electionId !== props.electionId) continue
-    const k = String(p.politicianId)
-    m.set(k, (m.get(k) ?? 0) + 1)
-  }
-  return m
-})
-const getPledgeCount = (politicianId: string | number) => pledgeCounts.value.get(String(politicianId)) ?? 0
+// 「N 項承諾」讀每人每屆承諾數對照（lib/policy-counts.ts，資料庫視圖 politician_election_policy_counts），不再掃整份政見清單。
+// 預渲染的選舉頁已把對照嵌在快照裡；沒有（舊 state、直接進頁）或只有這一頁的人（縣市／鄉鎮頁）時，掛載後補撈這一屆，
+// 補到之前這個人的數字還不知道，色帶顯示「載入中」，不先閃一個錯的 0。
+const getPledgeCount = (politicianId: string | number) => pledgeCountOf(policyCountsByElection.value, props.electionId, politicianId)
+const pledgeKnown = (politicianId: string | number) => pledgeCountKnown(policyCountsByElection.value, props.electionId, politicianId)
+onMounted(() => { if (props.electionId !== undefined) void ensurePolicyCounts(props.electionId) })
+watch(() => props.electionId, (id) => { if (id !== undefined && typeof window !== 'undefined') void ensurePolicyCounts(id) })
 
 // 這一屆投完票了沒：投完票之後「已登記」那顆勾與「已登記」標籤沒有意思（人人都在選票上），只講結果
 const voted = computed(() => {
@@ -221,8 +217,10 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         </div>
         <!-- 承諾數：整張卡寬的底部色帶，mt-auto 貼卡片最底，同列卡片內容高度不同也對齊 -->
         <div :class="['mt-auto flex items-center gap-1 px-3 py-1.5 text-[11px] font-bold text-left',
-                      getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
-          <Megaphone :size="11" /> {{ getPledgeCount(politician.id) }} 項{{ voted && politician.candidacyStatus === 'elected' ? '政見' : '承諾' }}
+                      pledgeKnown(politician.id) && getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
+          <Megaphone :size="11" />
+          <template v-if="pledgeKnown(politician.id)"> {{ getPledgeCount(politician.id) }} 項{{ voted && politician.candidacyStatus === 'elected' ? '政見' : '承諾' }}</template>
+          <template v-else> 承諾數載入中</template>
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
 import RegionPickMap, { type PickMapItem } from '../components/RegionPickMap.vue'
 import ScrollRow from '../components/ScrollRow.vue'
 import { runAfterRender } from '../lib/after-render'
+import { policyCountOfPeople } from '../lib/policy-counts'
 import { APPOINTED_EMPTY_TEXT, hasIndigenousElection, isAppointedDistrict, type IndigenousInput } from '../lib/appointed-district'
 import { PolicyStatus, ElectionType, type Politician, type Policy } from '../types'
 import { compareByPolicyDateDesc } from '../lib/policy-date'
@@ -74,7 +75,7 @@ const route = useRoute()
  * 上次定位的還原（restoreLocation）仍只限手機寬度。
  */
 const panelLayout = () => typeof window !== 'undefined'
-const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, ensureOfficialRegionalStats, loadPoliticiansByElection, loadedElections, ensurePolicies, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
+const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, ensureOfficialRegionalStats, loadPoliticiansByElection, loadedElections, ensurePolicies, policiesComplete, ensurePolicyCounts, policyCountsByElection, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -174,6 +175,9 @@ async function loadElectionData(id: number, region: string, subRegion: string) {
 }
 
 onMounted(() => {
+  // 卡片上的「N 項承諾」與 SEO 描述的政見數：每人每屆承諾數對照（幾 KB，預渲染已嵌就不撈；縣市／鄉鎮頁只嵌了那一頁的人，這裡補整屆）。
+  // 不是 ensurePolicies：整份政見清單 14,000 筆，這一頁預設的候選人檢視用不到。
+  ensurePolicyCounts(electionId.value)
   // 首屏只要候選人清單（路由解析時已經先發了，這裡接手同一個 promise，見 router/index.ts）。
   // 次要資料等第一批卡片載完、畫上去之後才抓（2026-10-31，載入順序優化）：
   // 政見清單 257 KB 與選舉區對應 77 KB 以前在這裡一掛載就發，在行動網路上跟卡片搶頻寬。
@@ -183,9 +187,9 @@ onMounted(() => {
     ? loadElectionData(electionId.value, selectedRegion.value, selectedSubRegion.value)
     : Promise.resolve()
   void firstCards.catch(() => undefined).then(() => runAfterRender(() => {
-    // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-    // 串聯檢視不需要整份政見與選舉區（離開串聯時補載）
-    if (viewMode.value !== 'issues') { ensurePolicies(); ensureDistricts() }
+    // 整份政見清單（14,000 筆）只有承諾／PK 檢視與「最近更新／關注度」排序用得到（needsFullPolicies），進到那些檢視才載；
+    // 預設的候選人檢視只讀承諾數對照。串聯檢視不需要整份政見與選舉區（離開串聯時補載）
+    if (viewMode.value !== 'issues') { if (needsFullPolicies.value) ensurePolicies(); ensureDistricts() }
     // 地方基本統計（RegionalStatsPanel 在這一頁不自己抓，由這裡統一排）
     ensureOfficialRegionalStats()
   }, nextTick))
@@ -246,9 +250,10 @@ const viewMode = ref<ElectionViewMode>('politicians')
 watch(viewMode, (now, before) => {
   if (before !== 'issues' || now === 'issues' || !electionId.value) return
   void loadElectionData(electionId.value, selectedRegion.value, selectedSubRegion.value)
-  void ensurePolicies()
   void ensureDistricts()
 })
+// 換屆（站內連結切到別屆）時補那一屆的承諾數對照
+watch(electionId, (id) => { if (typeof window !== 'undefined') ensurePolicyCounts(id) })
 /** 手機版（X 式版面）目前停在哪一種參選人類型（網址 ?tab=；空字串＝這一頁第一個有資料的類型） */
 const mobileTab = ref('')
 /** 承諾頁籤的頁碼（網址 ?page=，字串形式給 queryField；實際頁碼看 pledgePage） */
@@ -367,17 +372,32 @@ const SORT_OPTIONS = computed<SortIconOption<SortMode>[]>(() => [
   { key: 'attention', label: '關注度', icon: Eye },     // 支持、反對、關注的總數
   ...(hasBallotNos.value ? [{ key: 'ballot' as const, label: '號次', text: 'No' }] : []),
 ])
-/** 每位候選人名下政見的統計：最後變動時間、筆數、表態總數（跨屆別都算，那是這個人的活動量） */
+/**
+ * 整份政見清單什麼時候才需要載（2026-11-18 #982 延伸，以前一進頁就載）：
+ * 承諾頁籤、PK 頁籤要政見本身；候選人檢視只有選「最近更新」「關注度」排序時要（兩者看政見的更新時間與表態數）。
+ * 預設檢視（號次／筆畫排序）、「政見數」排序、卡片數字、SEO 描述都只讀承諾數對照。
+ */
+const needsFullPolicies = computed(() =>
+  viewMode.value === 'pledges' || viewMode.value === 'comparison'
+  || (viewMode.value === 'politicians' && (sortMode.value === 'updated' || sortMode.value === 'attention')))
+watch(needsFullPolicies, (need) => { if (need && typeof window !== 'undefined') void ensurePolicies() })
+/**
+ * 每位候選人的統計：最後變動時間與表態總數要掃政見（只在選了那兩種排序、整份載完後才有值），
+ * 筆數讀這一屆的政見數對照（卡片上的數字同一份來源；以前是名下全部屆別的筆數）。
+ */
 const policyStatsByPolitician = computed(() => {
   const m = new Map<string, { updated: string; count: number; attention: number }>()
-  for (const p of policies.value) {
-    const st = m.get(p.politicianId) ?? { updated: '', count: 0, attention: 0 }
-    // updatedAt 是 timestamptz（內容任何變動都會蓋，含代理套用的更正）；快照還沒帶這欄時退回只有「日」的 lastUpdated
-    const touched = p.updatedAt ?? p.lastUpdated ?? ''
-    if (touched > st.updated) st.updated = touched
-    st.count += 1
-    st.attention += (p.stanceSupport ?? 0) + (p.stanceOppose ?? 0) + (p.stancePriority ?? 0)
-    m.set(p.politicianId, st)
+  const counts = policyCountsByElection.value[electionId.value]?.map ?? {}
+  for (const [id, c] of Object.entries(counts)) m.set(id, { updated: '', count: c.policy, attention: 0 })
+  if (sortMode.value === 'updated' || sortMode.value === 'attention') {
+    for (const p of policies.value) {
+      const st = m.get(p.politicianId) ?? { updated: '', count: 0, attention: 0 }
+      // updatedAt 是 timestamptz（內容任何變動都會蓋，含代理套用的更正）；快照還沒帶這欄時退回只有「日」的 lastUpdated
+      const touched = p.updatedAt ?? p.lastUpdated ?? ''
+      if (touched > st.updated) st.updated = touched
+      st.attention += (p.stanceSupport ?? 0) + (p.stanceOppose ?? 0) + (p.stancePriority ?? 0)
+      m.set(p.politicianId, st)
+    }
   }
   return m
 })
@@ -1070,10 +1090,9 @@ const countyHeadNames = computed(() => {
     { cap: 1000 },
   ).map(it => it.name)
 })
-/** 名下這一屆政見的筆數（只算傳進來的這些人；不管 policies 載完整了沒，同一批人同一屆的數字都一樣） */
+/** 名下這一屆政見的筆數（只算傳進來的這些人；讀每人每屆政見數對照，不管整份政見載完沒，同一批人同一屆的數字都一樣） */
 function policyCountOf(people: ReadonlyArray<{ id: string | number }>): number {
-  const ids = new Set(people.map(p => String(p.id)))
-  return policies.value.filter(p => p.electionId === electionId.value && ids.has(String(p.politicianId))).length
+  return policyCountOfPeople(policyCountsByElection.value, electionId.value, people)
 }
 /**
  * 鄉鎮頁的頁首（2026-10-05）：「2022 嘉義縣大林鎮 候選人與政見」。
@@ -1938,7 +1957,9 @@ useSwipeTabs(swipeEl, {
           :politician="politicianById.get(policy.politicianId)!"
         />
       </div>
-      <p v-if="viewMode === 'pledges' && pagedCampaignPolicies.length === 0 && !loading" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400" data-testid="pledges-empty">尚無承諾</p>
+      <!-- 整份政見是進到這個檢視才載的：載完之前不能說「尚無承諾」 -->
+      <p v-if="viewMode === 'pledges' && !policiesComplete && !error" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400 animate-pulse" data-testid="pledges-loading">承諾載入中…</p>
+      <p v-else-if="viewMode === 'pledges' && pagedCampaignPolicies.length === 0 && !loading" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400" data-testid="pledges-empty">尚無承諾</p>
       <Pagination v-if="viewMode === 'pledges'" :page="pledgePage" :total-pages="pledgeTotalPages" @update:page="goPledgePage" />
 
       <!-- VIEW: Issues -->
@@ -1980,6 +2001,7 @@ useSwipeTabs(swipeEl, {
           <p v-else class="font-bold text-slate-700">先在左側選擇鄉鎮市區</p>
           <p class="text-sm mt-1">{{ levelLabel(pkLevel) }}的政見 PK 是一個{{ pkMissing === 'county' ? '縣市' : '鄉鎮市區' }}一場，選好之後就會並排這一場的參選人。</p>
         </div>
+        <p v-else-if="!policiesComplete && !error" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400 animate-pulse" data-testid="pk-loading">政見載入中…</p>
         <PolicyPk
           v-else
           :title="pkTitle"
