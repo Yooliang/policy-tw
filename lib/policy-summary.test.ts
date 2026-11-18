@@ -1,5 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { recentVisiblePolicies, summarizePolicies } from "./policy-summary.ts";
+import { slimRoutePart } from "./ssg/slim-routes.ts";
 import { PolicyStatus } from "../types.ts";
 
 // #982：首頁、/tracking、/analysis 的預渲染資料不再嵌整份政見（14,003 筆、12.4 MB），首頁改讀建置時算好的摘要。
@@ -37,15 +38,19 @@ Deno.test("recentVisiblePolicies：提出日新到舊取前 N 筆、落選的競
   assertEquals(list.map((p: { id: string }) => p.id).join(), before);
 });
 
-// 守門：這三個路由的預渲染切片不能再塞整份 full.policies（>10 MB 會讓每次造訪都下載整份）
-Deno.test("page-data.ts：home／tracking／analysis 不帶整份政見、不標 policiesComplete", () => {
-  const src = Deno.readTextFileSync(new URL("./ssg/page-data.ts", import.meta.url));
-  for (const route of ["home", "tracking", "analysis"]) {
-    const start = src.indexOf(`case '${route}'`);
-    assert(start >= 0, `找不到 case '${route}'`);
-    const end = src.indexOf("\n    case '", start + 10);
-    const body = src.slice(start, end);
-    assert(!/policies:\s*full\.policies\b/.test(body), `${route} 不該把整份 full.policies 放進切片`);
-    assert(!/policiesComplete:\s*true/.test(body), `${route} 不該標 policiesComplete: true`);
+// 守門：這三個路由的預渲染切片不能再塞整份政見（>10 MB 會讓每次造訪都下載整份）。用合成的 600 筆實際呼叫，不比對字串。
+Deno.test("slimRoutePart：home 最多 3 筆、tracking 與 analysis 沒有政見，且都不標 policiesComplete", () => {
+  const policies = Array.from({ length: 600 }, (_, i) => mk(`p${i}`, PolicyStatus.IN_PROGRESS, { politicianId: `pl${i % 5}`, proposedDate: `2026-01-${String((i % 28) + 1).padStart(2, "0")}` }));
+  const politicians = Array.from({ length: 5 }, (_, i) => ({ id: `pl${i}`, name: `人${i}`, elections: [] }));
+  const full = { policies, politicians, lineages: [], policiesComplete: true } as never;
+  const home = slimRoutePart("home", full)!;
+  assert(home.policies!.length <= 3 && home.policies!.length > 0);
+  assertEquals(slimRoutePart("tracking", full)!.policies, undefined);
+  assertEquals(slimRoutePart("analysis", full)!.policies, undefined);
+  for (const name of ["home", "tracking", "analysis"]) {
+    const part = slimRoutePart(name, full)!;
+    assert(!("policiesComplete" in part) || part.policiesComplete !== true, `${name} 不該標完整`);
+    assert((part.policies ?? []).length <= 3);
   }
+  assertEquals(slimRoutePart("election", full), null);
 });

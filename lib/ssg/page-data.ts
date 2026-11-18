@@ -4,7 +4,7 @@ import type { Lineage, Policy, Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { taipeiToday } from '../policy-stage'
 import { isProgressCase, lineageMateIdsOf } from '../policy-chain'
-import { recentVisiblePolicies } from '../policy-summary'
+import { slimRoutePart } from './slim-routes'
 import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
 import { findElectionBySegment } from '../election-route'
@@ -99,7 +99,7 @@ function electionIdOfParam(full: DataSnapshot, param: string | undefined): numbe
 function emptySnapshot(full: DataSnapshot): PageSnapshot {
   return {
     // 基底切片的 policies 是空的或只有幾筆，一律不算完整。
-    // 只有下面明確塞 full.policies 的那三個路由會把它翻成 true。
+    // 沒有任何路由把它翻成 true（#982 起首頁、/tracking、/analysis 也不帶整份政見）；整份由客戶端 ensurePolicies() 載。
     policiesComplete: false,
     generatedAt: full.generatedAt,
     elections: full.elections,
@@ -124,21 +124,11 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
   const base = emptySnapshot(full)
 
   switch (to.name) {
-    case 'home': {
-      // 統計數字用 stats.policySummary（建置時由全部政見算好）；卡片只列最新 3 筆，其政治人物要在場（#982）。
-      // 這 3 筆的挑法與 Home.vue 的 recentPolicies 一致：先濾掉落選的競選承諾，再依提出日新到舊。
-      const personById = new Map(full.politicians.map((pl) => [String(pl.id), pl]))
-      const recent = recentVisiblePolicies(full.policies, (p) => personById.get(String(p.politicianId)))
-      return { ...base, policies: recent, politicians: politiciansReferencedBy(recent, full.politicians) }
-    }
-
+    case 'home':
     case 'tracking':
-      // 整份政見進頁後才載（ensurePolicies）；預渲染 HTML 只帶骨架，不再把 12 MB 政見嵌進每一份 HTML（#982）
-      return base
-
     case 'analysis':
-      // 政策脈絡一覽（#349）：只用整份脈絡；「進度過半的政見」早已移到 /tracking?focus=progress，這頁不讀政見（#982）
-      return { ...base, lineages: full.lineages ?? [], lineagesComplete: true }
+      // 不帶整份政見（#982），見 slim-routes.ts
+      return { ...base, ...slimRoutePart(to.name, full) }
 
     case 'lineage': {
       // 政策脈絡頁（#349）：那一條＋它的政見＋提到的人（邊緣 SSR 的 loadLineagePage 算的是同一份）
