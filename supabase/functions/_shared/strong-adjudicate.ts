@@ -4,12 +4,14 @@
  * 這支端點**不呼叫任何模型**。分工：
  *   維護者（Firebase ID Token，同 console-admin）：list／enqueue／status／finalize／return_to_human／summary
  *   執行者（標頭 x-strong-lane-key ＝ STRONG_LANE_KEY，VM 上帶鑰匙的 claude）：claim／complete／fail
- * 流程：enqueue（queued）→ claim（running；回題目）→ complete（previewed；結果存表，不送 /report）→ 維護者 finalize
- * （伺服器端帶鑰匙 POST /report，adjudication，單一裁決即定案）或 return_to_human（returned，任務不動）。
+ * 流程：enqueue（queued）→ claim（running；回題目）→ complete（結果存表後，同一支函式立刻伺服器端帶鑰匙 POST /report，
+ * adjudication，單一裁決即定案；成功 finalized，/report 拒收 finalize_failed 留給人看）。維護者仍可對 previewed 舊資料手動 finalize，
+ * 或對 previewed／finalize_failed／failed 退回人工 return_to_human（returned，任務不動）。
  * STRONG_LANE_KEY 只在伺服器端與執行者手上；瀏覽器／主控台永遠不經手，回應也絕不含鑰匙。
  */
 import { isConsoleOwner, verifyFirebaseIdToken } from "./firebase-id-token.ts";
-import { correctionProblems, STRONG_KEY_HEADER, STRONG_VERDICTS, strongKeyOk } from "./strong-lane.ts";
+import { isSelfCitationUrl } from "./self-hosts.ts";
+import { correctionProblems, STRONG_KEY_HEADER, STRONG_REVIEWER, STRONG_VERDICTS, strongKeyOk } from "./strong-lane.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -35,6 +37,11 @@ export const MAX_REASONING = 1000;
 export const MIN_REASONING = 20; // /report 的 reason 至少 20 字
 export const MAX_CAUSE_NOTE = 300;
 export const SUMMARY_LIMIT = 500;
+/** enqueue_all 一次最多排入幾件（預設與上限） */
+export const ENQUEUE_ALL_DEFAULT_LIMIT = 50;
+export const ENQUEUE_ALL_MAX_LIMIT = 200;
+/** 每件任務透過 enqueue_all 最多累計幾筆作業（任何狀態都算；單件 enqueue 不受限，由人逐件決定） */
+export const ENQUEUE_ALL_MAX_JOBS_PER_TASK = 2;
 
 export interface JobRow {
   id: string; task_id: string; contribution_id: string | null; status: JobStatus;
@@ -66,6 +73,10 @@ export interface Repo {
   logUsage(u: UsageLog): Promise<void>;
   /** 貢獻 id → contribution_type（查不到的不在結果裡） */
   contributionTypes(ids: string[]): Promise<Record<string, string>>;
+  /** 原貢獻的 reviewed_by／review_notes（查不到回 null）；/report 回 no_strong_task 時判斷是不是這份作業其實已定案 */
+  contributionReview(id: string): Promise<{ reviewed_by: string | null; review_notes: string | null } | null>;
+  /** 原貢獻的 source_urls（查不到回空陣列）；自我引用剔光時當 /report 來源的最後退路 */
+  contributionSourceUrls(id: string): Promise<string[]>;
 }
 
 export interface StrongAdjudicateDeps {
@@ -98,7 +109,7 @@ function errMsg(e: unknown): string {
 }
 
 const LANE_ACTIONS = new Set(["claim", "complete", "fail"]);
-const MAINTAINER_ACTIONS = new Set(["list", "enqueue", "status", "finalize", "return_to_human", "summary"]);
+const MAINTAINER_ACTIONS = new Set(["list", "enqueue", "enqueue_all", "status", "finalize", "return_to_human", "summary"]);
 const SECRET_KEYS = /ip_hash|contributor_ip|x-strong-lane-key|lane_key|authorization|dispatch_token/i;
 
 /** 遞迴拿掉不該外流的欄位（ip 雜湊、鑰匙、派工憑證） */
@@ -177,11 +188,77 @@ export function parseResult(b: Obj): { error: string } | { value: Obj } {
   return { value: { verdict: b.verdict, corrected_fields: corrected, reasoning: b.reasoning.trim(), cause_category: b.cause_category, cause_note: nonEmpty(b.cause_note) ? b.cause_note.trim() : null, model: b.model.trim(), prompt_tokens: pt, completion_tokens: ct, cost, checked_urls: urls } };
 }
 
+const httpUrls = (v: unknown): string[] => (Array.isArray(v) ? v.filter((u): u is string => typeof u === "string" && /^https?:\/\//.test(u)) : []);
+const notSelf = (l: readonly string[]): string[] => l.filter((u) => !isSelfCitationUrl(u));
+
+/**
+ * /report 要送的來源網址：執行者的 checked_urls 剔掉正見自家網址（執行者讀協議時會被記進去，/report 會以 self_citation 整份退回）。
+ * 全剔光時依序用 corrected_fields.source_urls、原貢獻的 source_urls（fallback，同樣剔除自家網址）；/report 不收空來源。
+ */
+export function reportSourceUrls(j: JobRow, fallback: readonly string[] = []): string[] {
+  const checked = notSelf(httpUrls(j.checked_urls));
+  if (checked.length > 0) return checked;
+  const corrected = notSelf(httpUrls(j.corrected_fields?.source_urls));
+  if (corrected.length > 0) return corrected;
+  return notSelf(httpUrls(fallback));
+}
+
 /** finalize 送 /report 的 body（1.126.0 協議的 adjudication） */
-export function buildReportBody(j: JobRow): Obj {
-  const payload: Obj = { contribution_id: j.contribution_id, verdict: j.verdict, reason: j.reasoning, checked_urls: j.checked_urls ?? [] };
+/** 寫進 reason 的作業標記：落庫時跟著進原貢獻的 review_notes，/report 回 409 時憑它確認「是這份作業定案的」 */
+export const jobMarker = (jobId: string) => `[strong-job:${jobId}]`;
+
+export function buildReportBody(j: JobRow, fallbackSourceUrls: readonly string[] = []): Obj {
+  const urls = reportSourceUrls(j, fallbackSourceUrls);
+  const payload: Obj = { contribution_id: j.contribution_id, verdict: j.verdict, reason: `${j.reasoning ?? ""} ${jobMarker(j.id)}`, checked_urls: urls };
   if (j.verdict === "uphold_with_correction") payload.corrected_fields = j.corrected_fields;
-  return { kind: "contribute", agent_name: RUNNER_AGENT_NAME, agent_tool: j.model, contribution_type: "adjudication", payload, source_urls: j.checked_urls ?? [] };
+  return { kind: "contribute", agent_name: RUNNER_AGENT_NAME, agent_tool: j.model, contribution_type: "adjudication", payload, source_urls: urls };
+}
+
+/**
+ * 把 previewed 的結果送 /report 定案（complete 自動呼叫；維護者手動 finalize 同一條路）。
+ * 成功 finalized；拒收或連線失敗 finalize_failed（error 與 last_error 都寫，主控台讀 last_error）；不自動重試。
+ */
+async function runFinalize(job: JobRow, actor: string, deps: StrongAdjudicateDeps, nowIso: string): Promise<{ ok: boolean; locked: boolean; job: JobRow | null; status: number | null }> {
+  const { repo } = deps;
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const locked = await repo.transition(job.id, ["previewed"], { status: "finalizing", finalized_by: actor });
+  if (!locked) return { ok: false, locked: false, job: null, status: null };
+  // 送出之後的寫回可能失敗（資料庫暫時不通）：記下來、不讓 complete／finalize 變 500；finalizing 逾時會被收回 previewed
+  const settle = async (patch: Partial<JobRow>): Promise<JobRow | null> => {
+    try { return await repo.transition(job.id, ["finalizing"], patch); } catch (e) { console.error("strong-adjudicate 寫回定案結果失敗:", errMsg(e)); return null; }
+  };
+  const failWith = async (message: string, report_response: unknown, status: number | null) => {
+    const failed = await settle({ status: "finalize_failed", report_response, error: message, last_error: message });
+    return { ok: false, locked: true, job: failed, status };
+  };
+  let res: Response, rb: unknown;
+  try {
+    // 自我引用剔光時才需要原貢獻的來源；查不到就當沒有（/report 會講原因，記 finalize_failed）
+    let fallback: string[] = [];
+    if (reportSourceUrls(locked).length === 0 && locked.contribution_id) {
+      try { fallback = await repo.contributionSourceUrls(locked.contribution_id); } catch (e) { console.error("strong-adjudicate 查原貢獻來源失敗:", errMsg(e)); }
+    }
+    res = await fetchImpl(`${deps.functionsBase}/report`, { method: "POST", headers: { "Content-Type": "application/json", [STRONG_KEY_HEADER]: deps.laneKey! }, body: JSON.stringify(buildReportBody(locked, fallback)) });
+    rb = await res.json().catch(() => null);
+  } catch (e) {
+    console.error("strong-adjudicate finalize /report 失敗:", errMsg(e));
+    return await failWith("送 /report 時連線失敗", null, null);
+  }
+  const ok = res.ok && !(rb && typeof rb === "object" && (rb as Obj).success === false);
+  if (!ok) {
+    // 409 no_strong_task＝這件已不在強模型待辦：只有原貢獻是「這份作業」定案的（reviewed_by 為強模型裁決且 review_notes 帶本作業標記，
+    // 例如 finalizing 逾時被收回後重送）才算 finalized；人工核可或別條路徑定案的仍記 finalize_failed。不看 status（reject 時是 rejected）
+    if (res.status === 409 && (rb as Obj | null)?.error === "no_strong_task" && locked.contribution_id) {
+      const rv = await repo.contributionReview(locked.contribution_id).catch(() => null);
+      if (rv?.reviewed_by === STRONG_REVIEWER && (rv.review_notes ?? "").includes(jobMarker(locked.id))) {
+        const done = await settle({ status: "finalized", finalized_at: nowIso, report_response: scrub(rb), error: null, last_error: null });
+        return { ok: true, locked: true, job: done, status: res.status };
+      }
+    }
+    return await failWith(`/report 回 ${res.status}：${JSON.stringify(scrub(rb) ?? "").slice(0, 300)}`, scrub(rb), res.status);
+  }
+  const after = await settle({ status: "finalized", finalized_at: nowIso, report_response: scrub(rb), error: null, last_error: null });
+  return { ok: true, locked: true, job: after, status: res.status };
 }
 
 function bearerOf(h: Headers): string | null {
@@ -257,6 +334,39 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
     const { row, conflict } = await repo.insertJob({ task_id: taskId, contribution_id: open.contribution_id ? String(open.contribution_id) : null, requested_by: actor });
     if (conflict || !row) return fail("這件已有排隊或執行中的裁決", 409);
     return json({ success: true, job: publicJob(row) });
+  }
+
+  if (action === "enqueue_all") {
+    // 把強模型待辦裡「目前沒有進行中／剛出爐作業」的任務全部排入；規則與單件 enqueue 同一套（queued／running／30 分內 previewed／finalizing 算進行中）
+    const limit = b.limit === undefined || b.limit === null ? ENQUEUE_ALL_DEFAULT_LIMIT : b.limit;
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > ENQUEUE_ALL_MAX_LIMIT) return fail(`limit 要是 1～${ENQUEUE_ALL_MAX_LIMIT} 的整數（預設 ${ENQUEUE_ALL_DEFAULT_LIMIT}）`, 400);
+    const items = ((await repo.strongLaneList()).items ?? []) as Obj[];
+    await repo.requeueStale({ runningCutoff: iso(-RUNNING_STALE_MIN * 60_000), finalizingCutoff: iso(-FINALIZING_STALE_MIN * 60_000) });
+    const since = iso(-RECENT_WINDOW_MIN * 60_000);
+    // 防燒錢迴圈：進行中／剛出爐的跳過；最新一筆是 returned（人退回的）不自動再跑；每件任務累計已有 2 筆作業（任何狀態）就不再排
+    const byTask = new Map<string, JobRow[]>();
+    for (const j of await repo.latestJobsByTask(items.map((i) => String(i.task_id)))) byTask.set(j.task_id, [...(byTask.get(j.task_id) ?? []), j]);
+    const reasonOf = (taskId: string): "busy" | "returned" | "retry_cap" | null => {
+      const js = byTask.get(taskId) ?? []; // 新→舊
+      if (js.some((j) => j.status === "queued" || j.status === "running" || ((j.status === "previewed" || j.status === "finalizing") && (j.completed_at ?? j.created_at) >= since))) return "busy";
+      if (js[0]?.status === "returned") return "returned";
+      if (js.length >= ENQUEUE_ALL_MAX_JOBS_PER_TASK) return "retry_cap";
+      return null;
+    };
+    const jobs: Obj[] = [];
+    const skippedReasons = { busy: 0, returned: 0, retry_cap: 0 };
+    let overLimit = 0;
+    for (const item of items) {
+      const taskId = String(item.task_id);
+      const why = reasonOf(taskId);
+      if (why) { skippedReasons[why]++; continue; }
+      if (jobs.length >= limit) { overLimit++; continue; }
+      const { row, conflict } = await repo.insertJob({ task_id: taskId, contribution_id: item.contribution_id ? String(item.contribution_id) : null, requested_by: actor });
+      if (conflict || !row) { skippedReasons.busy++; continue; }
+      jobs.push(publicJob(row));
+    }
+    const skipped = skippedReasons.busy + skippedReasons.returned + skippedReasons.retry_cap;
+    return json({ success: true, enqueued: jobs.length, skipped, skipped_reasons: skippedReasons, over_limit: overLimit, jobs });
   }
 
   if (action === "status") {
@@ -349,7 +459,9 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
     try {
       await repo.logUsage({ model: String(v.model), prompt_tokens: Number(v.prompt_tokens ?? 0), completion_tokens: Number(v.completion_tokens ?? 0), cost: Number(v.cost ?? 0), note: `strong-adjudicate:${id}` });
     } catch (e) { console.error("ai_usage_logs 寫入失敗（不影響結果）:", errMsg(e)); }
-    return json({ success: true, job: publicJob(done) });
+    // 自動定案：結果存好就直接送 /report，不等人按。/report 拒收記 finalize_failed 留給人看（success 仍是 true：complete 本身收下了）
+    const fin = await runFinalize(done, actor, deps, iso(0));
+    return json({ success: true, finalized: fin.ok, job: publicJob(fin.job ?? done) });
   }
 
   if (action === "fail") {
@@ -366,24 +478,12 @@ async function dispatch(action: string, b: Obj, actor: string, deps: StrongAdjud
 
   if (action === "finalize") {
     if (!deps.laneKey) return fail("強模型鑰匙沒設，不能送出裁決", 503);
-    const locked = await repo.transition(id, ["previewed"], { status: "finalizing", finalized_by: actor });
-    if (!locked) return fail(`現在是 ${job.status}，只有已出爐（previewed）的能 finalize`, 409);
-    let res: Response, rb: unknown;
-    try {
-      res = await fetchImpl(`${deps.functionsBase}/report`, { method: "POST", headers: { "Content-Type": "application/json", [STRONG_KEY_HEADER]: deps.laneKey }, body: JSON.stringify(buildReportBody(locked)) });
-      rb = await res.json().catch(() => null);
-    } catch (e) {
-      console.error("strong-adjudicate finalize /report 失敗:", errMsg(e));
-      const failed = await repo.transition(id, ["finalizing"], { status: "finalize_failed", error: "送 /report 時連線失敗" });
-      return fail("送出失敗（不自動重試）", 502, { job: failed ? publicJob(failed) : null });
-    }
-    const ok = res.ok && !(rb && typeof rb === "object" && (rb as Obj).success === false);
-    const after = await repo.transition(id, ["finalizing"], ok
-      ? { status: "finalized", finalized_at: iso(0), report_response: scrub(rb), error: null }
-      : { status: "finalize_failed", report_response: scrub(rb), error: `/report 回 ${res.status}：${JSON.stringify(scrub(rb) ?? "").slice(0, 300)}` });
-    return ok
-      ? json({ success: true, job: after ? publicJob(after) : null })
-      : fail("/report 沒收下這份裁決（不自動重試）", 502, { job: after ? publicJob(after) : null, report_status: res.status });
+    const fin = await runFinalize(job, actor, deps, iso(0));
+    if (!fin.locked) return fail(`現在是 ${job.status}，只有已出爐（previewed）的能 finalize`, 409);
+    if (fin.ok) return json({ success: true, job: fin.job ? publicJob(fin.job) : null });
+    return fin.status === null
+      ? fail("送出失敗（不自動重試）", 502, { job: fin.job ? publicJob(fin.job) : null })
+      : fail("/report 沒收下這份裁決（不自動重試）", 502, { job: fin.job ? publicJob(fin.job) : null, report_status: fin.status });
   }
 
   return fail("unreachable", 500);

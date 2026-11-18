@@ -33,7 +33,7 @@ import { inOfficePolicyFutureElectionProblem } from "./policy-term-guard.ts";
 import { electionLabel, loadElections, loadRegistrationDeadlines, registrationDeadlineOf } from "./elections.ts";
 import { gatedNotFoundType, notFoundSearchMessage, notFoundSearchShortfall } from "./not-found-guard.ts";
 import { agentToolVerdict, fetchNotFoundRates, NOT_FOUND_RATE_WINDOW_DAYS, seriesVerdictMessage, type SeriesVerdict } from "./not-found-series.ts";
-import { applyPayloadCorrection, correctionProblems, STRONG_REVIEWER } from "./strong-lane.ts";
+import { applyPayloadCorrection, correctedSourceUrls, correctionProblems, STRONG_REVIEWER } from "./strong-lane.ts";
 import { agentToolNoticeOnce } from "./agent-tool-hint.ts";
 import { checkDispatchToken, dispatchTokenOf, invalidTokenResult, logDispatchBinding } from "./dispatch-token.ts";
 import { soleSourceProblems } from "./sole-source-guard.ts";
@@ -898,7 +898,7 @@ export async function handleContribute(
       if (cp) return { status: 400, body: { success: false, error: "invalid_correction", message: cp } };
       // 更正後的 payload 要能過同一套交件驗證（欄位名、型別、必填），不然落庫才炸
       const { payload: merged } = applyPayloadCorrection((orig.payload ?? {}) as Record<string, unknown>, ap.corrected_fields as Record<string, unknown>);
-      const recheck = validateContributionRequest({ agent_name: validation.contributor.agent_name, contribution_type: orig.contribution_type, payload: merged, source_urls: orig.source_urls ?? [] }, elections);
+      const recheck = validateContributionRequest({ agent_name: validation.contributor.agent_name, contribution_type: orig.contribution_type, payload: merged, source_urls: correctedSourceUrls(ap.corrected_fields as Record<string, unknown>) ?? orig.source_urls ?? [] }, elections);
       if (!recheck.ok) {
         return { status: 400, body: { success: false, error: "correction_invalid", message: "更正後的 payload 通不過交件驗證，請修正 corrected_fields（這不算被拒）", errors: recheck.errors.map((e) => ({ path: e.path, message: e.message })) } };
       }

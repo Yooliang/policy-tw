@@ -179,13 +179,13 @@ Authorization: Bearer <service role key>
 
 ## 強模型裁決端點 `strong-adjudicate`（2026-11-11，主控台「強模型裁決」頁用）
 
-難題（`strong_lane_list()` 那批 `requires_tier='strong'` 的裁決任務）由維護者在主控台逐件排進作業、**執行者**（VM 上持 `STRONG_LANE_KEY` 的強模型 claude）領題查證、回報結果，維護者看過後才送出定案。**端點本身不呼叫任何模型**（不需要模型 secret 與 `model_pricing`），用量由執行者回報、端點寫進 `ai_usage_logs`。不是代理協議、不升版號。migration `20261111180000_strong_adjudications.sql`（表只有 service_role 能碰），邏輯 `_shared/strong-adjudicate.ts`，守門 `_shared/strong-adjudicate.test.ts`。
+難題（`strong_lane_list()` 那批 `requires_tier='strong'` 的裁決任務）由維護者在主控台排進作業（單件 `enqueue`，或一鍵 `enqueue_all`）、**執行者**（VM 上持 `STRONG_LANE_KEY` 的強模型 claude）領題查證、回報結果；**執行者 `complete` 後同一支函式立刻自動送 `/report` 定案**，不再等維護者按。**端點本身不呼叫任何模型**（不需要模型 secret 與 `model_pricing`），用量由執行者回報、端點寫進 `ai_usage_logs`。不是代理協議、不升版號。migration `20261111180000_strong_adjudications.sql`（表只有 service_role 能碰），邏輯 `_shared/strong-adjudicate.ts`，守門 `_shared/strong-adjudicate.test.ts`。
 
 `POST https://<project>.supabase.co/functions/v1/strong-adjudicate`，body `{ "action": … }`，回應 `{ success, … }`（失敗 `{ success:false, error }`）。
 
 **兩種憑證，不能混用**：維護者動作帶 `Authorization: Bearer <Firebase ID token>`（同 `console-admin`，只收主控台擁有者）；執行者動作（`claim`／`complete`／`fail`）帶標頭 `x-strong-lane-key: <STRONG_LANE_KEY>`。沒帶憑證 401、鑰匙或帳號不對 403。`STRONG_LANE_KEY` 只在伺服器端（`finalize` 送 `/report`、`claim` 取 `/next` 都由函式自己帶）與執行者手上，瀏覽器與主控台永遠不經手，回應絕不含鑰匙、ip 雜湊、派工憑證。
 
-狀態：`queued` → `running` → `previewed` → `finalizing` → `finalized`；旁支 `returned`（退回人工）、`failed`（執行者回報或取不到題）、`finalize_failed`（`/report` 沒收下，**不自動重試**）。`running` 超過 30 分鐘沒 `complete` 自動回 `queued`；`finalizing` 超過 10 分鐘沒結果（函式中途死掉）回 `previewed` 並記 `last_error`（`/report` 若其實已收下，再 finalize 會被拒收、記 `finalize_failed`）。`claim` 取題遇 5xx／429／連線錯誤放回 `queued` 記 `last_error`，連續 3 次才 `failed`；只有 `/next` 回 `kind:none`（題已不在待辦）才直接 `failed`。同一件任務同時只能有一筆 `queued`／`running`（資料庫唯一索引）；已有進行中、或 30 分鐘內才出爐（`previewed`／`finalizing`，以 `completed_at` 算）的結果時再 `enqueue` 回 409（避免重複燒錢）。成因類別固定八個（資料庫 CHECK 與 TS 常數 `CAUSE_CATEGORIES` 同一份）：`來源難讀`、`前提過時`、`沒判斷型別`、`身分`、`拿錯名冊`、`規格不清`、`來源打不開`、`其他`。
+狀態：`queued` → `running` → `previewed` → `finalizing` → `finalized`（2026-11-18 起 `complete` 會連續走完 `previewed`→`finalizing`，成功直接是 `finalized`；`previewed` 只剩舊資料或 `finalizing` 逾時收回的件，仍可手動 `finalize`）；旁支 `returned`（退回人工）、`failed`（執行者回報或取不到題）、`finalize_failed`（`/report` 沒收下，**不自動重試**，留給人看；`error` 與 `last_error` 都寫入同一段原因）。`running` 超過 30 分鐘沒 `complete` 自動回 `queued`；`finalizing` 超過 10 分鐘沒結果（函式中途死掉）回 `previewed` 並記 `last_error`（`/report` 若其實已收下，再 finalize 會被拒收、記 `finalize_failed`）。`claim` 取題遇 5xx／429／連線錯誤放回 `queued` 記 `last_error`，連續 3 次才 `failed`；只有 `/next` 回 `kind:none`（題已不在待辦）才直接 `failed`。同一件任務同時只能有一筆 `queued`／`running`（資料庫唯一索引）；已有進行中、或 30 分鐘內才出爐（`previewed`／`finalizing`，以 `completed_at` 算）的結果時再 `enqueue` 回 409（避免重複燒錢）。成因類別固定八個（資料庫 CHECK 與 TS 常數 `CAUSE_CATEGORIES` 同一份）：`來源難讀`、`前提過時`、`沒判斷型別`、`身分`、`拿錯名冊`、`規格不清`、`來源打不開`、`其他`。
 
 ### 維護者動作
 
@@ -201,10 +201,15 @@ Authorization: Bearer <service role key>
 // enqueue：排進作業（建 queued）。404＝不在強模型待辦；409＝已有進行中或 30 分鐘內剛出爐的（回 job）
 { "action": "enqueue", "task_id": "…" }   → { "success": true, "job": { …完整 job… } }
 
+// enqueue_all：把 strong_lane_list() 裡可再排的任務排入。跳過三種：busy（queued／running／30 分內 previewed／finalizing）、
+// returned（最新一筆是人退回的，不自動再跑）、retry_cap（這件任務累計已有 2 筆作業，任何狀態都算；單件 enqueue 不受此限，人逐件決定）。
+// limit 選填（1～200，預設 50），超過的不排、計入 over_limit。不回 409（逐件結果在計數裡）
+{ "action": "enqueue_all", "limit": 50 }   → { "success": true, "enqueued": 3, "skipped": 4, "skipped_reasons": { "busy": 2, "returned": 1, "retry_cap": 1 }, "over_limit": 0, "jobs": [ /* 新建的 job */ ] }
+
 // status：單筆（adjudication_id）或某任務的歷次（task_id，新→舊）
 { "action": "status", "adjudication_id": "…" }   → { "success": true, "job": {…} }
 
-// finalize：只收 previewed。伺服器端帶鑰匙 POST /report（adjudication，單一裁決即定案）；成功 finalized，失敗 finalize_failed（502，記錯誤、不重試）
+// finalize：只收 previewed（舊資料；新作業 complete 後已自動定案）。伺服器端帶鑰匙 POST /report（adjudication，單一裁決即定案）；成功 finalized，失敗 finalize_failed（502，記錯誤、不重試）
 { "action": "finalize", "adjudication_id": "…" }   → { "success": true, "job": { "status": "finalized", "report_response": {…} } }
 
 // return_to_human：reason 必填；只有 previewed／finalize_failed／failed 可退，任務本身不動
@@ -239,7 +244,9 @@ POST … x-strong-lane-key: <STRONG_LANE_KEY>
   "cause_category": "來源難讀", "cause_note": "一句話（≤300 字）",
   "model": "<具體模型版本>", "prompt_tokens": 12345, "completion_tokens": 876, "cost": 0.31,   // 用量與金額（USD）由執行者回報，選填
   "checked_urls": ["https://…"] }                                  // 選填，最多 30 個 http(s)
-→ { "success": true, "job": { "status": "previewed" } }           // 不會送 /report；只有 running 的能 complete（逾時被收回要重新 claim，409）
+→ { "success": true, "finalized": true, "job": { "status": "finalized" } }   // 收下後同一次呼叫自動送 /report；/report 拒收時 finalized:false、status＝finalize_failed（success 仍 true，complete 本身收下了）
+// 只有 running 的能 complete（逾時被收回要重新 claim，409）
+// 送 /report 前會把 checked_urls／來源裡正見自家網址剔除（同 /report 的 self_citation 判斷）；全剔光時改用 corrected_fields.source_urls，再不行用原貢獻的來源，不送空來源。uphold_with_correction 的 corrected_fields.source_urls 落庫時也剔除自家網址後才寫回頂層 source_urls，剔光就不改並在 review_notes 記原來源；/report 回 409 no_strong_task 時，只有原貢獻是「這份作業」定案的（reviewed_by＝strong-adjudication 且 review_notes 帶 reason 結尾的 `[strong-job:<作業 id>]` 標記）才算 finalized，人工核可或別條路徑定案的仍記 finalize_failed
 
 // 做不出來：回報失敗（不影響任務，維護者可再 enqueue）
 { "action": "fail", "adjudication_id": "<id>", "error": "原因" }
