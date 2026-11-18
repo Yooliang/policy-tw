@@ -8,6 +8,7 @@
  *   4. 要有「那一屆」的公報才排除（工作卡的屆別對得上 politician_bulletins.election_id）
  *   5. 網站請求等手動任務（uuid task_id）與 auto 共用工作卡，同樣排除；文字層：不動資料列、簽名不變
  */
+// #977 已回滾（20261118091000），待重做：本檔測試全部 ignore。
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, latestFn, readMig } from "./arms-pglite.ts";
@@ -65,7 +66,7 @@ const days = async (db: PGlite, checkId: number): Promise<number> =>
 const state = async (db: PGlite, wk: string) =>
   (await db.query<{ checks: number; closed: boolean }>(`SELECT checks::int AS checks, closed FROM work_key_ladder_state('${wk}')`)).rows[0];
 
-Deno.test("1 公報上架前的 4 次查無不結案、不計階梯；上架後第一次查無從第 1 格（5 天）開始", async () => {
+Deno.test({ name: "1 公報上架前的 4 次查無不結案、不計階梯；上架後第一次查無從第 1 格（5 天）開始", ignore: true }, async () => {
   const db = await buildDb();
   const pm = `auto:policy_missing:${P1}`;
   for (const t of ["2026-11-02", "2026-11-06", "2026-11-10", "2026-11-14"]) await at(db, pm, "not_found", `${t}T03:00:00Z`);
@@ -78,7 +79,7 @@ Deno.test("1 公報上架前的 4 次查無不結案、不計階梯；上架後�
   assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 1);
 });
 
-Deno.test("2 只排除補政見任務的 not_found：confirmed、其他任務型別、沒有公報的候選人照舊", async () => {
+Deno.test({ name: "2 只排除補政見任務的 not_found：confirmed、其他任務型別、沒有公報的候選人照舊", ignore: true }, async () => {
   const db = await buildDb();
   await at(db, `auto:policy_missing:${P1}`, "confirmed", "2026-11-10T03:00:00Z");
   assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 1, "confirmed 不排除");
@@ -88,7 +89,7 @@ Deno.test("2 只排除補政見任務的 not_found：confirmed、其他任務型
   assertEquals((await state(db, `politician:${P1}:profile`)).checks, 1, "補基本資料的查無照算");
 });
 
-Deno.test("3 邊界：截止＝上架日隔天 00:00 UTC；前一分鐘排除、後一分鐘計入", async () => {
+Deno.test({ name: "3 邊界：截止＝上架日隔天 00:00 UTC；前一分鐘排除、後一分鐘計入", ignore: true }, async () => {
   const db = await buildDb();
   const pm = `auto:policy_missing:${P1}`;
   await at(db, pm, "not_found", "2026-11-17T23:59:00Z"); // 上架日 19:00Z 之後仍在截止前 → 排除
@@ -99,7 +100,7 @@ Deno.test("3 邊界：截止＝上架日隔天 00:00 UTC；前一分鐘排除、
   assertEquals((await state(db, `politician:${P1}:policies:2026`)).checks, 1, "只有截止後那一筆計入階梯");
 });
 
-Deno.test("4 要有「那一屆」的公報才排除：2022 有公報的人 2026 的查無照算；2022 屆上架前的才排除", async () => {
+Deno.test({ name: "4 要有「那一屆」的公報才排除：2022 有公報的人 2026 的查無照算；2022 屆上架前的才排除", ignore: true }, async () => {
   const db = await buildDb();
   await at(db, `auto:policy_missing:${P3}`, "not_found", "2026-11-10T03:00:00Z"); // 工作卡屆別 2026：P3 沒有 2026 的公報
   assertEquals((await state(db, `politician:${P3}:policies:2026`)).checks, 1);
@@ -108,7 +109,7 @@ Deno.test("4 要有「那一屆」的公報才排除：2022 有公報的人 2026
   assertEquals((await state(db, `politician:${P3}:policies:2022`)).checks, 1);
 });
 
-Deno.test("5 網站請求等手動任務（uuid task_id）與 auto 共用工作卡，上架前的查無同樣排除", async () => {
+Deno.test({ name: "5 網站請求等手動任務（uuid task_id）與 auto 共用工作卡，上架前的查無同樣排除", ignore: true }, async () => {
   const db = await buildDb();
   const MANUAL = "11111111-1111-4111-8111-111111111111";
   // 手動任務的查核照現行寫法掛在同一把工作卡鍵上
