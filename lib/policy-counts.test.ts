@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
+  fallbackMapFromPolicies,
   groupRowsByElection,
   isPolicyCountsComplete,
+  mapFromRawRows,
   pledgeCountKnown,
   pledgeCountOf,
   policyCountOfPeople,
@@ -107,8 +109,8 @@ Deno.test("選舉頁：預設檢視不載整份政見；整份只在承諾／PK�
   const page = read("../pages/ElectionPage.vue");
   assert(page.includes("const needsFullPolicies = computed("), "要有「什麼時候才需要整份政見」的單一判斷");
   const calls = [...page.matchAll(/ensurePolicies\(\)/g)].length;
-  // 只剩兩處：掛載後的條件式、needsFullPolicies 的 watch
-  assertEquals(calls, 2, "ensurePolicies() 只能在條件式裡呼叫");
+  assert(calls >= 1, "整份政見至少要有一處觸發");
+  assert(!/^\s*(void )?ensurePolicies\(\)\s*$/m.test(page), "不能在 onMounted 無條件呼叫");
   assert(/if \(needsFullPolicies\.value\) ensurePolicies\(\)/.test(page), "掛載時要先看 needsFullPolicies");
   assert(/watch\(needsFullPolicies, \(need\) => \{ if \(need[^}]*ensurePolicies\(\)/.test(page));
   assert(page.includes("policyCountOfPeople(policyCountsByElection.value"), "SEO 政見數讀對照");
@@ -136,4 +138,38 @@ Deno.test("migration：視圖 security_invoker、grant anon／authenticated、�
   assert(sql.includes("GRANT SELECT ON politician_election_policy_counts TO anon, authenticated"));
   assert(sql.includes("removed_at IS NULL"));
   assert(sql.includes("'Campaign Pledge'"));
+});
+
+Deno.test("PGRST205 退路：整份政見自算的對照與視圖結果同形", () => {
+  const viewRows: RawPolicyCountRow[] = [
+    { politician_id: "a", election_id: 2026, pledge_count: 1, policy_count: 2 },
+    { politician_id: "b", election_id: 2026, pledge_count: 0, policy_count: 1 },
+  ];
+  const policies = [
+    { politicianId: "a", electionId: 2026, status: "Campaign Pledge" },
+    { politicianId: "a", electionId: 2026, status: "In Progress" },
+    { politicianId: "b", electionId: 2026, status: "In Progress" },
+    { politicianId: "a", electionId: 2024, status: "Campaign Pledge" }, // 別屆不能混進來
+    { politicianId: "c", electionId: undefined, status: "Campaign Pledge" },
+  ];
+  assertEquals(fallbackMapFromPolicies(policies, 2026), mapFromRawRows(viewRows));
+  assertEquals(fallbackMapFromPolicies(policies, 1999), {}, "沒有那一屆就是空對照");
+});
+
+Deno.test("失敗狀態不等於 0：沒撈到的屆別 known 為 false，撈完後缺的人才是真的 0", () => {
+  const failed = slicesToState([]);
+  assertEquals(pledgeCountKnown(failed, 2026, "a"), false, "失敗時不能把沒讀到當成 0");
+  const state = slicesToState([{ electionId: 2026, rows: [], complete: true }]);
+  assertEquals(pledgeCountKnown(state, 2026, "a"), true);
+});
+
+Deno.test("守門：失敗要有獨立旗標與重試入口，不能掉進「尚無承諾」「載入中」", () => {
+  const page = read("../pages/ElectionPage.vue");
+  assert(page.includes('data-testid="pledges-error"') && page.includes('data-testid="pk-error"'), "承諾／PK 頁籤要有失敗顯示");
+  assert(page.includes('data-testid="pledge-counts-error"'), "承諾數補撈失敗要有重試入口");
+  assert(!/!policiesComplete && !error/.test(page), "載入中提示不能再靠 !error 消失");
+  const grid = read("../pages/election/PoliticianGrid.vue");
+  assert(grid.includes("暫時讀不到承諾數"), "卡片失敗要說讀不到");
+  const sup = read("../composables/useSupabase.ts");
+  assert(sup.includes("isMissingRelation(err)") && sup.includes("console.warn('[承諾數]"), "視圖不存在要退路並印 warn");
 });

@@ -31,7 +31,7 @@ const props = defineProps<{
    */
 }>()
 
-const { elections, policyCountsByElection, ensurePolicyCounts } = useSupabase()
+const { elections, policyCountsByElection, policyCountsFailed, ensurePolicyCounts } = useSupabase()
 
 /**
  * 卡片（2026-09-28 維護者試作大頭照版，參考民眾黨候選人頁；2026-10-06 維護者：拿掉「大頭照／清單」切換，只留這種卡片）：
@@ -220,6 +220,7 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
                       pledgeKnown(politician.id) && getPledgeCount(politician.id) > 0 ? 'bg-violet-50 text-violet-700' : 'bg-slate-100 text-slate-400']">
           <Megaphone :size="11" />
           <template v-if="pledgeKnown(politician.id)"> {{ getPledgeCount(politician.id) }} 項{{ voted && politician.candidacyStatus === 'elected' ? '政見' : '承諾' }}</template>
+          <template v-else-if="props.electionId !== undefined && policyCountsFailed[props.electionId]"> 暫時讀不到承諾數</template>
           <template v-else> 承諾數載入中</template>
         </div>
       </div>

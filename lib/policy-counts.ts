@@ -75,6 +75,24 @@ export function sliceForElection(
   return [{ electionId, rows, complete: false }]
 }
 
+/** 視圖原始列 → 單一屆的 id→數字對照（ensurePolicyCounts 的視圖路徑與自算退路共用，兩條路徑結果同形） */
+export function mapFromRawRows(raw: ReadonlyArray<RawPolicyCountRow>): PolicyCountMap {
+  const map: PolicyCountMap = {}
+  for (const r of raw) map[String(r.politician_id)] = { pledge: Number(r.pledge_count) || 0, policy: Number(r.policy_count) || 0 }
+  return map
+}
+
+/**
+ * 視圖不存在（部署空窗：新前端已上、db push 還沒建視圖）時，瀏覽器端從整份政見清單自己算這一屆的對照。
+ * 只留這一屆的政見，跟視圖「一人一屆一列」同形。
+ */
+export function fallbackMapFromPolicies(
+  policies: ReadonlyArray<{ politicianId: string | number; electionId?: number; status: unknown }>,
+  electionId: number,
+): PolicyCountMap {
+  return mapFromRawRows(rawRowsFromPolicies(policies.filter((p) => p.electionId === electionId)))
+}
+
 export function slicesToState(slices: ReadonlyArray<PolicyCountsSlice> | undefined): PolicyCountsByElection {
   const out: PolicyCountsByElection = {}
   for (const s of slices ?? []) {

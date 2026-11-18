@@ -75,7 +75,7 @@ const route = useRoute()
  * 上次定位的還原（restoreLocation）仍只限手機寬度。
  */
 const panelLayout = () => typeof window !== 'undefined'
-const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, ensureOfficialRegionalStats, loadPoliticiansByElection, loadedElections, ensurePolicies, policiesComplete, ensurePolicyCounts, policyCountsByElection, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
+const { elections, politicians, policies, locations, categories, getElectionBySegment, getPoliticianElectionData, loading, error, getElectoralDistrictByTownship, electoralDistrictAreas, ensureDistricts, ensureOfficialRegionalStats, loadPoliticiansByElection, loadedElections, ensurePolicies, policiesComplete, ensurePolicyCounts, policyCountsByElection, policyCountsFailed, policiesLoadFailed, retry, politicianListIncomplete, availableElectionTypes, townshipDirectory, loadTownshipDirectory } = useSupabase()
 
 // Helper: 取得候選人在該選舉的類型
 function getElectionType(politician: any): string | undefined {
@@ -1800,6 +1800,7 @@ useSwipeTabs(swipeEl, {
       <!-- VIEW: Politicians -->
 
       <div v-if="viewMode === 'politicians'" class="animate-fade-in">
+        <LoadError v-if="policyCountsFailed[electionId]" inline message="暫時讀不到各候選人的承諾數" class="mb-3" data-testid="pledge-counts-error" @retry="retry()" />
         <!-- 排序（純圖示）：預設有號次照號次、沒有就姓名筆畫；不讓活動量決定誰排第一 -->
         <div class="flex justify-end mb-2 md:hidden">
           <SortIcons v-model="sortMode" :options="SORT_OPTIONS" />
@@ -1958,7 +1959,8 @@ useSwipeTabs(swipeEl, {
         />
       </div>
       <!-- 整份政見是進到這個檢視才載的：載完之前不能說「尚無承諾」 -->
-      <p v-if="viewMode === 'pledges' && !policiesComplete && !error" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400 animate-pulse" data-testid="pledges-loading">承諾載入中…</p>
+      <LoadError v-if="viewMode === 'pledges' && !policiesComplete && policiesLoadFailed" inline message="承諾暫時讀不到" data-testid="pledges-error" @retry="retry()" />
+      <p v-else-if="viewMode === 'pledges' && !policiesComplete" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400 animate-pulse" data-testid="pledges-loading">承諾載入中…</p>
       <p v-else-if="viewMode === 'pledges' && pagedCampaignPolicies.length === 0 && !loading" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400" data-testid="pledges-empty">尚無承諾</p>
       <Pagination v-if="viewMode === 'pledges'" :page="pledgePage" :total-pages="pledgeTotalPages" @update:page="goPledgePage" />
 
@@ -2001,7 +2003,8 @@ useSwipeTabs(swipeEl, {
           <p v-else class="font-bold text-slate-700">先在左側選擇鄉鎮市區</p>
           <p class="text-sm mt-1">{{ levelLabel(pkLevel) }}的政見 PK 是一個{{ pkMissing === 'county' ? '縣市' : '鄉鎮市區' }}一場，選好之後就會並排這一場的參選人。</p>
         </div>
-        <p v-else-if="!policiesComplete && !error" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400 animate-pulse" data-testid="pk-loading">政見載入中…</p>
+        <LoadError v-else-if="!policiesComplete && policiesLoadFailed" inline message="政見暫時讀不到" data-testid="pk-error" @retry="retry()" />
+        <p v-else-if="!policiesComplete" class="rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center text-sm font-bold text-slate-400 animate-pulse" data-testid="pk-loading">政見載入中…</p>
         <PolicyPk
           v-else
           :title="pkTitle"

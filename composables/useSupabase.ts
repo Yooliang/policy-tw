@@ -29,7 +29,7 @@ import type { PartyPageData, PartySummary } from '../lib/party-pages'
 import type { PartyRegistry } from '../lib/parties'
 import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
 import type { PolicySummary } from '../lib/policy-summary'
-import { slicesToState, isPolicyCountsComplete, type PolicyCountsByElection, type PolicyCountsSlice, type RawPolicyCountRow } from '../lib/policy-counts'
+import { slicesToState, isPolicyCountsComplete, mapFromRawRows, fallbackMapFromPolicies, type PolicyCountsByElection, type PolicyCountsSlice, type RawPolicyCountRow } from '../lib/policy-counts'
 import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
@@ -620,6 +620,14 @@ let policiesPromise: Promise<void> | null = null
  */
 const policyCountsByElection = ref<PolicyCountsByElection>({})
 const policyCountsInflight = new Map<number, Promise<void>>()
+/** 這一屆的承諾數對照補撈失敗（含退路也失敗）：卡片要顯示「暫時讀不到」而不是無限「載入中」，頁面給重試 */
+const policyCountsFailed = ref<Record<number, boolean>>({})
+function setPolicyCountsFailed(electionId: number, failed: boolean): void {
+  if ((policyCountsFailed.value[electionId] ?? false) === failed) return
+  policyCountsFailed.value = { ...policyCountsFailed.value, [electionId]: failed }
+}
+/** 整份政見清單載入失敗：承諾／PK 頁籤據此顯示錯誤與重試，不能掉進「尚無承諾」 */
+const policiesLoadFailed = ref(false)
 
 /** 視圖 politician_election_policy_counts 的列（electionId 沒給＝全部屆別，建置端用）；一頁頁撈到底 */
 export async function fetchPolicyCountRows(electionId?: number): Promise<RawPolicyCountRow[]> {
@@ -639,12 +647,21 @@ export function ensurePolicyCounts(electionId: number): Promise<void> {
   if (!Number.isFinite(electionId) || isPolicyCountsComplete(policyCountsByElection.value, electionId)) return Promise.resolve()
   const flying = policyCountsInflight.get(electionId)
   if (flying) return flying
+  setPolicyCountsFailed(electionId, false)
   const run = (async () => {
-    const raw = await fetchPolicyCountRows(electionId)
-    const map: Record<string, { pledge: number; policy: number }> = {}
-    for (const r of raw) map[String(r.politician_id)] = { pledge: Number(r.pledge_count) || 0, policy: Number(r.policy_count) || 0 }
+    let map: ReturnType<typeof mapFromRawRows>
+    try {
+      map = mapFromRawRows(await fetchPolicyCountRows(electionId))
+    } catch (err) {
+      if (!isMissingRelation(err)) throw err
+      // 視圖還沒建（CI 部署時 Hosting 已上新前端、db push 還沒跑完的空窗）：退回舊路徑，載整份政見自己算同一份對照
+      console.warn('[承諾數] 對照視圖不存在，退回整份政見自算', err)
+      await ensurePolicies()
+      if (!policiesComplete.value) throw new Error('政見清單載入失敗，無法自算承諾數')
+      map = fallbackMapFromPolicies(policies.value, electionId)
+    }
     policyCountsByElection.value = { ...policyCountsByElection.value, [electionId]: { complete: true, map } }
-  })().catch((err) => { recordFailure('承諾數', err, () => ensurePolicyCounts(electionId)) })
+  })().catch((err) => { setPolicyCountsFailed(electionId, true); recordFailure('承諾數', err, () => ensurePolicyCounts(electionId)) })
     .finally(() => { policyCountsInflight.delete(electionId) })
   policyCountsInflight.set(electionId, run)
   return run
@@ -660,6 +677,7 @@ export function ensurePolicyCounts(electionId: number): Promise<void> {
 export function ensurePolicies(): Promise<void> {
   if (policiesComplete.value) return Promise.resolve()
   if (!policiesPromise) {
+    policiesLoadFailed.value = false
     policiesPromise = (async () => {
       // 全台 15,000+ 位候選人不預載（選舉頁按需載入），但「有政見的那些人」一定要在，
       // 否則政見追蹤頁、首頁、AI 分析頁的卡片會被 v-if="politicians.find(…)" 整張吃掉，
@@ -673,7 +691,7 @@ export function ensurePolicies(): Promise<void> {
       // 詳情頁可能已經用 loadPolicyById 塞了幾筆進來，整份蓋過去就好（同一個來源、較新）
       policies.value = (rows || []).filter(r => !r.removed_at).map(mapPolicy)
       policiesComplete.value = true
-    })().catch((err) => { policiesPromise = null; recordFailure('政見清單', err, ensurePolicies) })
+    })().catch((err) => { policiesPromise = null; policiesLoadFailed.value = true; recordFailure('政見清單', err, ensurePolicies) })
   }
   return policiesPromise
 }
@@ -1406,6 +1424,8 @@ export function useSupabase() {
     ensurePolicies,
     ensurePolicyCounts,
     policyCountsByElection,
+    policyCountsFailed,
+    policiesLoadFailed,
     ensureVerificationSources,
     policiesComplete,
     getPoliciesByCategory,
