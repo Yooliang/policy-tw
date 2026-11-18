@@ -195,3 +195,18 @@ Deno.test("過期瞬間連打：只有一個請求背景回源", async () => {
   await c.flush();
   assertEquals(s.calls(), 2, "1 次初次 + 1 次背景重抓");
 });
+
+Deno.test("?__proxy=1（現場渲染頁的除錯旗標）直接代理：不讀也不寫快取，不會把上游空殼寫進現場渲染的鍵", async () => {
+  assert(!isCacheableRequest(req("/politician/x?__proxy=1")));
+  const s = setup(html);
+  const c = ctx();
+  // 快取裡先放一份現場渲染的頁：帶旗標的請求不能讀到它
+  s.cache.store.set(`${SITE}/politician/x`, new Response("SSR", { headers: { "Content-Type": "text/html" } }));
+  const r = await cachedProxy(req("/politician/x?__proxy=1"), c, s.deps());
+  await c.flush();
+  assertEquals(await r.text(), "<!doctype html><title>x</title>");
+  assertEquals(r.headers.get("X-Prerender-Cache"), null);
+  assertEquals(s.calls(), 1);
+  assertEquals(await s.cache.store.get(`${SITE}/politician/x`)!.text(), "SSR", "沒被覆寫");
+  assertEquals(s.cache.store.size, 1);
+});

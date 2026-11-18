@@ -46,6 +46,8 @@ export function isCacheableRequest(request) {
   if (hasSessionCookie(request.headers.get('Cookie'))) return false
   const url = new URL(request.url)
   if (BYPASS_PATH.test(url.pathname)) return false
+  // __proxy：現場渲染頁（/politician 等）的除錯旗標，要看 Firebase 的原樣回應。鍵不含 query，若放行會把上游的 noindex 空殼寫進現場渲染的同一個鍵
+  if (url.searchParams.has('__proxy')) return false
   return true
 }
 
@@ -79,7 +81,7 @@ function withCacheHeaders(res, state) {
 async function fetchAndStore(request, key, deps, ctx) {
   const upstream = await deps.proxy(request)
   if (!isCacheableResponse(upstream)) {
-    return { response: new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: withBypass(upstream.headers) }), stored: false }
+    return { response: new Response(upstream.body, { status: upstream.status, statusText: upstream.statusText, headers: withBypass(upstream.headers) }), stored: Promise.resolve() }
   }
   const body = await upstream.arrayBuffer()
   const h = new Headers(upstream.headers)
@@ -98,7 +100,7 @@ async function fetchAndStore(request, key, deps, ctx) {
   forStore.set('X-Shell-Version', shellVersion(new TextDecoder().decode(body)))
   const store = deps.cache.put(key, new Response(body, { status: 200, headers: forStore })).catch(() => undefined)
   ctx.waitUntil(store)
-  return { response: new Response(body, { status: 200, headers: forVisitor }), stored: true }
+  return { response: new Response(body, { status: 200, headers: forVisitor }), stored: store }
 }
 
 function withBypass(headers) {
@@ -120,7 +122,7 @@ export function prerenderCacheEnabled(env) {
   return String(env?.PRERENDER_CACHE ?? '1').trim() !== '0'
 }
 
-/** 正在背景重抓的鍵：熱門頁過期的瞬間只讓一個請求回源，其餘先回舊頁 */
+/** 正在背景重抓的鍵（寫進快取後才移除）：熱門頁過期的瞬間只讓一個請求回源，其餘先回舊頁 */
 const refreshing = new Set()
 
 /**
@@ -141,7 +143,7 @@ export async function cachedProxy(request, ctx, deps) {
     // 過了新鮮期：先回舊的，背景重抓一份換掉；重抓失敗不影響這次回應
     if (stale && !refreshing.has(key.url)) {
       refreshing.add(key.url)
-      ctx.waitUntil(fetchAndStore(request, key, deps, ctx).catch(() => undefined).finally(() => refreshing.delete(key.url)))
+      ctx.waitUntil(fetchAndStore(request, key, deps, ctx).then((r) => r.stored).catch(() => undefined).finally(() => refreshing.delete(key.url)))
     }
     return new Response(hit.body, { status: hit.status, headers: withCacheHeaders(hit, stale ? 'STALE' : 'HIT') })
   }
