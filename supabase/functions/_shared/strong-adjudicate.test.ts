@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { buildReportBody, CAUSE_CATEGORIES, handleStrongAdjudicate, type JobRow, type JobStatus, type Repo, type StrongAdjudicateDeps, toListItem } from "./strong-adjudicate.ts";
+import { jobMarker, buildReportBody, CAUSE_CATEGORIES, handleStrongAdjudicate, type JobRow, type JobStatus, type Repo, type StrongAdjudicateDeps, toListItem } from "./strong-adjudicate.ts";
 import { correctedSourceUrls } from "./strong-lane.ts";
 import type { VerifyResult } from "./firebase-id-token.ts";
 
@@ -10,7 +10,7 @@ const NOW = new Date("2026-11-11T12:00:00Z");
 const LANE_ITEM = { task_id: "t1", contribution_id: "c1", contribution_type: "policy", status: "disputed", subject: "王小明", votes: 5, created_at: "2026-11-08T12:00:00Z", reason: "投太多輪",
   verdicts: [{ verdict: "agree" }, { verdict: "disagree" }, { verdict: "disagree" }] };
 
-let contribStatus = "disputed";
+let contribReview: { reviewed_by: string | null; review_notes: string | null } | null = null;
 function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
   const rows: JobRow[] = [];
   let n = 0;
@@ -41,7 +41,7 @@ function memRepo(laneItems: Record<string, unknown>[] = [LANE_ITEM]) {
     jobsSince: async (s) => rows.filter((r) => r.created_at >= s),
     logUsage: async (u) => { usage.push(u); },
     contributionTypes: async (ids) => Object.fromEntries(ids.filter((i) => i === "c1").map((i) => [i, "policy"])),
-    contributionStatus: async (id) => (id === "c1" ? contribStatus : null),
+    contributionReview: async (id) => (id === "c1" ? contribReview : null),
     contributionSourceUrls: async (id) => (id === "c1" ? ["https://orig.example.com/p.pdf", "https://xn--2lw665d.tw/self"] : []),
   };
   const usage: unknown[] = [];
@@ -493,16 +493,25 @@ Deno.test("更正來源：剔除正見自家網址，剔光回 null（不改頂�
   assertEquals(correctedSourceUrls({ title: "x" }), null);
 });
 
-Deno.test("自動定案：/report 回 409 no_strong_task 但原貢獻已 applied → 記 finalized；未 applied 仍 finalize_failed", async () => {
+Deno.test("自動定案：/report 回 409 no_strong_task：原貢獻是這份作業定案的（reviewed_by＋作業標記）才記 finalized；別條路徑定案一律 finalize_failed", async () => {
   const conflict = (async () => new Response(JSON.stringify({ success: false, error: "no_strong_task" }), { status: 409 })) as typeof fetch;
   const s = await running(conflict);
-  contribStatus = "applied";
+  contribReview = { reviewed_by: "strong-adjudication", review_notes: `[強模型裁決 uphold] 理由 ${jobMarker(s.rows[0].id)}（裁決者 x）` };
   const ok = await (await handleStrongAdjudicate(complete(s.rows[0].id), s.deps)).json();
   assertEquals([ok.finalized, ok.job.status], [true, "finalized"]);
-  contribStatus = "disputed";
-  const s2 = await running(conflict);
-  const bad = await (await handleStrongAdjudicate(complete(s2.rows[0].id), s2.deps)).json();
-  assertEquals([bad.finalized, bad.job.status], [false, "finalize_failed"]);
+  // 反例：人工核可（reviewed_by 不是強模型）、別份強模型作業定案（review_notes 沒有本作業標記）、查不到
+  for (const rv of [{ reviewed_by: "human", review_notes: "ok" }, { reviewed_by: "strong-adjudication", review_notes: "[strong-job:other-job]" }, null]) {
+    const s2 = await running(conflict);
+    contribReview = rv;
+    const bad = await (await handleStrongAdjudicate(complete(s2.rows[0].id), s2.deps)).json();
+    assertEquals([bad.finalized, bad.job.status], [false, "finalize_failed"], JSON.stringify(rv));
+  }
+  contribReview = null;
+});
+
+Deno.test("buildReportBody：reason 帶作業標記（落庫後進原貢獻 review_notes）", () => {
+  const j = { id: "job-1", contribution_id: "c1", verdict: "uphold", reasoning: "r".repeat(30), model: "m", checked_urls: ["https://a.example.com/"], corrected_fields: null } as unknown as JobRow;
+  assert(String((buildReportBody(j).payload as { reason: string }).reason).endsWith(jobMarker("job-1")));
 });
 
 Deno.test("自動定案：寫回定案結果時資料庫丟錯不讓 complete 變 500", async () => {
@@ -511,4 +520,5 @@ Deno.test("自動定案：寫回定案結果時資料庫丟錯不讓 complete �
   s.deps.repo = { ...s.deps.repo, transition: async (id, from, patch) => { if (patch.status === "finalized") throw new Error("db down"); return real(id, from, patch); } };
   const res = await handleStrongAdjudicate(complete(s.rows[0].id), s.deps);
   assertEquals(res.status, 200);
+  assertEquals(s.rows[0].status, "finalizing"); // 寫回失敗：維持 finalizing，逾時後由 requeueStale 收回 previewed
 });

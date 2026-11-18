@@ -68,10 +68,10 @@ export function supabaseRepo(supabase: SupabaseLike): Repo {
       for (const r of (data ?? []) as Array<{ id: string; contribution_type: string }>) out[String(r.id)] = r.contribution_type;
       return out;
     },
-    async contributionStatus(id) {
-      const { data, error } = await supabase.from("contributions").select("status").eq("id", id).maybeSingle();
-      if (error) throw new Error(`contributionStatus: ${error.message}`);
-      return ((data as { status?: string } | null)?.status ?? null) as string | null;
+    async contributionReview(id) {
+      const { data, error } = await supabase.from("contributions").select("reviewed_by, review_notes").eq("id", id).maybeSingle();
+      if (error) throw new Error(`contributionReview: ${error.message}`);
+      return (data ?? null) as { reviewed_by: string | null; review_notes: string | null } | null;
     },
     async contributionSourceUrls(id) {
       const { data, error } = await supabase.from("contributions").select("source_urls").eq("id", id).maybeSingle();

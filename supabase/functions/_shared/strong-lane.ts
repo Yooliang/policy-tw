@@ -47,8 +47,11 @@ export function strongKeyFromRequest(req: Request, env: (k: string) => string | 
 export function applyPayloadCorrection(original: Obj, fields: Obj): { payload: Obj; diff: Array<{ field: string; before: unknown; after: unknown }> } {
   const payload: Obj = { ...original };
   const diff: Array<{ field: string; before: unknown; after: unknown }> = [];
-  for (const [k, v] of Object.entries(fields)) {
+  for (const [k, rawV] of Object.entries(fields)) {
     if (CORRECTION_FORBIDDEN_KEYS.has(k)) continue;
+    // 更正來源：正見自家網址不能當出處；剔光就不寫（保留原 payload.source_urls）
+    const v = k === "source_urls" && Array.isArray(rawV) ? correctedSourceUrls({ source_urls: rawV }) : rawV;
+    if (k === "source_urls" && Array.isArray(rawV) && v === null) continue;
     const before = original[k];
     if (JSON.stringify(before) === JSON.stringify(v === null ? undefined : v)) continue;
     if (v === null) delete payload[k]; else payload[k] = v;

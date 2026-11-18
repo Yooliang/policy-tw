@@ -11,7 +11,7 @@
  */
 import { isConsoleOwner, verifyFirebaseIdToken } from "./firebase-id-token.ts";
 import { isSelfCitationUrl } from "./self-hosts.ts";
-import { correctionProblems, STRONG_KEY_HEADER, STRONG_VERDICTS, strongKeyOk } from "./strong-lane.ts";
+import { correctionProblems, STRONG_KEY_HEADER, STRONG_REVIEWER, STRONG_VERDICTS, strongKeyOk } from "./strong-lane.ts";
 
 type Obj = Record<string, unknown>;
 
@@ -73,8 +73,8 @@ export interface Repo {
   logUsage(u: UsageLog): Promise<void>;
   /** 貢獻 id → contribution_type（查不到的不在結果裡） */
   contributionTypes(ids: string[]): Promise<Record<string, string>>;
-  /** 原貢獻目前的 status（查不到回 null）；/report 回 no_strong_task 時判斷是不是其實已定案 */
-  contributionStatus(id: string): Promise<string | null>;
+  /** 原貢獻的 reviewed_by／review_notes（查不到回 null）；/report 回 no_strong_task 時判斷是不是這份作業其實已定案 */
+  contributionReview(id: string): Promise<{ reviewed_by: string | null; review_notes: string | null } | null>;
   /** 原貢獻的 source_urls（查不到回空陣列）；自我引用剔光時當 /report 來源的最後退路 */
   contributionSourceUrls(id: string): Promise<string[]>;
 }
@@ -204,9 +204,12 @@ export function reportSourceUrls(j: JobRow, fallback: readonly string[] = []): s
 }
 
 /** finalize 送 /report 的 body（1.126.0 協議的 adjudication） */
+/** 寫進 reason 的作業標記：落庫時跟著進原貢獻的 review_notes，/report 回 409 時憑它確認「是這份作業定案的」 */
+export const jobMarker = (jobId: string) => `[strong-job:${jobId}]`;
+
 export function buildReportBody(j: JobRow, fallbackSourceUrls: readonly string[] = []): Obj {
   const urls = reportSourceUrls(j, fallbackSourceUrls);
-  const payload: Obj = { contribution_id: j.contribution_id, verdict: j.verdict, reason: j.reasoning, checked_urls: urls };
+  const payload: Obj = { contribution_id: j.contribution_id, verdict: j.verdict, reason: `${j.reasoning ?? ""} ${jobMarker(j.id)}`, checked_urls: urls };
   if (j.verdict === "uphold_with_correction") payload.corrected_fields = j.corrected_fields;
   return { kind: "contribute", agent_name: RUNNER_AGENT_NAME, agent_tool: j.model, contribution_type: "adjudication", payload, source_urls: urls };
 }
@@ -243,10 +246,11 @@ async function runFinalize(job: JobRow, actor: string, deps: StrongAdjudicateDep
   }
   const ok = res.ok && !(rb && typeof rb === "object" && (rb as Obj).success === false);
   if (!ok) {
-    // 409 no_strong_task＝這件已不在強模型待辦：若原貢獻其實已 applied（例如 finalizing 逾時被收回後重送），算定案，不記假失敗
+    // 409 no_strong_task＝這件已不在強模型待辦：只有原貢獻是「這份作業」定案的（reviewed_by 為強模型裁決且 review_notes 帶本作業標記，
+    // 例如 finalizing 逾時被收回後重送）才算 finalized；人工核可或別條路徑定案的仍記 finalize_failed。不看 status（reject 時是 rejected）
     if (res.status === 409 && (rb as Obj | null)?.error === "no_strong_task" && locked.contribution_id) {
-      const applied = await repo.contributionStatus(locked.contribution_id).catch(() => null);
-      if (applied === "applied") {
+      const rv = await repo.contributionReview(locked.contribution_id).catch(() => null);
+      if (rv?.reviewed_by === STRONG_REVIEWER && (rv.review_notes ?? "").includes(jobMarker(locked.id))) {
         const done = await settle({ status: "finalized", finalized_at: nowIso, report_response: scrub(rb), error: null, last_error: null });
         return { ok: true, locked: true, job: done, status: res.status };
       }

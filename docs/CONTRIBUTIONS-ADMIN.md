@@ -246,7 +246,7 @@ POST … x-strong-lane-key: <STRONG_LANE_KEY>
   "checked_urls": ["https://…"] }                                  // 選填，最多 30 個 http(s)
 → { "success": true, "finalized": true, "job": { "status": "finalized" } }   // 收下後同一次呼叫自動送 /report；/report 拒收時 finalized:false、status＝finalize_failed（success 仍 true，complete 本身收下了）
 // 只有 running 的能 complete（逾時被收回要重新 claim，409）
-// 送 /report 前會把 checked_urls／來源裡正見自家網址剔除（同 /report 的 self_citation 判斷）；全剔光時改用 corrected_fields.source_urls，再不行用原貢獻的來源，不送空來源。uphold_with_correction 的 corrected_fields.source_urls 落庫時也剔除自家網址後才寫回頂層 source_urls，剔光就不改並在 review_notes 記原來源；/report 回 409 no_strong_task 但原貢獻已 applied 算 finalized
+// 送 /report 前會把 checked_urls／來源裡正見自家網址剔除（同 /report 的 self_citation 判斷）；全剔光時改用 corrected_fields.source_urls，再不行用原貢獻的來源，不送空來源。uphold_with_correction 的 corrected_fields.source_urls 落庫時也剔除自家網址後才寫回頂層 source_urls，剔光就不改並在 review_notes 記原來源；/report 回 409 no_strong_task 時，只有原貢獻是「這份作業」定案的（reviewed_by＝strong-adjudication 且 review_notes 帶 reason 結尾的 `[strong-job:<作業 id>]` 標記）才算 finalized，人工核可或別條路徑定案的仍記 finalize_failed
 
 // 做不出來：回報失敗（不影響任務，維護者可再 enqueue）
 { "action": "fail", "adjudication_id": "<id>", "error": "原因" }
