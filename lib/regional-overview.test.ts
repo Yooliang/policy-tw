@@ -231,8 +231,11 @@ Deno.test('縣市列表 22 個、沒有重複', () => {
 })
 
 // ───── migration 守門 ─────
-const sql = Deno.readTextFileSync(new URL('../supabase/migrations/20261119140000_regional_data_views.sql', import.meta.url))
-const policiesByRegion = Deno.readTextFileSync(new URL('../supabase/migrations/20261119120000_policies_by_region.sql', import.meta.url))
+// 本機 git autocrlf 會讓檔案變 CRLF，含換行的字串比對要先正規化，CI（LF）與本機才一致
+const readSql = (name: string) =>
+  Deno.readTextFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url)).replace(/\r\n/g, '\n')
+const sql = readSql('20261119140000_regional_data_views.sql')
+const policiesByRegion = readSql('20261119120000_policies_by_region.sql')
 
 Deno.test('migration：五支視圖都建、security_invoker、anon／authenticated 可讀', () => {
   for (const v of ['region_category_stage_counts', 'region_stage_counts', 'lineage_term_spans', 'region_element_stats', 'region_deadline_stats']) {
