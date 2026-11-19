@@ -372,6 +372,14 @@ export function isLineageListed(l: { policyIds?: readonly string[] | null }): bo
   return !Array.isArray(l.policyIds) || l.policyIds.length > 0
 }
 
+/**
+ * 方塊格上的脈絡條數：某縣市（'All'＝全台）在某分類（'All'＝全部）下，一覽會列出的脈絡有幾條。
+ * 跟一覽同一套規則（空脈絡不算、中央層級在每個縣市都算），所以格子上的數字等於點進去清單的條數；不含關鍵字。
+ */
+export function lineageTotal(list: readonly Lineage[], region: string, category: string = 'All'): number {
+  return filterLineages(list.filter(isLineageListed), { region, category }).length
+}
+
 /** 清單篩選：縣市（「All」不篩；中央層級在每個縣市都列）、分類、關鍵字（標題與摘要） */
 export function filterLineages(list: readonly Lineage[], opts: { region?: string; category?: string; q?: string }): Lineage[] {
   const q = (opts.q ?? '').trim().toLowerCase()

@@ -8,7 +8,7 @@
  */
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace,
+  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace, lineageTotal,
   mapLineage, mapLineageSummary, needsHandoverRecord, officeTermEnd, ORIGIN_LABEL, participantRows, policyMeta, ROLE_LABEL, termRoleLabel,
 } from './lineage.ts'
 import * as shared from '../supabase/functions/_shared/lineage.ts'
@@ -235,4 +235,19 @@ Deno.test('別處不預設脈絡有交接：政見頁的脈絡卡不寫交接說
   assert(!card.includes('前後任怎麼交接') && !card.includes('都在脈絡頁'), '脈絡卡不放解釋文字（也不能預設有前後任交接）')
   const list = await read('../pages/PolicyAnalysis.vue')
   assert(/<span v-if="lineageCounts\(l\)\.handovers > 0">交接 \{\{ lineageCounts\(l\)\.handovers \}\} 筆<\/span>/.test(list), '脈絡一覽的「交接 N 筆」0 筆時不顯示')
+})
+
+Deno.test('方塊格的脈絡條數：中央層級每個縣市都算、空脈絡不算、台／臺同縣市；分類在地區範圍內算', () => {
+  const p = (l: Lineage): Lineage => ({ ...l, policyIds: ['p1'] })
+  const list = [
+    p(L('n', 'national', null, '能源')), p(L('t', 'county', '臺中市', '交通建設')), p(L('t2', 'county', '台中市', '能源')),
+    p(L('k', 'county', '高雄市', '交通建設')), L('empty', 'county', '台中市', '交通建設'),
+  ]
+  assertEquals(lineageTotal(list, 'All'), 4, '全台：空脈絡不算')
+  assertEquals(lineageTotal(list, '台中市'), 3, '台中市：自己 2 條＋中央 1 條')
+  assertEquals(lineageTotal(list, '台中市', '交通建設'), 1)
+  assertEquals(lineageTotal(list, 'All', '能源'), 2)
+  assertEquals(lineageTotal(list, '桃園市'), 1, '沒有地方脈絡的縣市只剩中央層級的')
+  assertEquals(lineageTotal(list, 'All', '社會福利'), 0)
+  assertEquals(lineageTotal(list, '台中市'), filterLineages(list.filter(isLineageListed), { region: '台中市' }).length, '跟一覽同一套規則')
 })
