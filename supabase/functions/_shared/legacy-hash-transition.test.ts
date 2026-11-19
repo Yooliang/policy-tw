@@ -1,7 +1,7 @@
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert@1";
 import { handleVerify } from "./verify-handler.ts";
 import { handleContribute, ipHashOf, legacyIpHashOf } from "./contribute-handler.ts";
-import { fetchMyVotedRows } from "./my-votes.ts";
+import { fetchMyVotedAmong, fetchMyVotedRows } from "./my-votes.ts";
 import { excludeOwnAdjudications } from "./dispatch.ts";
 
 /**
@@ -185,16 +185,18 @@ function fakeVotesDb(rows: Array<{ contribution_id: string; agent_name: string; 
       let pred: (r: Row) => boolean = () => true;
       const chain = {
         select() { return chain; },
-        eq(c: string, v: string) { calls.push({ op: "eq", col: c, val: v }); pred = (r) => r[c] === v; return chain; },
+        eq(c: string, v: string) { calls.push({ op: "eq", col: c, val: v }); { const prev = pred; pred = (r) => prev(r) && r[c] === v; } return chain; },
         // ilike 不分大小寫；跳脫字元（反斜線＋字元）還原成字元本身
         ilike(c: string, v: string) {
           calls.push({ op: "ilike", col: c, val: v });
           const want = v.replace(/\\(.)/g, "$1").toLowerCase();
-          pred = (r) => String(r[c]).toLowerCase() === want;
+          const prev = pred; pred = (r) => prev(r) && String(r[c]).toLowerCase() === want;
           return chain;
         },
+        in(c: string, vs: string[]) { calls.push({ op: "in", col: c, val: vs.join(",") }); const prev = pred; pred = (r) => prev(r) && vs.includes(String(r[c])); return chain; },
         order() { return chain; },
         range() { return Promise.resolve({ data: rows.filter((r) => pred(r as Row)).map((r) => ({ contribution_id: r.contribution_id })), error: null }); },
+        limit() { return Promise.resolve({ data: rows.filter((r) => pred(r as Row)).map((r) => ({ contribution_id: r.contribution_id })), error: null }); },
       };
       return chain;
     },
@@ -230,9 +232,33 @@ Deno.test("3 /next：my_votes 按代號（匿名）或帳號（DiTrust）查；�
   assertEquals(kept.map((c) => (c.payload as Row).contribution_id), ["C-same-net-other-agent"]);
 });
 
-Deno.test("3 /next 接線：my_votes 走 fetchMyVotedRows({agentName, actorId})，不再用雜湊；驗證池不傳舊雜湊", async () => {
+Deno.test("3 /next：只查候選那幾筆（fetchMyVotedAmong）與整份歷史（fetchMyVotedRows）的結果在候選範圍內完全一致", async () => {
+  const rows = [
+    { contribution_id: "A", agent_name: "Dave" },
+    { contribution_id: "B", agent_name: "dave" },
+    { contribution_id: "C", agent_name: "someone-else" },
+    { contribution_id: "D", agent_name: "dave-handle", actor_id: "ditrust:u1" },
+    { contribution_id: "E", agent_name: "a_b" },
+    { contribution_id: "F", agent_name: "aXb" },
+  ];
+  const db = fakeVotesDb(rows);
+  const candidates = ["A", "C", "D", "E", "F", "Z"];
+  for (const me of [{ agentName: "dave", actorId: "net-hash" }, { agentName: "x", actorId: "ditrust:u1" }, { agentName: "a_b" }]) {
+    const all = new Set((await fetchMyVotedRows(db, me)).map((r) => r.contribution_id));
+    const among = await fetchMyVotedAmong(db, me, candidates);
+    assertEquals(among.sort(), candidates.filter((c) => all.has(c)).sort(), `身份 ${me.agentName}／${me.actorId}`);
+  }
+  assertEquals(await fetchMyVotedAmong(db, { agentName: "dave" }, []), [], "沒有候選就不查");
+  const callsBefore = db.calls.length;
+  await fetchMyVotedAmong(db, { agentName: "dave" }, ["A", "A", ""]);
+  assertEquals(db.calls[callsBefore], { op: "in", col: "contribution_id", val: "A" }, "id 去重、空字串不查");
+});
+
+Deno.test("3 /next 接線：my_votes 只查候選（fetchMyVotedAmong），不再翻整份歷史票；驗證池不傳舊雜湊", async () => {
   const code = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
-  assert(code.includes("fetchMyVotedRows(supabase, { agentName, actorId: actor.actor_id })"), "my_votes 要按代號／帳號查");
+  assert(code.includes("fetchMyVotedAmong(supabase, { agentName, actorId: actor.actor_id }, todo)"), "my_votes 要按代號／帳號查");
+  assert(!code.includes("fetchMyVotedRows"), "/next 不再撈全部歷史票");
+  assert(!code.includes('timed("my_votes"'), "整份歷史票的平行查詢已拿掉");
   assert(!code.includes("voterHashes"), "voterHashes 已刪");
   assert(!code.includes("p_legacy_ip_hash"), "驗證池不再傳舊雜湊");
   assert(!code.includes("legacyIpHashOf"), "/next 不再算舊雜湊");
