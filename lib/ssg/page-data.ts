@@ -280,7 +280,7 @@ function buildPageSnapshotRaw(to: RouteLocationNormalized, full: DataSnapshot): 
     }
 
     case 'regional-data':
-      return { ...base, regionStats: full.regionStats }
+      return { ...base, regionStats: full.regionStats, ...(full.regionalData ? { regionalData: full.regionalData } : {}) }
 
     case 'politicians':
       // 人物一覽的索引：每一組（筆畫）有哪些姓、幾位

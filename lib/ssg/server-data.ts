@@ -12,6 +12,7 @@ import {
   ensureDiscussions,
   ensurePolicies,
   fetchPolicyCountRows,
+  fetchRegionalDataSet,
   ensureVerificationSources,
 } from '../../composables/useSupabase'
 import type { Lineage, Politician, RawLineage, RawPolitician } from '../../types'
@@ -30,6 +31,7 @@ import { buildSitemapMeta } from '../sitemap'
 import { summarizePolicies } from '../policy-summary'
 import { groupRowsByElection, rawRowsFromPolicies, type PolicyCountsSlice, type RawPolicyCountRow } from '../policy-counts'
 import type { Policy } from '../../types'
+import type { RegionalDataSet } from '../regional-overview'
 
 /**
  * 建置端專用：一次撈齊全站資料（含 15,000+ 政治人物），之後每頁只切片、不再打 Supabase。
@@ -145,7 +147,27 @@ async function loadFullDataset(): Promise<DataSnapshot> {
   console.log(`[ssg] dataset ready: policies=${base.policies.length} politicians=${politicians.length} (rows=${rows.length}) referencedPoliticians=${referenced.size} elections=${base.elections.length} discussions=${base.discussions.length} lineages=${lineages.length} parties=${partyRegistry.parties.length}`)
   const policyMatrix = await loadPolicyMatrix()
   const policyCounts = await loadPolicyCounts(base.policies)
-  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry, policyMatrix, policyCounts }
+  const regionalData = await loadRegionalData()
+  return { ...base, politicians, stats, lineages, lineagesComplete: true, partyRegistry, policyMatrix, policyCounts, ...(regionalData ? { regionalData } : {}) }
+}
+
+/**
+ * 數據分佈頁（/regional-data）的全台與各縣市聚合：五支視圖合計約 700 列，整份放進那一頁的快照，切縣市不用再撈。
+ * 視圖還不存在（CI 先建置、部署完 Hosting 才 db push 的空窗）就不帶，這次預渲染的那頁沒有圖、瀏覽器端掛載後自己撈；
+ * 其他錯重試三次，仍失敗中止建置（缺一塊的預渲染頁比不建置更糟）。
+ */
+async function loadRegionalData(): Promise<RegionalDataSet | null> {
+  return await withRetry<RegionalDataSet | null>('數據分佈視圖', async () => {
+    try {
+      return await fetchRegionalDataSet()
+    } catch (err) {
+      if (isMissingRelation(err)) {
+        console.warn('[ssg] 數據分佈的聚合視圖還不存在（migration 還沒套上），這次預渲染的 /regional-data 不帶圖')
+        return null
+      }
+      throw err
+    }
+  }, () => true)
 }
 
 /**
