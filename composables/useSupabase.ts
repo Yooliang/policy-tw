@@ -1,4 +1,5 @@
 import { displayCurrentPosition, participationLabel } from '../lib/participation-label'
+import { isRegionLoaded } from '../lib/policy-region'
 import { electionArea } from '../lib/election-area'
 import { ref, shallowRef } from 'vue'
 import { supabasePublic as supabase } from '../lib/supabase'
@@ -740,9 +741,9 @@ function mergePoliticians(rows: RawPolitician[]): void {
 /** 已載完的範圍：縣市名，或 'All'（全台 listed）。policiesComplete 為真時任何範圍都算載完 */
 const policyRegionsLoaded = ref<ReadonlySet<string>>(new Set())
 const policyRegionInflight = new Map<string, Promise<void>>()
-/** 這個範圍（縣市或 'All'）的政見載完了嗎：有整份清單、或那個範圍自己載完 */
+/** 這個範圍（縣市或 'All'）的政見載完了嗎：有整份清單、全台那批已載（含所有縣市）、或那個範圍自己載完 */
 export function isPolicyRegionLoaded(region: string): boolean {
-  return policiesComplete.value || policyRegionsLoaded.value.has(region)
+  return isRegionLoaded(region, policiesComplete.value, policyRegionsLoaded.value)
 }
 
 /**

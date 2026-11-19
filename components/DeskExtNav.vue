@@ -80,7 +80,8 @@ const FILTER_ROUTES = new Set(['tracking', 'analysis', 'regional-data'])
 const filterGroup = computed<DeskGroup[]>(() => (FILTER_ROUTES.has(String(route.name)) ? [{ key: 'filter', title: '篩選', blocks: [] }] : []))
 const hasCategoryFilter = computed(() => route.name === 'tracking')
 const regionLabel = computed(() => (globalRegion.value === 'All' ? '全台' : globalRegion.value))
-const categoryLabel = computed(() => (typeof route.query.category === 'string' && route.query.category !== '' ? route.query.category : '全部'))
+// 預渲染不帶 query，掛載後才讀網址上的分類，兩邊第一次渲染的 HTML 才一致
+const categoryLabel = computed(() => (mounted.value && typeof route.query.category === 'string' && route.query.category !== '' ? route.query.category : '全部'))
 function onFilterRow(which: 'region' | 'category') {
   togglePanel(which)
   closeDeskDrawer() // 窄桌面（< lg）延伸欄是抽屜：點了就收起抽屜，主區的方塊格才看得到

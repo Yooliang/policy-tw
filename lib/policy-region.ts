@@ -20,3 +20,11 @@ export function policyMatchesRegion(policy: Policy, politicians: readonly Politi
     : (politicians as PoliticianRegionIndex).get(String(policy.politicianId))
   return politician?.region === region
 }
+
+/**
+ * 這個縣市的政見載完了嗎：整份清單載完、全台（'All'）那批載完、或該縣市自己載過。
+ * 全台那批是所有縣市 listed 列的聯集，已含每個縣市的列，所以 'All' 已載時任何縣市都算載完，不用再抓一次。
+ */
+export function isRegionLoaded(region: string, policiesComplete: boolean, loaded: ReadonlySet<string>): boolean {
+  return policiesComplete || loaded.has(ALL_REGIONS) || loaded.has(region)
+}
