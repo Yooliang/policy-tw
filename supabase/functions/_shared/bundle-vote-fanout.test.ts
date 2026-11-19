@@ -32,7 +32,7 @@ Deno.test("A1 seed：新定義＝20261112005000 的定義加一處登記的排�
   // 前一版是不是還是 seed 的最新定義（中間有人插一版，這裡的底就過期）
   const defining: string[] = [];
   for (const n of await migrationNames()) if ((await readMig(n)).includes("CREATE OR REPLACE FUNCTION seed_auto_task_queue(")) defining.push(n);
-  assertEquals(defining.slice(-4), ["20261112005000_election_year_priority.sql", MIG_NAME, "20261112070100_work_card_demand_seed.sql" /* 工作卡需求疊加：seed 多一個標記區塊，守門在 work-card-demand.test.ts */, "20261114010000_election_type_priority_days.sql" /* 選舉類別提前天數：守門在 election-type-priority-days.test.ts */]);
+  assertEquals(defining.slice(-5), ["20261112005000_election_year_priority.sql", MIG_NAME, "20261112070100_work_card_demand_seed.sql" /* 工作卡需求疊加：seed 多一個標記區塊，守門在 work-card-demand.test.ts */, "20261114010000_election_type_priority_days.sql" /* 選舉類別提前天數：守門在 election-type-priority-days.test.ts */, "20261119170000_seed_narrow_temp_tables.sql" /* 暫存表瘦身：seed 的暫存表只帶要用的欄，守門在 seed-narrow-temp.test.ts */]);
 });
 
 Deno.test("A2 task_boost_matches：新定義＝20261102180000 的定義加一處登記的排除", async () => {
