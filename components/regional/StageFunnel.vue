@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { STAGE_COLORS, funnelRows, normRegion, percentText, policyTotal, type RegionalDataSet } from '../../lib/regional-overview'
 
 /**
- * ① 各縣市階段漏斗：承諾條與政見條各自縮放；政見條內分已提出／施政中／已完成／停滯；依兌現率排序。
+ * ① 各縣市階段漏斗：承諾條與政見條各自縮放；政見條內分尚未啟動／已提出／施政中／已完成／停滯；依兌現率排序。
  * 兌現率的分母（政見數）不足 10 的縣市：百分比淡化、印出「n／m」，排在有效樣本後面。
  */
 const props = defineProps<{ data: RegionalDataSet; region: string }>()
@@ -16,15 +16,17 @@ const maxPolicy = computed(() => Math.max(1, ...rows.value.map((r) => policyTota
 
 const legend = [
   { label: '承諾', color: STAGE_COLORS.pledge },
+  { label: '尚未啟動', color: STAGE_COLORS.not_started },
   { label: '已提出', color: STAGE_COLORS.proposed },
   { label: '施政中', color: STAGE_COLORS.in_progress },
   { label: '已完成', color: STAGE_COLORS.achieved },
   { label: '停滯', color: STAGE_COLORS.stalled },
 ]
 
-function segments(c: { proposed_n: number; in_progress_n: number; achieved_n: number; stalled_n: number }) {
+function segments(c: { not_started_n: number; proposed_n: number; in_progress_n: number; achieved_n: number; stalled_n: number }) {
   const total = policyTotal(c as never)
   return ([
+    ['尚未啟動', c.not_started_n, STAGE_COLORS.not_started],
     ['已提出', c.proposed_n, STAGE_COLORS.proposed],
     ['施政中', c.in_progress_n, STAGE_COLORS.in_progress],
     ['已完成', c.achieved_n, STAGE_COLORS.achieved],

@@ -22,11 +22,11 @@ const lineageCount = computed(() => lineageStat(props.data.lineage, props.region
 const kpis = computed(() => {
   const t = totals.value
   return [
-    { label: '承諾數', value: fmt(t.pledge_n), sub: `${scopeLabel.value} · 選前提出`, cls: 'text-navy-900' },
-    { label: '政見數', value: fmt(policyTotal(t)), sub: `${scopeLabel.value} · 當選後正式提出`, cls: 'text-blue-600' },
+    { label: '承諾數', value: fmt(t.pledge_n), sub: scopeLabel.value, cls: 'text-navy-900' },
+    { label: '政見數', value: fmt(policyTotal(t)), sub: scopeLabel.value, cls: 'text-blue-600' },
     { label: '施政中', value: fmt(t.in_progress_n), sub: `${scopeLabel.value} · 已開始執行`, cls: 'text-indigo-600' },
     { label: '已完成', value: fmt(t.achieved_n), sub: `${scopeLabel.value} · 已有成果`, cls: 'text-emerald-600' },
-    { label: '脈絡數', value: fmt(lineageCount.value), sub: `${scopeLabel.value} · 跨任期延續`, cls: 'text-amber-600' },
+    { label: '脈絡數', value: fmt(lineageCount.value), sub: scopeLabel.value, cls: 'text-amber-600' },
     {
       label: '兌現率',
       value: percentText(rate.value),

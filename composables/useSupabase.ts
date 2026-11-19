@@ -33,7 +33,7 @@ import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
 import type { PolicySummary } from '../lib/policy-summary'
 import { slicesToState, isPolicyCountsComplete, mapFromRawRows, fallbackMapFromPolicies, type PolicyCountsByElection, type PolicyCountsSlice, type RawPolicyCountRow } from '../lib/policy-counts'
 import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
-import type { RegionalDataSet } from '../lib/regional-overview'
+import { stageRowsFromCategory, type RegionalDataSet } from '../lib/regional-overview'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -790,14 +790,14 @@ export async function fetchRegionalDataSet(): Promise<RegionalDataSet> {
     if (truncated) throw new Error(`${view} 撈到分頁上限仍未撈完`)
     return [...rows]
   }
-  const [stage, category, element, deadline, lineage] = await Promise.all([
-    read<RegionalDataSet['stage'][number]>('region_stage_counts', 'region,pledge_n,proposed_n,in_progress_n,achieved_n,stalled_n', ['region']),
-    read<RegionalDataSet['category'][number]>('region_category_stage_counts', 'region,category,pledge_n,proposed_n,in_progress_n,achieved_n,stalled_n', ['region', 'category']),
+  const [category, element, deadline, lineage] = await Promise.all([
+    read<RegionalDataSet['category'][number]>('region_category_stage_counts', 'region,category,pledge_n,not_started_n,proposed_n,in_progress_n,achieved_n,stalled_n', ['region', 'category']),
     read<RegionalDataSet['element'][number]>('region_element_stats', 'region,election_type,target_stated,target_total,deadline_stated,deadline_total,funding_stated,funding_total', ['region', 'election_type']),
     read<RegionalDataSet['deadline'][number]>('region_deadline_stats', 'region,policy_n,overdue_n,within30_n,later_n,unset_n,updated_30d_n', ['region']),
     read<RegionalDataSet['lineage'][number]>('lineage_term_spans', 'lineage_id,title,category,level,region,election_ids,term_years,handover_n', ['lineage_id']),
   ])
-  return { stage, category, element, deadline, lineage }
+  // 縣市階段漏斗由縣市 × 分類加總，不另撈 region_stage_counts
+  return { stage: stageRowsFromCategory(category), category, element, deadline, lineage }
 }
 
 let regionalDataPromise: Promise<void> | null = null

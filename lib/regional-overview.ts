@@ -2,9 +2,9 @@
  * 數據分佈頁（/regional-data）的純函式：階段計數、兌現率、分母門檻、資料不足判定、熱力圖尺度、脈絡跨任期。
  *
  * 口徑（維護者 2026-11-19，裁決 docs/decisions/2026-11-19-數據分佈兌現率與資料不足顯示.md；視圖在 migration 20261119140000）：
- *   承諾 ＝ status 為 Campaign Pledge；
- *   政見 ＝ status 不是 Campaign Pledge、而且屬選後／施政（lib/policy-stage.ts 的 isPostElectionStage）；
- *   已提出／施政中／已完成／停滯 ＝ 政見的 status（Proposed／In Progress／Achieved／Stalled＋Failed）；
+ *   政見 ＝ 選後／施政（lib/policy-stage.ts 的 isPostElectionStage；SQL 是 policies_by_region.listed，與 /tracking 同一個定義，
+ *           當選那一屆狀態仍是 Campaign Pledge 的也算）；承諾 ＝ 其餘（選前、落選、退選）；
+ *   政見依 status 分桶：尚未啟動（Campaign Pledge）／已提出／施政中／已完成／停滯（Stalled＋Failed）；
  *   兌現率 ＝ （施政中＋已完成）÷ 政見數；
  *   區域 ＝ policies_by_region 的 region 語意（台／臺同一；全國範圍只算進全台）。
  * 這個檔只 import 型別與 policy-stage（也只 import 型別），deno 直接能測。
@@ -35,6 +35,7 @@ export const COUNTIES: readonly string[] = [
 /** 一頁共用的色票：所有圖同一套 */
 export const STAGE_COLORS = {
   pledge: '#bfdbfe', // 承諾：淡藍
+  not_started: '#cbd5e1', // 尚未啟動：淺灰藍
   proposed: '#3b82f6', // 已提出：藍
   in_progress: '#6366f1', // 施政中：靛
   achieved: '#10b981', // 已完成：綠
@@ -45,9 +46,10 @@ export const DEADLINE_COLORS = { overdue: '#f43f5e', within30: '#f59e0b', later:
 
 export type StageKey = keyof typeof STAGE_COLORS
 
-/** 視圖 region_stage_counts／region_category_stage_counts 的計數欄 */
+/** 視圖 region_stage_counts／region_category_stage_counts 的計數欄（pledge_n＝承諾；其餘五欄加起來＝政見數） */
 export interface StageCounts {
   pledge_n: number
+  not_started_n: number
   proposed_n: number
   in_progress_n: number
   achieved_n: number
@@ -93,7 +95,7 @@ export interface RegionalDataSet {
   lineage: LineageSpanRow[]
 }
 
-export const EMPTY_STAGE: StageCounts = { pledge_n: 0, proposed_n: 0, in_progress_n: 0, achieved_n: 0, stalled_n: 0 }
+export const EMPTY_STAGE: StageCounts = { pledge_n: 0, not_started_n: 0, proposed_n: 0, in_progress_n: 0, achieved_n: 0, stalled_n: 0 }
 
 /** 台／臺同一 */
 export function normRegion(region: string | null | undefined): string {
@@ -105,10 +107,10 @@ export function inRegion(rowRegion: string | null | undefined, region: string): 
   return region === ALL_REGIONS || normRegion(rowRegion) === normRegion(region)
 }
 
-/** 一條政見落在哪個階段格；不在任何格（沒有被列為政見的非承諾）回 null。以 lib/policy-stage.ts 的階段判斷為準，SQL 是同一份規則的另一份 */
+/** 一條政見落在哪個階段格：選前／落選的一律是承諾；選後／施政依 status 分桶，不認得的 status 回 null。以 lib/policy-stage.ts 的階段判斷為準，SQL 是同一份規則的另一份 */
 export function stageBucketOf(status: string, stage: PolicyStage): StageKey | null {
-  if (status === 'Campaign Pledge') return 'pledge'
-  if (!isPostElectionStage(stage)) return null
+  if (!isPostElectionStage(stage)) return 'pledge'
+  if (status === 'Campaign Pledge') return 'not_started'
   if (status === 'Proposed') return 'proposed'
   if (status === 'In Progress') return 'in_progress'
   if (status === 'Achieved') return 'achieved'
@@ -119,6 +121,7 @@ export function stageBucketOf(status: string, stage: PolicyStage): StageKey | nu
 export function addStage(a: StageCounts, b: StageCounts): StageCounts {
   return {
     pledge_n: a.pledge_n + b.pledge_n,
+    not_started_n: a.not_started_n + b.not_started_n,
     proposed_n: a.proposed_n + b.proposed_n,
     in_progress_n: a.in_progress_n + b.in_progress_n,
     achieved_n: a.achieved_n + b.achieved_n,
@@ -126,14 +129,24 @@ export function addStage(a: StageCounts, b: StageCounts): StageCounts {
   }
 }
 
+/** 縣市 × 分類的列加總成縣市階段列（漏斗用；不另撈一支視圖） */
+export function stageRowsFromCategory(rows: readonly RegionCategoryStageRow[]): RegionStageRow[] {
+  const byRegion = new Map<string, RegionStageRow>()
+  for (const r of rows) {
+    const prev = byRegion.get(r.region)
+    byRegion.set(r.region, { ...addStage(prev ?? EMPTY_STAGE, r), region: r.region })
+  }
+  return [...byRegion.values()].sort((a, b) => a.region.localeCompare(b.region, 'zh-Hant'))
+}
+
 /** 某範圍（全台或縣市）的階段加總 */
 export function stageTotals(rows: readonly (StageCounts & { region: string })[], region: string): StageCounts {
   return rows.reduce((acc, r) => (inRegion(r.region, region) ? addStage(acc, r) : acc), EMPTY_STAGE)
 }
 
-/** 政見數＝已提出＋施政中＋已完成＋停滯 */
+/** 政見數＝尚未啟動＋已提出＋施政中＋已完成＋停滯（與 /tracking 同一個定義） */
 export function policyTotal(c: StageCounts): number {
-  return c.proposed_n + c.in_progress_n + c.achieved_n + c.stalled_n
+  return c.not_started_n + c.proposed_n + c.in_progress_n + c.achieved_n + c.stalled_n
 }
 
 /** 兌現率（0～1）＝（施政中＋已完成）÷ 政見數；沒有政見回 null（畫面印「—」，不是 0%） */

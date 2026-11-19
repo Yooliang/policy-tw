@@ -31,6 +31,7 @@ import {
   policyTotal,
   rateReliable,
   stageBucketOf,
+  stageRowsFromCategory,
   stageTotals,
   termCount,
   timelineLineages,
@@ -42,8 +43,8 @@ import {
   type RegionStageRow,
 } from './regional-overview.ts'
 
-const stage = (region: string, p: number, pr: number, ip: number, ac: number, st: number): RegionStageRow =>
-  ({ region, pledge_n: p, proposed_n: pr, in_progress_n: ip, achieved_n: ac, stalled_n: st })
+const stage = (region: string, p: number, pr: number, ip: number, ac: number, st: number, ns = 0): RegionStageRow =>
+  ({ region, pledge_n: p, not_started_n: ns, proposed_n: pr, in_progress_n: ip, achieved_n: ac, stalled_n: st })
 
 Deno.test('台／臺同一；全台含全國、縣市不含全國', () => {
   assertEquals(normRegion('臺北市'), '台北市')
@@ -56,17 +57,35 @@ Deno.test('台／臺同一；全台含全國、縣市不含全國', () => {
   assertEquals(stageTotals(rows, '桃園市').pledge_n, 0)
 })
 
-Deno.test('階段格：承諾看 status、政見要屬選後／施政；Failed 併入停滯', () => {
+Deno.test('階段格：選前／落選一律承諾；選後／施政依 status 分桶，Campaign Pledge 是尚未啟動，Failed 併入停滯', () => {
   assertEquals(stageBucketOf('Campaign Pledge', 'pledge'), 'pledge')
-  assertEquals(stageBucketOf('Campaign Pledge', 'policy'), 'pledge')
+  assertEquals(stageBucketOf('Campaign Pledge', 'lost_pledge'), 'pledge')
+  assertEquals(stageBucketOf('Campaign Pledge', 'policy'), 'not_started')
   assertEquals(stageBucketOf('Proposed', 'policy'), 'proposed')
   assertEquals(stageBucketOf('In Progress', 'governance'), 'in_progress')
   assertEquals(stageBucketOf('Achieved', 'governance'), 'achieved')
   assertEquals(stageBucketOf('Stalled', 'governance'), 'stalled')
   assertEquals(stageBucketOf('Failed', 'governance'), 'stalled')
-  // 還在承諾階段（選前／落選）的非 Campaign Pledge 狀態不算政見
-  assertEquals(stageBucketOf('In Progress', 'pledge'), null)
-  assertEquals(stageBucketOf('Achieved', 'lost_pledge'), null)
+  // 還在承諾階段（選前／落選）的任何 status 都是承諾，不進政見
+  assertEquals(stageBucketOf('In Progress', 'pledge'), 'pledge')
+  assertEquals(stageBucketOf('Achieved', 'lost_pledge'), 'pledge')
+})
+
+Deno.test('政見數含尚未啟動；兌現率分母也含', () => {
+  const c = stage('x', 100, 4, 3, 2, 1, 10)
+  assertEquals(policyTotal(c), 20)
+  assertAlmostEquals(fulfilmentRate(c)!, 0.25)
+})
+
+Deno.test('縣市階段列由縣市 × 分類加總', () => {
+  const rows = stageRowsFromCategory([
+    { ...stage('台北市', 10, 1, 2, 0, 0, 5), category: '交通建設' },
+    { ...stage('台北市', 4, 0, 0, 1, 0, 2), category: '社會福利' },
+    { ...stage('新北市', 7, 0, 0, 0, 0, 0), category: '交通建設' },
+  ])
+  assertEquals(rows.length, 2)
+  const tp = rows.find((r) => r.region === '台北市')!
+  assertEquals([tp.pledge_n, tp.not_started_n, tp.proposed_n, tp.in_progress_n, tp.achieved_n], [14, 7, 1, 2, 1])
 })
 
 Deno.test('兌現率＝（施政中＋已完成）÷ 政見數；沒有政見是 null 不是 0', () => {
@@ -109,10 +128,10 @@ Deno.test('熱力圖：全圖共用一個尺度，0 沒有顏色，最大值最�
 })
 
 const catRows: RegionCategoryStageRow[] = [
-  { region: '台北市', category: '交通建設', pledge_n: 10, proposed_n: 1, in_progress_n: 2, achieved_n: 0, stalled_n: 0 },
-  { region: '台北市', category: '社會福利', pledge_n: 5, proposed_n: 0, in_progress_n: 0, achieved_n: 0, stalled_n: 0 },
-  { region: '新北市', category: '交通建設', pledge_n: 20, proposed_n: 0, in_progress_n: 0, achieved_n: 1, stalled_n: 0 },
-  { region: '全國', category: '交通建設', pledge_n: 99, proposed_n: 0, in_progress_n: 0, achieved_n: 0, stalled_n: 0 },
+  { region: '台北市', category: '交通建設', pledge_n: 10, not_started_n: 0, proposed_n: 1, in_progress_n: 2, achieved_n: 0, stalled_n: 0 },
+  { region: '台北市', category: '社會福利', pledge_n: 5, not_started_n: 0, proposed_n: 0, in_progress_n: 0, achieved_n: 0, stalled_n: 0 },
+  { region: '新北市', category: '交通建設', pledge_n: 20, not_started_n: 0, proposed_n: 0, in_progress_n: 0, achieved_n: 1, stalled_n: 0 },
+  { region: '全國', category: '交通建設', pledge_n: 99, not_started_n: 0, proposed_n: 0, in_progress_n: 0, achieved_n: 0, stalled_n: 0 },
 ]
 const lin = (id: string, region: string, category: string, years: number[], handovers = 0, ids: number[] | null = null): LineageSpanRow =>
   ({ lineage_id: id, title: id, category, level: 'county', region, election_ids: ids ?? years, term_years: years, handover_n: handovers })
@@ -223,25 +242,19 @@ Deno.test('migration：五支視圖都建、security_invoker、anon／authentica
   }
 })
 
-Deno.test('migration：listed 式子跟 policies_by_region 同一份（改一邊要連另一邊一起改）', () => {
-  const squash = (s: string) => s.replace(/\s+/g, ' ')
-  const parts = [
-    "NOT (CASE WHEN COALESCE(pl.origin, '') <> '' THEN pl.origin = 'pledge' ELSE pl.status = 'Campaign Pledge' END)",
-    'pl.election_id IS NOT NULL AND e.election_date < activity_today()',
-    "q.politician_id = pl.politician_id AND q.election_id = pl.election_id AND q.candidacy_status = 'elected'",
-  ]
-  for (const p of parts) {
-    assert(squash(policiesByRegion).includes(p), `policies_by_region 找不到：${p}`)
-    assert(squash(sql).includes(p), `數據分佈視圖找不到：${p}`)
-  }
+Deno.test('migration：算政見的視圖直接讀 policies_by_region，不另抄 listed 的式子', () => {
+  const code = sql.split('\n').filter((l) => !l.trimStart().startsWith('--')).join('\n').replace(/'(?:[^']|'')*'\s*;/g, ';')
+  assert(policiesByRegion.includes('AS listed'))
+  assertEquals((code.match(/FROM policies_by_region pl/g) ?? []).length, 2) // 階段計數、期限分佈
+  assert(!code.includes('AND EXISTS') && !code.includes("q.candidacy_status = 'elected'"), '不該再抄一份 listed 式子')
+  assert(!code.includes("pl.origin = 'pledge'"))
 })
 
-Deno.test('migration：縣市用 COALESCE(regions.region, politicians.region)，只算未移除的政見；承諾看 status、政見排除 Campaign Pledge', () => {
-  assert(sql.includes('COALESCE(r.region, po.region)'))
-  assert(sql.includes('pl.removed_at IS NULL'))
-  assert(sql.includes("count(*) FILTER (WHERE pl.status = 'Campaign Pledge')::int AS pledge_n"))
-  assert(sql.includes("pl.status IN ('Stalled', 'Failed')"))
-  assert(sql.includes("pl.status <> 'Campaign Pledge'")) // 期限分佈的母體是政見
+Deno.test('migration：承諾＝NOT listed、政見＝listed 再依 status 分桶（尚未啟動＝Campaign Pledge）；期限分佈母體是 listed', () => {
+  assert(sql.includes('count(*) FILTER (WHERE NOT pl.listed)::int AS pledge_n'))
+  assert(sql.includes("count(*) FILTER (WHERE pl.listed AND pl.status = 'Campaign Pledge')::int AS not_started_n"))
+  assert(sql.includes("pl.listed AND pl.status IN ('Stalled', 'Failed')"))
+  assert(sql.includes('WHERE pl.listed\nGROUP BY pl.region'))
 })
 
 Deno.test('migration：脈絡只收合格政見、三要素沒有列不進分母', () => {

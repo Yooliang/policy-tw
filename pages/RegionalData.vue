@@ -43,7 +43,8 @@ async function loadRegional() {
   await ensureRegionalData()
   regionalFailed.value = !regionalData.value
 }
-void loadRegional()
+// 只在瀏覽器端補撈：預渲染時快照有就用、沒有就留骨架，建置端不發請求、失敗也不寫進全域錯誤（會污染別頁的 HTML）
+onMounted(() => { void loadRegional() })
 const { globalRegion, setGlobalRegion, globalCategory } = useGlobalState()
 const { openPanel } = useDeskFilterPanel()
 
