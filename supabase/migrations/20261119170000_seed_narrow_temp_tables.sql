@@ -10,6 +10,7 @@
 --      what_we_need、hint_sources、task_type、reward、region 不再進 _gaps，「內容沒變不重寫」的比對與新缺口 INSERT 改用 src_rn 回 _gaps_all 取。
 --   3. 選舉年優先、選舉類別提前兩次 UPDATE 併成一次（COALESCE 寫法與依序兩次執行一致）。
 --   4. 函式定義帶 SET statement_timeout = '280s'（11-19 手動加的現況）與 SET work_mem = '16MB'；CREATE OR REPLACE 會洗掉 ALTER FUNCTION 設的值，所以寫進定義。
+--   5. _gaps 的 DISTINCT ON (task_id) 決勝欄明寫 ORDER BY g.task_id, g.rn：同一 task_id 出現多列時固定取最小 rn（臂輸出順序最先出現者），與改前一致、不靠實作順序。
 -- 沒改：_rekey_prev（本來就只有 6 欄）、任何規則、別的函式、資料列。
 -- 相依：與 db-tuning 那支 PR 的 seed／arms work_mem 設定一致；本支定義已帶 work_mem，先後合併都不衝突，但要晚於它（避免被它的 ALTER FUNCTION 蓋掉設定的人搞混）。
 -- 回滾：用 20261114010000_election_type_priority_days.sql 的 seed_auto_task_queue 定義 CREATE OR REPLACE 還原，再 ALTER FUNCTION seed_auto_task_queue() SET statement_timeout = '280s'。
@@ -34,7 +35,7 @@ BEGIN
   PERFORM set_config('gap.arms_all', '', true);
   -- <<< gap_events window／filled
   -- >>> 暫存表瘦身：_gaps 只帶後面會讀、會改的欄（task_id、arm、target、opened_by），加 src_rn 指回 _gaps_all 取寬欄。下面五次 UPDATE 每次都整列重寫，列越窄落碟越少
-  CREATE TEMP TABLE _gaps ON COMMIT DROP AS SELECT DISTINCT ON (g.task_id) g.task_id, g.rn AS src_rn, g.arm, g.target, g.opened_by FROM _gaps_all g WHERE g.opened_by IS NOT NULL ORDER BY g.task_id;
+  CREATE TEMP TABLE _gaps ON COMMIT DROP AS SELECT DISTINCT ON (g.task_id) g.task_id, g.rn AS src_rn, g.arm, g.target, g.opened_by FROM _gaps_all g WHERE g.opened_by IS NOT NULL ORDER BY g.task_id, g.rn;
   -- <<< 暫存表瘦身
 
   -- >>> 優先秒數（20261011320000）：每個缺口的優先秒數（每組「臂×選舉×職位」問一次；多條規則相符取最小；20261011350000 起相符的規則 id 也從這裡記，不再另算層）

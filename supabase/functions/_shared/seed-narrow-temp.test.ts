@@ -139,19 +139,20 @@ const snap = async (db: PGlite): Promise<string> =>
     `SELECT coalesce(jsonb_agg((to_jsonb(t) - 'queue_at' - 'opened_at' - 'refreshed_at' - 'last_dispatched_at' - 'opened_by')
         || jsonb_build_object('qa', t.queue_at - now(), 'oa', t.opened_at - now(), 'ra', t.refreshed_at - now(), 'lda', t.last_dispatched_at - now(),
                               'ob', t.opened_by - 'chain_opened_at', 'cho', (t.opened_by->>'chain_opened_at')::timestamptz - now()) ORDER BY t.task_id), '[]')::text AS j
-       FROM task_dispatches t`)).rows[0]!.j;
+       FROM task_dispatches t WHERE t.task_id <> 'auto:dupe'`)).rows[0]!.j; // 重複 task_id 那列改前沒有決勝欄（取哪列不固定），改後固定取最小 rn：另外在 B1 單獨斷言
 const count = async (db: PGlite): Promise<number> => Number((await db.query<{ n: string }>(`SELECT count(*) n FROM task_dispatches`)).rows[0]!.n);
 
 /**
  * 兩個資料庫同一套設定：A 跑上一版、B 跑這一版，每一輪做同樣的改動後各跑一次 seed，比 task_dispatches 與回傳值。
  * 不用同一個資料庫「SAVEPOINT／ROLLBACK」輪流跑：PGlite 在回滾暫存表的建立之後再建同名暫存表，會把別的暫存表連接的結果弄錯（正式庫每輪都是獨立交易，沒有這個情形）。
  */
-async function scenario(newSeed: string = NEW_SEED): Promise<{ same: boolean[]; ret: boolean[]; counts: number[]; final: string; rekeyed: boolean }> {
+async function scenario(newSeed: string = NEW_SEED): Promise<{ same: boolean[]; ret: boolean[]; counts: number[]; final: string; rekeyed: boolean; dupeTypes: string[] }> {
   const A = await env();
   const B = await env(newSeed);
   const same: boolean[] = [];
   const ret: boolean[] = [];
   const counts: number[] = [];
+  const dupeTypes: string[] = [];
   const both = async (sql: string) => { await A.exec(sql); await B.exec(sql); };
   await both("BEGIN");
   async function round(label: string, setup: string) {
@@ -164,12 +165,13 @@ async function scenario(newSeed: string = NEW_SEED): Promise<{ same: boolean[]; 
     same.push(oldSnap === newSnap);
     ret.push(oldRet === newRet);
     counts.push(await count(B));
+    dupeTypes.push((await B.query<{ t: string }>(`SELECT task_type t FROM task_dispatches WHERE task_id = 'auto:dupe'`)).rows[0]!.t);
   }
   const base: Gap[] = [
     { id: "a1" }, { id: "a2", arm: "arm_b" }, { id: "a3", target: null }, { id: "a4", hint: null, reward: null, region: null },
     { id: "hot1", target: { hot: "1", election_id: 2026 } }, { id: "y1999", target: { election_id: 1999 } },
     { id: "rk1", target: { election_id: 2026, election_type: "縣市長" } }, { id: "w1", arm: "arm_c" },
-    { id: "dupe" }, { id: "dupe" }, // 同一個 task_id 兩列內容相同（DISTINCT ON 只留一列、INSERT 不能重複）
+    { id: "dupe", type: "t_dupe_first", reward: 7 }, { id: "dupe", type: "t_dupe_second", reward: 8 }, // 同一個 task_id 兩列內容不同：只留最小 rn 那列（先出現者）、INSERT 不能重複
     { id: "filtered", kept: false },   // opened_by 為 NULL：只在 _gaps_all（拿來分辨收回原因），不進 _gaps
   ];
   await both(`INSERT INTO contributions (id, status) VALUES ('00000000-0000-4000-8000-000000000001', 'pending'), ('00000000-0000-4000-8000-000000000002', 'pending'), ('00000000-0000-4000-8000-000000000003', 'verified')`);
@@ -203,13 +205,14 @@ async function scenario(newSeed: string = NEW_SEED): Promise<{ same: boolean[]; 
   const final = await snap(B);
   await A.close();
   await B.close();
-  return { same, ret, counts, final, rekeyed };
+  return { same, ret, counts, final, rekeyed, dupeTypes };
 }
 
 Deno.test("B1 逐輪等價：改前與改後的 task_dispatches 每一列每一欄完全相同、回傳值相同", async () => {
   const r = await scenario();
   assertEquals(r.same, r.same.map(() => true), `各輪相同：${r.same}`);
   assertEquals(r.ret, r.ret.map(() => true), "seed 回傳值相同");
+  assertEquals(r.dupeTypes, r.dupeTypes.map(() => "t_dupe_first"), "同一 task_id 兩列內容不同：每輪都固定取最小 rn（先出現）那列");
   // 非空：第一輪入列 9 個不同 task_id 加 2 張驗證票＝11 列；之後有成長
   assertEquals(r.counts[0], 11);
   assert(r.counts[4]! > r.counts[0]!, `收回與新增後列數變了：${r.counts}`);
