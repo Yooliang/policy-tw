@@ -47,6 +47,7 @@
 3. 任務窗口依 id 分手動（uuid，`isManualTaskId`）與自動（`auto:`）各取最前一個。
 4. `pickDispatchKind`（2026-11-19 驗證先於任務）：驗證池有能派給這隻代理的票就派驗證，不跟任務比先後；沒有才用 `pickQueueHead` 在 manual／auto 之間比 `queue_at`（同時刻 `manual` ＞ `auto`，時間用 `Date.parse` 比）。驗證池內的順序在 SQL：`verify_rank`（有票 0／沒票 3，加層級 縣市 0、鄉鎮 1、村里 2）→ `queue_at` → `task_id`；有票的票每被領走只往後排 1 小時，沒人投過的 7 天（`20261119100000`）。
 5. 沒有 2:1 或 3:1 交錯（2026-10-13 起全拿掉）；沒有候選時回 `none`。
+6. 回應裡的 `open_tasks` 是最多 60 秒前的計數（2026-11-19）：`contribution_queue_task_counts` 每次要讀整個佇列（實測 1.0～1.5 秒），`/next` 改在 isolate 記憶體按 region（null 當 `ALL`）快取 60 秒（`_shared/queue-counts-cache.ts`）；重打失敗沿用舊值。回應欄位形狀與協議不變。
 
 ## 2. 每條臂
 

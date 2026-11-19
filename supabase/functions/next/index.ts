@@ -14,6 +14,7 @@ import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
 import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts";
 import { loadQuotaLimits } from "../_shared/quota-settings.ts";
+import { cachedQueueCounts } from "../_shared/queue-counts-cache.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
 import { serveStrongLane } from "../_shared/strong-lane-claim.ts";
 import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
@@ -150,7 +151,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
     const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes, breakerRes] = await Promise.all([
       timed("pool", pendingQuery),
-      timed("counts", supabase.rpc("contribution_queue_task_counts", { p_region: region }) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單 */),
+      timed("counts", cachedQueueCounts(region, () => supabase.rpc("contribution_queue_task_counts", { p_region: region })) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單；最多 60 秒前的值（2026-11-19，每次 1.0～1.5 秒） */),
       timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
       fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
         supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
