@@ -10,9 +10,9 @@
 
 export const DEFAULTS = Object.freeze({
   /** 頁面快取多久之後背景重新渲染（秒） */
-  cacheTtlS: 600,
+  cacheTtlS: 1800,
   /** 邊緣快取最長保存（s-maxage，秒）：重新渲染失敗時，舊頁最多再撐這麼久 */
-  staleTtlS: 3600,
+  staleTtlS: 21600,
   /** 基礎資料（選舉／分類／地區）每個 isolate 多久重撈一次（秒） */
   baseTtlS: 600,
   /** 上游（Firebase Hosting）網址：預渲染頁、工具頁、靜態資源、客戶端殼都在那 */

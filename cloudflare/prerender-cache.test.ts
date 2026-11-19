@@ -35,7 +35,7 @@ Deno.test("首頁第二次請求命中快取：MISS → HIT，只打一次上游
   assertEquals(await r1.text(), "<!doctype html><title>x</title>");
   const r2 = await cachedProxy(req("/"), c, s.deps());
   assertEquals(r2.headers.get("X-Prerender-Cache"), "HIT");
-  assertEquals(r2.headers.get("Cache-Control"), "public, max-age=0, s-maxage=300");
+  assertEquals(r2.headers.get("Cache-Control"), "public, max-age=0, s-maxage=900");
   assert(!(r2.headers.get("Cache-Control") ?? "").includes("stale-while-revalidate"), "給瀏覽器的不能帶 SWR（Chrome 會用本機舊頁）");
   assertEquals(await r2.text(), "<!doctype html><title>x</title>");
   assertEquals(s.calls(), 1);
@@ -104,7 +104,7 @@ Deno.test("過了新鮮期：先回舊的（STALE）並背景重抓，下一個�
   await cachedProxy(req("/analysis"), c, s.deps());
   await c.flush();
   version = 2;
-  const later = () => Date.now() + 301_000;
+  const later = () => Date.now() + 901_000;
   const r = await cachedProxy(req("/analysis"), c, s.deps(later));
   assertEquals(r.headers.get("X-Prerender-Cache"), "STALE");
   assertEquals(await r.text(), "v1");
@@ -190,7 +190,7 @@ Deno.test("過期瞬間連打：只有一個請求背景回源", async () => {
   const c = ctx();
   await cachedProxy(req("/"), c, s.deps());
   await c.flush();
-  const later = () => Date.now() + 301_000;
+  const later = () => Date.now() + 901_000;
   await Promise.all([1, 2, 3, 4, 5].map(() => cachedProxy(req("/"), c, s.deps(later))));
   await c.flush();
   assertEquals(s.calls(), 2, "1 次初次 + 1 次背景重抓");
@@ -209,4 +209,11 @@ Deno.test("?__proxy=1（現場渲染頁的除錯旗標）直接代理：不讀�
   assertEquals(s.calls(), 1);
   assertEquals(await s.cache.store.get(`${SITE}/politician/x`)!.text(), "SSR", "沒被覆寫");
   assertEquals(s.cache.store.size, 1);
+});
+
+Deno.test("預渲染頁新鮮期 15 分鐘、舊頁 10 分鐘，Cache-Control 不帶 stale-while-revalidate", async () => {
+  const m = await import("./prerender-cache.js");
+  assertEquals(m.FRESH_S, 900);
+  assertEquals(m.STALE_S, 600);
+  assertEquals(m.PRERENDER_CACHE_CONTROL, "public, max-age=0, s-maxage=900");
 });

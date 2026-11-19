@@ -74,14 +74,14 @@ Deno.test("正常時原樣回（含 render 回 null＝不歸這裡管）", async
 
 Deno.test("TTL 只對人物、政見與 .md 拉長到 3600，其餘照 SSR_CACHE_TTL_S", () => {
   const cfg = readWorkerConfig({});
-  assertEquals(cfg.cacheTtlS, 600);
+  assertEquals(cfg.cacheTtlS, 1800);
   for (const p of ["/politician/abc", "/policy/abc", "/politician/abc/", "/politician/abc.md", "/category/交通.md", "/data/2026/index.md"]) {
     assert(isLongTailPath(p), p);
     assertEquals(cacheTtlForPath(p, cfg), 3600, p);
   }
   for (const p of ["/lineage/abc", "/election/2026", "/", "/politicians/5", "/policy/a/b"]) {
     assertEquals(isLongTailPath(p), false, p);
-    assertEquals(cacheTtlForPath(p, cfg), 600, p);
+    assertEquals(cacheTtlForPath(p, cfg), 1800, p);
   }
   // 設定值改了，非長尾頁跟著走
   assertEquals(cacheTtlForPath("/lineage/x", readWorkerConfig({ SSR_CACHE_TTL_S: "120" })), 120);
@@ -89,9 +89,11 @@ Deno.test("TTL 只對人物、政見與 .md 拉長到 3600，其餘照 SSR_CACHE
 
 Deno.test("s-maxage：長尾頁至少新鮮期的兩倍（過了新鮮期還留得住舊的），其餘維持 SSR_STALE_TTL_S", () => {
   const cfg = readWorkerConfig({});
-  assertEquals(sMaxAgeForPath("/politician/x", cfg), 7200);
-  assertEquals(sMaxAgeForPath("/lineage/x", cfg), 3600);
+  assertEquals(sMaxAgeForPath("/politician/x", cfg), 21600);
+  assertEquals(sMaxAgeForPath("/lineage/x", cfg), 21600);
   assertEquals(sMaxAgeForPath("/politician/x", readWorkerConfig({ SSR_STALE_TTL_S: "86400" })), 86400);
+  // 預設 s-maxage 已拉到 6 小時，長尾「至少兩倍新鮮期」的下限要用較小的設定值才測得到
+  assertEquals(sMaxAgeForPath("/politician/x", readWorkerConfig({ SSR_STALE_TTL_S: "600" })), 7200);
 });
 
 Deno.test("錯誤訊息含中文也不會讓退路自己炸掉（標頭只留 ASCII）", async () => {
@@ -112,4 +114,13 @@ Deno.test("ssr-worker.js 接線：現場渲染走 renderOrFallback、上游 prox
   assert(src.includes("body && Array.isArray(body.paths)"), "purge body 為 null 不丟例外");
   assert(src.includes("catch { /* 略過 */ }"), "purge 單筆失敗略過");
   assert(src.includes("await cache.put(cacheKey, res.clone()).catch(() => undefined)"), "寫快取失敗不影響回應");
+});
+
+Deno.test("邊緣渲染頁預設 TTL：新鮮 30 分鐘、s-maxage 6 小時（wrangler.toml 與預設值一致）", async () => {
+  const cfg = readWorkerConfig({});
+  assertEquals(cfg.cacheTtlS, 1800);
+  assertEquals(cfg.staleTtlS, 21600);
+  const toml = await Deno.readTextFile(new URL("../wrangler.toml", import.meta.url));
+  assert(/SSR_CACHE_TTL_S = "1800"/.test(toml), "wrangler.toml 的 SSR_CACHE_TTL_S 要等於預設");
+  assert(/SSR_STALE_TTL_S = "21600"/.test(toml), "wrangler.toml 的 SSR_STALE_TTL_S 要等於預設");
 });
