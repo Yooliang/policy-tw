@@ -1,5 +1,5 @@
 /**
- * jev_decisions.state 保留政策（migration 20261119130000_jev_decisions_prune_state.sql）。
+ * jev_decisions.state 保留政策（migration 20261119150000_jev_decisions_prune_state.sql）。
  *
  *   A. 文字層：migration 不含 DELETE／TRUNCATE、UPDATE 只動 state 與 state_pruned_at；
  *      保留天數下限（設定表 CHECK 與預設）不短於 trace_events 最後一版的回看窗（14 天）。
@@ -13,7 +13,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 
 const MIGRATIONS = new URL("../../migrations/", import.meta.url);
-const MIG = "20261119130000_jev_decisions_prune_state.sql";
+const MIG = "20261119150000_jev_decisions_prune_state.sql";
 const norm = (s: string) => s.replace(/\r\n/g, "\n");
 const read = async (name: string) => norm(await Deno.readTextFile(new URL(name, MIGRATIONS)));
 
