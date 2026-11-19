@@ -20,10 +20,10 @@ const text = async (rel: string, base = REPO) => (await Deno.readTextFile(new UR
 
 // ---- Worker 快取時間與上游 ----
 
-Deno.test("Worker 設定：沒設＝改之前寫死的值（600／3600／600 秒、policy-tw.web.app）", () => {
+Deno.test("Worker 設定：沒設＝預設值（1800／21600／600 秒、policy-tw.web.app）", () => {
   const c = readWorkerConfig({});
-  assertEquals(c.cacheTtlS, 600);
-  assertEquals(c.staleTtlS, 3600);
+  assertEquals(c.cacheTtlS, 1800);
+  assertEquals(c.staleTtlS, 21600);
   assertEquals(c.baseTtlMs, 10 * 60 * 1000);
   assertEquals(c.origin, "https://policy-tw.web.app");
   assertEquals(c.originHost, "policy-tw.web.app");
@@ -40,15 +40,15 @@ Deno.test("Worker 設定：環境變數有設就用（字串，wrangler [vars] �
   assertEquals(c.originHost, "other.example");
   // 各自獨立：一個壞了，其他照常
   const partial = readWorkerConfig({ SSR_CACHE_TTL_S: "abc", SSR_STALE_TTL_S: "120" });
-  assertEquals([partial.cacheTtlS, partial.staleTtlS], [600, 120]);
+  assertEquals([partial.cacheTtlS, partial.staleTtlS], [1800, 120]);
 });
 
 Deno.test("Worker 設定：寫壞（非整數、小數、負數、超出範圍、網址不是 https 根）一律退回預設", () => {
   for (const bad of ["", " ", "abc", "1.5", "-5", "0", "9", "86401", "1e3", "60s", "٦٠"]) {
-    assertEquals(readWorkerConfig({ SSR_CACHE_TTL_S: bad }).cacheTtlS, 600, `SSR_CACHE_TTL_S=${JSON.stringify(bad)}`);
+    assertEquals(readWorkerConfig({ SSR_CACHE_TTL_S: bad }).cacheTtlS, 1800, `SSR_CACHE_TTL_S=${JSON.stringify(bad)}`);
   }
-  assertEquals(readWorkerConfig({ SSR_STALE_TTL_S: "59" }).staleTtlS, 3600);
-  assertEquals(readWorkerConfig({ SSR_STALE_TTL_S: "604801" }).staleTtlS, 3600);
+  assertEquals(readWorkerConfig({ SSR_STALE_TTL_S: "59" }).staleTtlS, 21600);
+  assertEquals(readWorkerConfig({ SSR_STALE_TTL_S: "604801" }).staleTtlS, 21600);
   assertEquals(readWorkerConfig({ SSR_BASE_TTL_S: "9" }).baseTtlMs, 600_000);
   for (const bad of ["http://policy-tw.web.app", "policy-tw.web.app", "https://x.test/path", "https://x.test?q=1", "javascript:alert(1)", ""]) {
     assertEquals(readWorkerConfig({ ORIGIN: bad }).origin, DEFAULTS.origin, bad);
