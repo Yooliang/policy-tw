@@ -49,6 +49,7 @@
 --     system-one-legacy-30min                11,41 * * * *              20,50 * * * *
 --     policy-jp-vote-baseline-hourly         17 * * * *                 30 * * * *
 --     news-fetch-hourly                      5 * * * *                  10 * * * *
+--   注意：regions-elected-policy-count-10min 與 apply-verified-10min 同在每小時第 9 分；與 apply-verified 同分鐘，計數最多晚 10 分鐘反映剛套用的政見，只影響畫面計數。
 --   （變更前的 */10 與 5-59/10 等寫法與列出的逗號清單等價。）
 --   寫法：只在 job 存在時才 alter（PGlite／本機沒有 pg_cron 或沒有該 job 就略過）；已經是新排程的不重複 alter（冪等）。
 --   回滾＝再寫一支 migration 把上表「變更後」改回「變更前」。
