@@ -4,21 +4,23 @@ import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import RegionCategoryPicker from '../components/RegionCategoryPicker.vue'
-import { Search, Waypoints } from 'lucide-vue-next'
+import { Search, Waypoints, X } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { useGlobalState } from '../composables/useGlobalState'
-import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace } from '../lib/lineage'
+import { useDeskFilterPanel } from '../composables/useDeskFilterPanel'
+import { ALL_REGIONS } from '../lib/policy-region'
+import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace, lineageTotal } from '../lib/lineage'
 
 /**
  * /analysis：政策脈絡一覽（#349，2026-10-06；原本叫「市政接力」，網址不變）。
  * 上半是政策脈絡（一件事在某一層級、某一地方的來龍去脈，點進 /lineage/:id）；
  * 「進度過半的政見」是政見不是脈絡，已移到全部政見（/tracking?focus=progress，#201）；/analysis/:policyId 深度分析頁照舊。
  */
-const { categories, lineages, ensureLineages } = useSupabase()
-const { globalRegion } = useGlobalState()
+const { categories, lineages, lineagesComplete, ensureLineages } = useSupabase()
+const { globalRegion, setGlobalRegion, globalCategory: selectedCategory } = useGlobalState()
+const { openPanel } = useDeskFilterPanel()
 const searchTerm = ref('')
-const selectedCategory = ref('All')
 
 // 縣市（全站共用，本頁只影響選擇器顯示）與分類 ↔ 網址 ?region=&category=
 useRegionQuerySync({ routeName: 'analysis', extra: { category: queryField(selectedCategory, 'All') } })
@@ -31,6 +33,10 @@ const lineageList = computed(() =>
     .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]
       || (a.region ?? '').localeCompare(b.region ?? '', 'zh-Hant-TW')
       || a.title.localeCompare(b.title, 'zh-Hant-TW')))
+
+/** 方塊格上的數字＝脈絡條數（跟下面的清單同一套規則，lib/lineage.ts lineageTotal）；脈絡還沒整份載入就不印 */
+const lineageCountFor = (region: string, category: string) => (!lineagesComplete.value ? null : lineageTotal(lineages.value, region, category))
+const pickerCounter = { region: lineageCountFor, category: lineageCountFor, unit: '脈絡', suffix: '條' }
 
 usePageHead({
   title: LINEAGE_NAME,
@@ -63,7 +69,19 @@ onMounted(() => { ensureLineages() })
         </div>
       </div>
 
-      <RegionCategoryPicker />
+      <!-- 桌面版（md 以上）：目前的縣市／分類 chip＋條數，點 chip 展開方塊格、✕ 清掉；面板由左欄「地區」「分類」開（手機維持 Hero 內的縣市選擇器與下方的分類選單） -->
+      <div v-if="globalRegion !== ALL_REGIONS || selectedCategory !== 'All'" class="hidden md:flex items-center gap-3 mb-6" data-testid="analysis-scope">
+        <span v-if="globalRegion !== ALL_REGIONS" class="inline-flex items-center gap-1.5 rounded-full bg-navy-900 text-white pl-4 pr-2 py-2 text-sm font-bold">
+          <button type="button" class="font-bold" @click="openPanel('region')">{{ globalRegion }}</button>
+          <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除地區" @click="setGlobalRegion(ALL_REGIONS)"><X :size="14" /></button>
+        </span>
+        <span v-if="selectedCategory !== 'All'" class="inline-flex items-center gap-1.5 rounded-full bg-navy-900 text-white pl-4 pr-2 py-2 text-sm font-bold">
+          <button type="button" class="font-bold" @click="openPanel('category')">{{ selectedCategory }}</button>
+          <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除分類" @click="selectedCategory = 'All'"><X :size="14" /></button>
+        </span>
+        <span v-if="lineagesComplete" class="text-sm font-bold text-slate-400 tabular-nums">{{ lineageList.length.toLocaleString('en-US') }} 條</span>
+      </div>
+      <RegionCategoryPicker v-model:category="selectedCategory" category-enabled :counter="pickerCounter" />
 
       <!-- 分類篩選：手機版用下拉選單（同 PolicyTracking，18 個分類攤開會佔掉整個首屏） -->
       <div class="sm:hidden mb-6">
@@ -78,7 +96,8 @@ onMounted(() => { ensureLineages() })
         </select>
       </div>
 
-      <div class="hidden sm:flex lg:hidden gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+      <!-- md 以上的分類在主區方塊格（左欄「分類」開），這塊只留給 sm～md 的窄螢幕 -->
+      <div class="hidden sm:flex md:hidden gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
         <div class="shrink-0 flex items-center gap-3">
           <button
             @click="selectedCategory = 'All'"

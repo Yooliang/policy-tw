@@ -26,3 +26,25 @@ export function regionTotal(rows: readonly RegionCountRow[], region: string, cat
 export function categoryTotal(rows: readonly RegionCountRow[], region: string, category: string): number {
   return regionTotal(rows, region, category)
 }
+
+/** 區域統計（region_stats）裡跟人物數有關的欄位 */
+export interface RegionPeopleRow {
+  region: string
+  sub_region: string | null
+  village: string | null
+  total_politicians: number
+}
+
+/**
+ * 數據分佈頁地區格上的人物數：縣市層級有統計就用它，沒有就加總該縣市的鄉鎮區（同頁面上方總覽的算法）；
+ * 'All'＝全台（22 縣市加總）。還沒載入統計（rows 為空）回 null＝格子不印數字。
+ */
+export function regionPeopleTotal(rows: readonly RegionPeopleRow[], region: string, counties: readonly string[]): number | null {
+  if (rows.length === 0) return null
+  const ofCounty = (county: string): number => {
+    const city = rows.find((r) => r.region === county && r.sub_region === null)
+    if (city && city.total_politicians > 0) return city.total_politicians
+    return rows.filter((r) => r.region === county && r.sub_region !== null && r.village === null).reduce((sum, r) => sum + (r.total_politicians || 0), 0)
+  }
+  return region === ALL ? counties.reduce((sum, c) => sum + ofCounty(c), 0) : ofCounty(region)
+}

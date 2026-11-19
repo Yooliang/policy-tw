@@ -23,9 +23,9 @@ defineProps<{ drawer?: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const route = useRoute()
-const { elections, getActiveElection, categories } = useSupabase()
+const { elections, getActiveElection } = useSupabase()
 const { electionNav, personNav, closeDeskDrawer } = useDeskNav()
-const { globalRegion } = useGlobalState()
+const { globalRegion, globalCategory } = useGlobalState()
 const { panel: filterPanel, togglePanel } = useDeskFilterPanel()
 const mounted = ref(false)
 onMounted(() => { mounted.value = true })
@@ -74,23 +74,18 @@ const searchGroup: DeskGroup = { key: 'search', title: '搜尋', blocks: [[link(
 const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
-// 政見區的「篩選」：地區（三頁共用全站縣市）與分類（只在全部政見頁）是兩列入口，點了切換主區的方塊格（RegionCategoryPicker），
-// 右側印目前的選擇；全部政見頁的 18 個分類不再攤在左欄（2026-11-19，改到主區方塊格）。
+// 政見區的「篩選」：地區（三頁共用全站縣市）與分類（三頁都有，同一份全站狀態）是兩列入口，點了切換主區的方塊格（RegionCategoryPicker），
+// 右側印目前的選擇；兩頁的分類都不再攤在左欄（2026-11-19，改到主區方塊格）。
 const FILTER_ROUTES = new Set(['tracking', 'analysis', 'regional-data'])
 const filterGroup = computed<DeskGroup[]>(() => (FILTER_ROUTES.has(String(route.name)) ? [{ key: 'filter', title: '篩選', blocks: [] }] : []))
-const hasCategoryFilter = computed(() => route.name === 'tracking')
+const hasCategoryFilter = computed(() => true)
 const regionLabel = computed(() => (globalRegion.value === 'All' ? '全台' : globalRegion.value))
-// 預渲染不帶 query，掛載後才讀網址上的分類，兩邊第一次渲染的 HTML 才一致
-const categoryLabel = computed(() => (mounted.value && typeof route.query.category === 'string' && route.query.category !== '' ? route.query.category : '全部'))
+// 分類是全站共用狀態（跨頁保留），預渲染與第一次 hydrate 都是「全部」，掛載後才由網址帶入
+const categoryLabel = computed(() => (globalCategory.value === 'All' ? '全部' : globalCategory.value))
 function onFilterRow(which: 'region' | 'category') {
   togglePanel(which)
   closeDeskDrawer() // 窄桌面（< lg）延伸欄是抽屜：點了就收起抽屜，主區的方塊格才看得到
 }
-// 政策脈絡頁的分類仍留在左欄：該頁電腦版的分類只放這裡（2026-11-05 維護者）
-const policyCategories = computed<DeskGroup[]>(() => {
-  if (categories.value.length === 0 || route.path !== '/analysis') return []
-  return [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `/analysis?category=${encodeURIComponent(c)}`))] }]
-})
 
 /** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
 const OVERVIEW_ROUTES = new Set(['elections', 'politicians', 'politicians-group', 'parties', 'party'])
@@ -109,7 +104,7 @@ const title = computed(() => {
 })
 const groups = computed<DeskGroup[]>(() => {
   switch (section.value) {
-    case 'policy': return [...POLICY, ...filterGroup.value, ...policyCategories.value]
+    case 'policy': return [...POLICY, ...filterGroup.value]
     case 'join': return JOIN
     case 'home':
     case 'about': return ABOUT
@@ -128,8 +123,8 @@ function isOn(item: DeskItem): boolean {
   // 一覽組：人物／政黨的子頁（/politicians/xxx、/parties/xxx）也高亮對應那項
   if (['/politicians', '/parties'].includes(path)) { if (!overviewItemOn(path, route.path)) return false } else if (route.path !== path) return false
   const want = new URLSearchParams(qs ?? '')
-  if (path === '/tracking') return want.has('view') ? route.query.view === want.get('view') : want.has('category') ? route.query.category === want.get('category') : !route.query.view && !route.query.category
-  if (path === '/analysis') return want.has('category') ? route.query.category === want.get('category') : !route.query.category
+  if (path === '/tracking') return want.has('view') ? route.query.view === want.get('view') : !route.query.view // 分類是全站篩選（左欄「分類」入口），不影響「全部政見」是否為目前頁
+  if (path === '/analysis') return true // 分類在主區方塊格，選了分類「政策脈絡」仍是目前頁
   if (want.has('view')) return route.query.view === want.get('view')
   if (path.startsWith('/election/') && !path.endsWith('/matrix')) return !route.query.view
   return true

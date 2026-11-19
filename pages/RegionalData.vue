@@ -5,10 +5,12 @@ import { useGlobalState } from '../composables/useGlobalState'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
 import RegionCategoryPicker from '../components/RegionCategoryPicker.vue'
-import { ArrowRight, MapPin, Users, Database } from 'lucide-vue-next'
+import { ArrowRight, MapPin, Users, Database, X } from 'lucide-vue-next'
 import { useRouter, useRoute } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
-import { useRegionQuerySync } from '../composables/useRegionQuerySync'
+import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
+import { useDeskFilterPanel } from '../composables/useDeskFilterPanel'
+import { regionPeopleTotal } from '../lib/policy-region-counts'
 import RegionalStatsPanel from '../components/RegionalStatsPanel.vue'
 
 const router = useRouter()
@@ -26,7 +28,8 @@ watch(() => route.path, syncRailSoon)
 const { regionStats, ensureRegionStats } = useSupabase()
 // 這一頁才需要的重資料，改成按需載入（見 useSupabase 的 ensure*）
 ensureRegionStats()
-const { globalRegion, setGlobalRegion } = useGlobalState()
+const { globalRegion, setGlobalRegion, globalCategory } = useGlobalState()
+const { openPanel } = useDeskFilterPanel()
 
 // 所有縣市列表
 const allCounties = [
@@ -66,7 +69,8 @@ const twArea: Record<string, string[]> = {
 const selectedRegion = ref(globalRegion.value === 'All' ? '全國' : globalRegion.value)
 
 // 縣市（全站共用）↔ 網址 ?region=；selectedRegion 與 globalRegion 的雙向 watch 在下面
-useRegionQuerySync({ routeName: 'regional-data' })
+// 分類是全站共用狀態：本頁內容只依地區，但左欄與方塊格的分類值跟其他兩頁同一份，網址也一併帶著
+useRegionQuerySync({ routeName: 'regional-data', extra: { category: queryField(globalCategory, 'All') } })
 
 // 是否為全國模式
 const isNational = computed(() => selectedRegion.value === '全國')
@@ -191,6 +195,13 @@ const getSubRegionStats = (subRegion: string) => {
   }
 }
 
+/** 方塊格上的數字：該頁已載入的區域統計裡的政治人物數（分類格不印數字：統計不分類） */
+const pickerCounter = {
+  region: (region: string) => regionPeopleTotal(regionStats.value, region, allCounties),
+  category: () => null,
+  unit: '人物', suffix: '位',
+}
+
 usePageHead({
   title: '數據分佈',
   description: '統計全台 22 縣市與各鄉鎮市區的政治人物人數與政見規模，了解各縣市的政治生態與治理脈絡。',
@@ -210,7 +221,18 @@ usePageHead({
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 pt-20">
-      <RegionCategoryPicker />
+      <!-- 桌面版（md 以上）：目前的縣市／分類 chip，點 chip 展開方塊格、✕ 清掉；面板由左欄「地區」「分類」開（手機維持 Hero 內的縣市選擇器） -->
+      <div v-if="globalRegion !== 'All' || globalCategory !== 'All'" class="hidden md:flex items-center gap-3 mb-6" data-testid="regional-scope">
+        <span v-if="globalRegion !== 'All'" class="inline-flex items-center gap-1.5 rounded-full bg-navy-900 text-white pl-4 pr-2 py-2 text-sm font-bold">
+          <button type="button" class="font-bold" @click="openPanel('region')">{{ globalRegion }}</button>
+          <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除地區" @click="setGlobalRegion('All')"><X :size="14" /></button>
+        </span>
+        <span v-if="globalCategory !== 'All'" class="inline-flex items-center gap-1.5 rounded-full bg-navy-900 text-white pl-4 pr-2 py-2 text-sm font-bold">
+          <button type="button" class="font-bold" @click="openPanel('category')">{{ globalCategory }}</button>
+          <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除分類" @click="globalCategory = 'All'"><X :size="14" /></button>
+        </span>
+      </div>
+      <RegionCategoryPicker v-model:category="globalCategory" category-enabled :counter="pickerCounter" />
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <!-- County Summary -->
         <div class="lg:col-span-1 space-y-6">
