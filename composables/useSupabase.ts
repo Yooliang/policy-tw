@@ -33,6 +33,7 @@ import type { Matrix as PolicyMatrix } from '../lib/md/dataset'
 import type { PolicySummary } from '../lib/policy-summary'
 import { slicesToState, isPolicyCountsComplete, mapFromRawRows, fallbackMapFromPolicies, type PolicyCountsByElection, type PolicyCountsSlice, type RawPolicyCountRow } from '../lib/policy-counts'
 import { mapRegionalStat, type RawRegionalStat, type RegionalStat } from '../lib/regional-stats'
+import { stageRowsFromCategory, type RegionalDataSet } from '../lib/regional-overview'
 
 // Cache key prefix (used for in-memory tracking only, no IndexedDB)
 const CACHE_KEY_PREFIX_ELECTION = 'politicians_election_'
@@ -124,6 +125,8 @@ const availableElectionTypes = ref<string[]>([])
 const townshipDirectory = ref<DirectoryPerson[]>([])
 /** 政見矩陣（/election/:屆/matrix，預產快取表 data_md_cache 的 _matrix 那一列）：預渲染時由建置端放進頁面快照，這樣 HTML 裡就有數字與連結（內容頁要可收錄）。沒帶＝null，頁面掛載後自己讀 */
 const policyMatrix = ref<PolicyMatrix | null>(null)
+/** 數據分佈頁的全台與各縣市聚合（五支視圖合計約 700 列）。預渲染時由建置端放進頁面快照；沒帶＝null，頁面掛載後 ensureRegionalData() 自己撈一次，之後切縣市都用這份 */
+const regionalData = shallowRef<RegionalDataSet | null>(null)
 let directoryKey = ''
 
 /**
@@ -775,6 +778,40 @@ export function loadPoliciesByRegion(region: string): Promise<void> {
   return run
 }
 
+/** 數據分佈頁的聚合視圖（migration 20261119140000）：每支都是幾十到幾百列，一次撈完。任何一支失敗整份當失敗（缺一塊的圖比沒有圖更誤導） */
+export async function fetchRegionalDataSet(): Promise<RegionalDataSet> {
+  const read = async <T>(view: string, columns: string, order: string[]): Promise<T[]> => {
+    const { rows, truncated } = await fetchAllPages<T>(view, (from, to) =>
+      withTimeoutAndRetry(`${view} ${from}-${to}`, (signal) => {
+        let q = supabase.from(view).select(columns)
+        for (const col of order) q = q.order(col)
+        return q.range(from, to).abortSignal(signal).throwOnError()
+      }) as unknown as PromiseLike<PageResponse<T>>)
+    if (truncated) throw new Error(`${view} 撈到分頁上限仍未撈完`)
+    return [...rows]
+  }
+  const [category, element, deadline, lineage] = await Promise.all([
+    read<RegionalDataSet['category'][number]>('region_category_stage_counts', 'region,category,pledge_n,not_started_n,proposed_n,in_progress_n,achieved_n,stalled_n', ['region', 'category']),
+    read<RegionalDataSet['element'][number]>('region_element_stats', 'region,election_type,target_stated,target_total,deadline_stated,deadline_total,funding_stated,funding_total', ['region', 'election_type']),
+    read<RegionalDataSet['deadline'][number]>('region_deadline_stats', 'region,policy_n,overdue_n,within30_n,later_n,unset_n,updated_30d_n', ['region']),
+    read<RegionalDataSet['lineage'][number]>('lineage_term_spans', 'lineage_id,title,category,level,region,election_ids,term_years,handover_n', ['lineage_id']),
+  ])
+  // 縣市階段漏斗由縣市 × 分類加總，不另撈 region_stage_counts
+  return { stage: stageRowsFromCategory(category), category, element, deadline, lineage }
+}
+
+let regionalDataPromise: Promise<void> | null = null
+/** 數據分佈頁要的聚合：快照帶了就直接用；沒帶（站內換頁進來）才撈一次。失敗記進全域錯誤、可重試，不吞掉 */
+export function ensureRegionalData(): Promise<void> {
+  if (regionalData.value) return Promise.resolve()
+  if (!regionalDataPromise) {
+    regionalDataPromise = fetchRegionalDataSet()
+      .then((data) => { regionalData.value = data })
+      .catch((err) => { regionalDataPromise = null; recordFailure('數據分佈', err, ensureRegionalData) })
+  }
+  return regionalDataPromise
+}
+
 /** 縣市 × 分類的政見筆數（policy_region_category_counts，約 400 列）。listed＝這頁會列出的，n＝全部未移除 */
 export interface PolicyRegionCount { region: string; category: string | null; n: number; listed: number }
 const policyRegionCounts = ref<PolicyRegionCount[]>([])
@@ -1112,6 +1149,8 @@ export interface DataSnapshot {
   townshipDirectory?: DirectoryPerson[]
   /** 政見矩陣頁的資料（只有那一頁的切片有） */
   policyMatrix?: PolicyMatrix | null
+  /** 數據分佈頁的全台與各縣市聚合（只有 /regional-data 的切片有；沒給＝這一頁不需要，瀏覽器端要用時自己撈） */
+  regionalData?: RegionalDataSet
   /** 每人每屆承諾數／政見數對照（選舉頁的切片帶那一屆；建置端的 full 帶全部屆別）。沒給＝這一頁不需要，瀏覽器端要用時自己撈 */
   policyCounts?: PolicyCountsSlice[]
   /** 政策脈絡（#349）：脈絡一覽帶整份（lineagesComplete=true）、脈絡頁帶那一條。沒給＝這一頁不需要 */
@@ -1175,6 +1214,9 @@ export function applyDataSnapshot(snapshot: DataSnapshot): void {
   if (snapshot.townshipDirectory) townshipDirectory.value = snapshot.townshipDirectory
   // 快照沒帶就清空（預渲染一頁一頁套快照，前一頁的矩陣不該留到下一頁）
   policyMatrix.value = snapshot.policyMatrix ?? null
+  // 數據分佈聚合：同樣沒帶就清空（預渲染一頁一頁套快照）
+  regionalData.value = snapshot.regionalData ?? null
+  if (!snapshot.regionalData) regionalDataPromise = null
   // 承諾數對照：同樣沒帶就清空（預渲染一頁一頁套快照）
   policyCountsByElection.value = slicesToState(snapshot.policyCounts)
   // 政策脈絡：快照沒帶就清空（預渲染一頁一頁套快照，前一頁的脈絡不該留到下一頁）
@@ -1465,6 +1507,7 @@ export function useSupabase() {
     availableElectionTypes,
     townshipDirectory,
     policyMatrix,
+    regionalData,
     loadTownshipDirectory,
     stats,
     // 人物一覽、政黨頁（#346）：只有預渲染的快照會帶
@@ -1489,6 +1532,7 @@ export function useSupabase() {
     getTotalPoliticianCount,
     // 按需載入的三塊重資料：需要的頁面自己在 onMounted 呼叫
     ensureRegionStats,
+    ensureRegionalData,
     loadPoliciesByRegion,
     isPolicyRegionLoaded,
     policyRegionsLoaded,
