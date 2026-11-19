@@ -24,6 +24,7 @@
    - 2026-11-18（#982）：全部政見已 14,000 筆、12 MB，所以首頁只帶最新 3 筆政見與 `stats.policySummary`（建置時算好的狀態計數與競選承諾／任內筆數，`lib/policy-summary.ts`），`/tracking`、`/analysis` 不帶政見（進頁後 `ensurePolicies()` 載整份，載完前顯示骨架）。三者的 `policiesComplete` 都是 false。選舉頁（`/election/…`）也不再帶政見列，見下一條。首頁數字是建置當下的快照，下次部署前不會更新；逛過 /tracking 再回首頁會改用載入後的即時清單，數字可能微跳。
 4. `ssgOptions.concurrency` 必須是 1：資料層是模組級全域狀態，並行渲染會讓各頁切片互相覆蓋。
 5. `onBeforePageRender` 第一次被叫到時，把 vite 產出的模板（空 `#app`）寫成 `dist/404.html` 與 `dist/app.html`，並加 `noindex`。
+6. 建置端載入資料的重試在 `lib/ssg/retry.ts`（最多 4 次、退避 5／15／30 秒）。`ensurePolicies()` 等五支按需載入失敗時只記進全域 `error`、不丟錯，所以 `server-data.ts` 以「`error` 為空且 `policiesComplete`」判斷成功，失敗就清標記重撈。2026-11-19 兩次主線 CI 在整份政見清單撈到 `statement timeout`（57014）紅燈，就是這層重試沒起作用（沒丟錯＝當成功，一路走到「基礎資料為空」才中止）；守門 `lib/ssg/retry.test.ts`。
 
 ## 哪些頁面會預渲染
 

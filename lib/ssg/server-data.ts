@@ -18,6 +18,7 @@ import {
 import type { Lineage, Politician, RawLineage, RawPolitician } from '../../types'
 import { mapLineage } from '../lineage'
 import { isMissingRelation } from '../retry'
+import { withRetry } from './retry'
 import { analysisListedPolicyIds } from './page-data'
 import { isRunningCandidate } from '../candidate-status'
 import { isCounty, SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-regions'
@@ -43,37 +44,6 @@ let datasetPromise: Promise<DataSnapshot> | null = null
 export function ensureFullDataset(): Promise<DataSnapshot> {
   if (!datasetPromise) datasetPromise = loadFullDataset()
   return datasetPromise
-}
-
-const FETCH_ATTEMPTS = 3
-const RETRY_DELAY_MS = [0, 3000, 9000]
-
-/**
- * 建置期間的暫時性失敗要重試，不要整條 CI 紅掉。
- *
- * 2026-09-13 實際發生：`Failed to fetch data from Supabase: { message: 'Gateway Timeout' }`
- * → 建置中止 → 那次合併的改動整批沒有部署，而且畫面上看起來只是「CI 紅了」。
- * 中止本身是對的（產出空殼頁更糟），錯的是只試一次。
- *
- * 刻意只重試「拿不到資料」，不重試「資料是空的」：後者代表 Supabase 回了但內容不對，
- * 那是真的該停下來的狀況，重試只會拖長時間然後得到同一個答案。
- */
-async function withRetry<T>(label: string, run: () => Promise<T>, ok: (v: T) => boolean): Promise<T> {
-  let last: unknown = null
-  for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt++) {
-    if (RETRY_DELAY_MS[attempt] > 0) {
-      console.warn(`[ssg] ${label} 第 ${attempt} 次沒成功，${RETRY_DELAY_MS[attempt] / 1000} 秒後重試`)
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS[attempt]))
-    }
-    try {
-      const v = await run()
-      if (ok(v)) return v
-      last = new Error(`${label} 回傳的內容不完整`)
-    } catch (err) {
-      last = err
-    }
-  }
-  throw last instanceof Error ? last : new Error(`[ssg] ${label} 連續 ${FETCH_ATTEMPTS} 次失敗`)
 }
 
 /**
@@ -103,20 +73,25 @@ async function loadPolicyCounts(policies: Policy[]): Promise<PolicyCountsSlice[]
 }
 
 async function loadFullDataset(): Promise<DataSnapshot> {
-  const { fetchAll, loaded } = useSupabase()
+  const { fetchAll, loaded, error: loadError, policiesComplete } = useSupabase()
   await withRetry(
     '基礎資料（政見／選舉／分類）',
     async () => { await fetchAll(); return loaded.value },
     (ok) => ok,
   ).catch(() => {
-    throw new Error('[ssg] 基礎資料（政見／選舉／分類）連續三次載入失敗，中止建置以免產出空殼頁')
+    throw new Error('[ssg] 基礎資料（政見／選舉／分類）連續多次載入失敗，中止建置以免產出空殼頁')
   })
   // 首屏已經把政見清單／regions／選舉區對應／討論／查證來源改成按需載入，但預渲染要靠完整
   // 資料切片，所以建置端明確把五塊都補上。漏掉的話對應的頁面會預渲染成空的
   // （政見那塊漏掉更嚴重：下面的「基礎資料為空」會直接中止建置）。
+  // 這五支載入失敗時只記進全域 error、不丟錯（瀏覽器端要顯示重試），所以不能拿「沒丟錯」當成功：
+  // 2026-11-19 政見清單撈到 statement timeout，這裡照樣往下走，到後面才以「基礎資料為空」中止，重試一次都沒跑。
+  // 每次嘗試先清掉上一次的失敗標記；失敗的載入函式會把自己的 promise 清掉，下一次嘗試會真的重撈。
   await withRetry('按需載入的五塊（政見／regions／選舉區／討論／查證來源）', async () => {
+    loadError.value = null
     await Promise.all([ensurePolicies(), ensureRegionStats(), ensureDistricts(), ensureDiscussions(), ensureVerificationSources()])
-    return true
+    if (loadError.value) console.warn(`[ssg] 按需載入有失敗：${loadError.value}`)
+    return loadError.value === null && policiesComplete.value
   }, (ok) => ok)
 
   const base = getDataSnapshot()
