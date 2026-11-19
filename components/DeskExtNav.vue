@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { X } from 'lucide-vue-next'
+import { ChevronRight, X } from 'lucide-vue-next'
 import { useSupabase } from '../composables/useSupabase'
 import { useDeskNav, type DeskGroup, type DeskItem } from '../composables/useDeskNav'
 import { useDeskSection } from '../composables/useDeskSection'
+import { useGlobalState } from '../composables/useGlobalState'
+import { useDeskFilterPanel } from '../composables/useDeskFilterPanel'
 import { footerElections, taipeiDay } from '../lib/election-list'
 import { overviewItemOn } from '../lib/desk-sections'
 import { electionPath } from '../lib/election-regions'
@@ -22,7 +24,9 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const route = useRoute()
 const { elections, getActiveElection, categories } = useSupabase()
-const { electionNav, personNav } = useDeskNav()
+const { electionNav, personNav, closeDeskDrawer } = useDeskNav()
+const { globalRegion } = useGlobalState()
+const { panel: filterPanel, togglePanel } = useDeskFilterPanel()
 const mounted = ref(false)
 onMounted(() => { mounted.value = true })
 
@@ -70,11 +74,21 @@ const searchGroup: DeskGroup = { key: 'search', title: '搜尋', blocks: [[link(
 const moreElection: DeskGroup = { key: 'more', title: '一覽', blocks: [[link('elections', '選舉一覽', '/elections'), link('politicians', '人物一覽', '/politicians'), link('parties', '政黨一覽', '/parties')]] }
 /** 人物一覽、政黨一覽只在建置時產生內容：用一般連結整頁載入預渲染那一份（lib/full-load.ts） */
 const FULL_LOAD = new Set(['/politicians', '/parties'])
-// 分類連結留在目前的清單：在政策脈絡頁就篩政策脈絡（該頁電腦版的分類只放這裡，2026-11-05 維護者），其他頁到全部政見
+// 政見區的「篩選」：地區（三頁共用全站縣市）與分類（只在全部政見頁）是兩列入口，點了切換主區的方塊格（RegionCategoryPicker），
+// 右側印目前的選擇；全部政見頁的 18 個分類不再攤在左欄（2026-11-19，改到主區方塊格）。
+const FILTER_ROUTES = new Set(['tracking', 'analysis', 'regional-data'])
+const filterGroup = computed<DeskGroup[]>(() => (FILTER_ROUTES.has(String(route.name)) ? [{ key: 'filter', title: '篩選', blocks: [] }] : []))
+const hasCategoryFilter = computed(() => route.name === 'tracking')
+const regionLabel = computed(() => (globalRegion.value === 'All' ? '全台' : globalRegion.value))
+const categoryLabel = computed(() => (typeof route.query.category === 'string' && route.query.category !== '' ? route.query.category : '全部'))
+function onFilterRow(which: 'region' | 'category') {
+  togglePanel(which)
+  closeDeskDrawer() // 窄桌面（< lg）延伸欄是抽屜：點了就收起抽屜，主區的方塊格才看得到
+}
+// 政策脈絡頁的分類仍留在左欄：該頁電腦版的分類只放這裡（2026-11-05 維護者）
 const policyCategories = computed<DeskGroup[]>(() => {
-  if (categories.value.length === 0) return []
-  const base = route.path === '/analysis' ? '/analysis' : '/tracking'
-  return [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `${base}?category=${encodeURIComponent(c)}`))] }]
+  if (categories.value.length === 0 || route.path !== '/analysis') return []
+  return [{ key: 'cat', title: '政見分類', blocks: [categories.value.map(c => link(`c${c}`, c, `/analysis?category=${encodeURIComponent(c)}`))] }]
 })
 
 /** 選舉一覽／人物一覽／政黨一覽這幾頁（以及搜尋頁）的延伸欄只放同一組「一覽」（moreElection），不放選舉頁的內容類型與選舉清單 */
@@ -94,7 +108,7 @@ const title = computed(() => {
 })
 const groups = computed<DeskGroup[]>(() => {
   switch (section.value) {
-    case 'policy': return [...POLICY, ...policyCategories.value]
+    case 'policy': return [...POLICY, ...filterGroup.value, ...policyCategories.value]
     case 'join': return JOIN
     case 'home':
     case 'about': return ABOUT
@@ -129,6 +143,7 @@ watch([groups, () => route.fullPath], () => {
   void nextTick(() => { rootEl.value?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: 'nearest' }) })
 }, { flush: 'post' })
 
+const filterRowClass = (open: boolean) => ['flex w-full items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-left text-sm font-bold transition-colors', open ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100 hover:text-navy-900']
 const itemClass = (on: boolean, dim = false) => [dim ? 'opacity-50' : '', 'block w-full rounded-lg px-3 py-1.5 text-left text-sm font-bold transition-colors', on ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-100 hover:text-navy-900']
 </script>
 
@@ -141,7 +156,17 @@ const itemClass = (on: boolean, dim = false) => [dim ? 'opacity-50' : '', 'block
     <div class="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 py-4">
       <section v-for="g in groups" :key="g.key" :data-testid="`desk-group-${g.key}`">
         <h3 class="mb-1.5 px-3 text-xs font-bold text-slate-400">{{ g.title }}</h3>
-        <div>
+        <div v-if="g.key === 'filter'" class="space-y-0.5">
+          <button type="button" :class="filterRowClass(filterPanel === 'region')" :aria-expanded="filterPanel === 'region'" data-testid="desk-filter-region" @click="onFilterRow('region')">
+            <span>地區</span>
+            <span :class="['flex items-center gap-1 text-xs font-bold', globalRegion !== 'All' ? 'text-blue-600' : 'text-slate-400']">{{ regionLabel }}<ChevronRight :size="14" :class="filterPanel === 'region' ? 'rotate-90' : ''" /></span>
+          </button>
+          <button v-if="hasCategoryFilter" type="button" :class="filterRowClass(filterPanel === 'category')" :aria-expanded="filterPanel === 'category'" data-testid="desk-filter-category" @click="onFilterRow('category')">
+            <span>分類</span>
+            <span :class="['flex min-w-0 items-center gap-1 text-xs font-bold', categoryLabel !== '全部' ? 'text-blue-600' : 'text-slate-400']"><span class="truncate">{{ categoryLabel }}</span><ChevronRight :size="14" class="shrink-0" :class="filterPanel === 'category' ? 'rotate-90' : ''" /></span>
+          </button>
+        </div>
+        <div v-else>
           <template v-for="(block, bi) in g.blocks" :key="bi">
             <hr v-if="bi > 0" class="my-1.5 border-slate-200" data-testid="desk-group-divider" />
             <ul class="space-y-0.5">

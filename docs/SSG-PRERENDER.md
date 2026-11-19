@@ -56,3 +56,5 @@
 ## Tailwind
 
 Play CDN 已移除，改為建置時 Tailwind（`tailwind.config.js` ＋ `postcss.config.js` ＋ `styles/main.css`）。動態組出來的 class（目前只有 `focus:ring-${ringColor}`）掃不到，要加進 `safelist`。
+
+- 2026-11-19：`/tracking` 進頁後不再載整份政見，改按縣市載入（`loadPoliciesByRegion`；預渲染內容不變，仍不帶政見、載完前顯示骨架）。網址有 `?region=` 就只載那個縣市，沒有就載全台「會列出的」政見（選後政見／施政，約全部的四分之一）。資料來自視圖 `policies_by_region`，方塊格上的筆數來自 `policy_region_category_counts`（migration `20261119120000`）。

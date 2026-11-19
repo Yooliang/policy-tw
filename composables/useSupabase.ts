@@ -13,6 +13,7 @@ import { mapLineage, mapLineageSummary } from '../lib/lineage'
 import { ElectionType } from '../types'
 import { isClientError, isMissingFunction, isMissingRelation, withTimeoutAndRetry } from '../lib/retry'
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
+import { fetchKeysetAll, KEYSET_PAGE_SIZE } from '../lib/keyset-segments'
 import { idbGet, idbPut } from '../lib/idb-cache'
 import { positionsToLoad } from '../lib/election-levels'
 import { electionPageLoadArgs } from '../lib/election-prefetch'
@@ -188,7 +189,7 @@ const stats = ref<DataStats>({ totalPoliticians: null, politiciansByElection: {}
 // 而且不會有任何錯誤——只是卡片靜靜地少幾張。
 // notRemoved：在伺服器端濾掉軟移除的列（removed_at 有值）；只有帶 removed_at 欄的視圖／表能用。
 // 以前整份撈回來才在瀏覽器濾，被移除的列白白傳一遍，翻頁數也跟著被它們撐大。
-export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string, orderBy: string, opts: { notRemoved?: boolean } = {}): Promise<T[]> {
+export async function fetchAllRows<T = Record<string, unknown>>(tableName: string, selectStr: string, orderBy: string, opts: { notRemoved?: boolean; eq?: Record<string, string | boolean>; parallel?: number } = {}): Promise<T[]> {
   let allData: T[] = []
   let from = 0
   let to = 999
@@ -196,30 +197,29 @@ export async function fetchAllRows<T = Record<string, unknown>>(tableName: strin
 
   // 依 id 排序、結果帶 id 時改用「接著上一頁最後一個 id 往後讀」（keyset）：OFFSET 越後面越慢，
   // politicians_with_elections 最後一頁 6.3 秒，超過匿名角色 statement_timeout 3 秒，預渲染建置會逾時（2026-11-15 實測；keyset 同一頁 0.34 秒）。
+  // opts.eq：再加等值條件（例如按縣市載入政見的 region、listed）；opts.parallel：id 切 N 段並行（lib/keyset-segments.ts），預設循序。
   const keyset = orderBy === 'id' && (selectStr === '*' || selectStr.split(',').map((s) => s.trim()).includes('id'))
   if (keyset) {
-    let lastId: unknown = null
-    while (!finished) {
-      const after = lastId
-      const { data } = await withTimeoutAndRetry(`${tableName} id>${after ?? '-'}`, (signal) => {
+    return fetchKeysetAll<T & { id: unknown }>(async ({ after, gte, lt }) => {
+      const { data } = await withTimeoutAndRetry(`${tableName} id>${after ?? gte ?? '-'}`, (signal) => {
         let q = opts.notRemoved ? supabase.from(tableName).select(selectStr).is('removed_at', null) : supabase.from(tableName).select(selectStr)
-        if (after !== null) q = q.gt('id', after as string)
-        return q.order('id').limit(1000).abortSignal(signal).throwOnError()
+        for (const [col, val] of Object.entries(opts.eq ?? {})) q = q.eq(col, val)
+        if (after !== null) q = q.gt('id', after)
+        else if (gte !== null) q = q.gte('id', gte)
+        if (lt !== null) q = q.lt('id', lt)
+        return q.order('id').limit(KEYSET_PAGE_SIZE).abortSignal(signal).throwOnError()
       })
-      const rows = (data ?? []) as T[]
-      allData.push(...rows)
-      if (rows.length < 1000) finished = true
-      else lastId = (rows[rows.length - 1] as Record<string, unknown>).id
-    }
-    return allData
+      return (data ?? []) as unknown as (T & { id: unknown })[]
+    }, opts.parallel)
   }
 
   while (!finished) {
     // supabase-js 不會 reject，網路錯誤與中止都包在 error 裡回來；要 throwOnError 重試才看得到
-    const { data } = await withTimeoutAndRetry(`${tableName} ${from}-${to}`, (signal) =>
-      (opts.notRemoved ? supabase.from(tableName).select(selectStr).is('removed_at', null) : supabase.from(tableName).select(selectStr))
-        .order(orderBy).range(from, to).abortSignal(signal).throwOnError(),
-    )
+    const { data } = await withTimeoutAndRetry(`${tableName} ${from}-${to}`, (signal) => {
+      let q = opts.notRemoved ? supabase.from(tableName).select(selectStr).is('removed_at', null) : supabase.from(tableName).select(selectStr)
+      for (const [col, val] of Object.entries(opts.eq ?? {})) q = q.eq(col, val)
+      return q.order(orderBy).range(from, to).abortSignal(signal).throwOnError()
+    })
 
     if (!data || data.length < 1000) finished = true
 
@@ -684,7 +684,8 @@ export function ensurePolicies(): Promise<void> {
       // 縣市篩選也會把每一筆政見判成不符合（lib/policy-region.ts 的 politician?.region）。
       // 兩份互不依賴，同時發；以前串行等於白付一次往返。
       const [rows] = await Promise.all([
-        fetchAllRows<RawPolicy>('policies_with_logs', '*', 'id', { notRemoved: true }),
+        // id 切 16 段並行（lib/keyset-segments.ts）：15 趟循序 → 約 1～2 趟的等待
+        fetchAllRows<RawPolicy>('policies_with_logs', '*', 'id', { notRemoved: true, parallel: 16 }),
         loadPoliticiansWithPolicies(),
       ])
       // 軟移除的政見不進全域 state：伺服器端已濾（notRemoved），這裡再濾一次是保險（見 migration 20260913000001）。
@@ -719,14 +720,83 @@ function politicianIdsWithPolicies(): Set<string> {
  */
 async function loadPoliticiansWithPolicies(): Promise<void> {
   try {
-    const rows = await fetchAllRows<RawPolitician>('politicians_with_policies', '*', 'id')
-    const seen = new Set(politicians.value.map(p => p.id))
-    const loaded = rows.map(mapPolitician).filter(p => !seen.has(p.id))
-    if (loaded.length > 0) politicians.value = [...politicians.value, ...loaded]
+    mergePoliticians(await fetchAllRows<RawPolitician>('politicians_with_policies', '*', 'id'))
   } catch (err) {
     recordFailure('有政見的人物', err, loadPoliticiansWithPolicies)
   }
 }
+
+/** 把一批人物併進全域清單，已有的不動 */
+function mergePoliticians(rows: RawPolitician[]): void {
+  const seen = new Set(politicians.value.map(p => p.id))
+  const loaded = rows.map(mapPolitician).filter(p => !seen.has(p.id))
+  if (loaded.length > 0) politicians.value = [...politicians.value, ...loaded]
+}
+
+// ── 全部政見頁按縣市載入 ──────────────────────────────────────────────────────────────
+// 以前進 /tracking 就載整份政見（14,700 筆、20.5 MB、約 11.6 秒），縣市與分類都在瀏覽器裡篩。
+// 現在 policies_by_region 視圖（migration 20261119120000）每列帶所屬縣市與 listed（這頁會不會列出：選後政見／施政），
+// 選了縣市只載那一個縣市的 listed 列併進全域清單；沒選縣市（全台）也只載 listed 列、id 切 16 段並行。
+/** 已載完的範圍：縣市名，或 'All'（全台 listed）。policiesComplete 為真時任何範圍都算載完 */
+const policyRegionsLoaded = ref<ReadonlySet<string>>(new Set())
+const policyRegionInflight = new Map<string, Promise<void>>()
+/** 這個範圍（縣市或 'All'）的政見載完了嗎：有整份清單、或那個範圍自己載完 */
+export function isPolicyRegionLoaded(region: string): boolean {
+  return policiesComplete.value || policyRegionsLoaded.value.has(region)
+}
+
+/**
+ * 只載一個縣市（'All'＝全台）的政見與其提出者，併進全域清單；已載過的範圍不重撈，同一範圍同時只飛一個請求。
+ * 視圖還沒建（前端比 migration 早上線的空窗）：退回載整份政見。失敗記進全域錯誤，可重試。
+ */
+export function loadPoliciesByRegion(region: string): Promise<void> {
+  if (isPolicyRegionLoaded(region)) return Promise.resolve()
+  const flying = policyRegionInflight.get(region)
+  if (flying) return flying
+  const all = region === 'All'
+  const run = (async () => {
+    try {
+      const [rows] = await Promise.all([
+        fetchAllRows<RawPolicy>('policies_by_region', '*', 'id', { eq: all ? { listed: true } : { region, listed: true }, parallel: all ? 16 : 1 }),
+        all ? loadPoliticiansWithPolicies() : fetchAllRows<RawPolitician>('politicians_with_policies', '*', 'id', { eq: { region } }).then(mergePoliticians),
+      ])
+      mergePolicies(rows.filter(r => !r.removed_at).map(mapPolicy))
+      policyRegionsLoaded.value = new Set([...policyRegionsLoaded.value, region])
+    } catch (err) {
+      if (!isMissingRelation(err)) throw err
+      console.warn('[政見清單] 按縣市載入的視圖不存在，退回整份政見', err)
+      await ensurePolicies()
+      if (!policiesComplete.value) throw new Error('政見清單載入失敗')
+    }
+  })().catch((err) => { recordFailure('政見清單', err, () => loadPoliciesByRegion(region)) })
+    .finally(() => { policyRegionInflight.delete(region) })
+  policyRegionInflight.set(region, run)
+  return run
+}
+
+/** 縣市 × 分類的政見筆數（policy_region_category_counts，約 400 列）。listed＝這頁會列出的，n＝全部未移除 */
+export interface PolicyRegionCount { region: string; category: string | null; n: number; listed: number }
+const policyRegionCounts = ref<PolicyRegionCount[]>([])
+const policyRegionCountsLoaded = ref(false)
+let policyRegionCountsPromise: Promise<void> | null = null
+/** 一次、小：方塊格上的數字。視圖不存在或讀失敗就維持沒有數字（方塊只顯示名稱），不擋頁面 */
+export function ensurePolicyRegionCounts(): Promise<void> {
+  if (policyRegionCountsLoaded.value) return Promise.resolve()
+  if (!policyRegionCountsPromise) {
+    policyRegionCountsPromise = (async () => {
+      const { data } = await withTimeoutAndRetry('policy_region_category_counts', (signal) =>
+        supabase.from('policy_region_category_counts').select('region,category,n,listed_n').abortSignal(signal).throwOnError())
+      policyRegionCounts.value = ((data ?? []) as { region: string; category: string | null; n: number; listed_n: number }[])
+        .map(r => ({ region: r.region, category: r.category, n: r.n, listed: r.listed_n }))
+      policyRegionCountsLoaded.value = true
+    })().catch((err) => {
+      policyRegionCountsPromise = null
+      console.info('[政見筆數] 縣市分類對照讀取失敗，方塊暫不顯示筆數', err)
+    })
+  }
+  return policyRegionCountsPromise
+}
+
 // 已載入的 region 組合追蹤
 const loadedRegions = ref<Set<string>>(new Set())
 /** 正在飛的候選人請求（鍵同 loadedRegions）：預先發起與元件掛載後的呼叫共用同一個 promise，不重複請求 */
@@ -1418,6 +1488,12 @@ export function useSupabase() {
     getTotalPoliticianCount,
     // 按需載入的三塊重資料：需要的頁面自己在 onMounted 呼叫
     ensureRegionStats,
+    loadPoliciesByRegion,
+    isPolicyRegionLoaded,
+    policyRegionsLoaded,
+    policyRegionCounts,
+    policyRegionCountsLoaded,
+    ensurePolicyRegionCounts,
     ensureOfficialRegionalStats,
     ensureDistricts,
     ensureDiscussions,
