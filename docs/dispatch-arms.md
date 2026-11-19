@@ -302,3 +302,38 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 - **換屆流程要跑 `SELECT * FROM work_key_recompute();`**：`policy_missing` 的鍵含 `campaign_election_id()`，2028 新增進 elections 之後舊列的鍵不會自己重算；這支重算三張表、只動鍵變了的列。觸發器在 `UPDATE OF task_id` 時直接重算。
 - **上線前可查（唯讀，migration 套用後跑；先 `SET default_transaction_read_only = on;`）**：新視圖會讓幾張卡結案、幾件 auto 列會變永久 blocked——`SELECT count(*) AS closed_cards FROM (SELECT DISTINCT work_key FROM task_checks) k CROSS JOIN LATERAL work_key_ladder_state(k.work_key) s WHERE s.closed;` 與 `SELECT count(*) FILTER (WHERE d.task_id LIKE 'auto:%') AS auto_rows_blocked_by_card FROM task_dispatches d WHERE EXISTS (SELECT 1 FROM task_ladder_closed lc WHERE lc.task_id = d.task_id);`（後者與改前的 `blocked` 欄位現況相比）。
 - **注意**：`policy_missing` 的屆別用 `campaign_election_id()`，換屆（2028 新增）時舊列的鍵不會回頭改。新增派工臂：task_id 長相若不是既有形狀，要在 `task_work_key` 補一段並在 `work-key.test.ts` 加樣本。守門 `_shared/work-key.test.ts`。
+
+## 資料庫減負：排程錯開、job_run_details 清理、work_mem（2026-11-19，`20261119160000_db_tuning.sql`）
+
+正式庫 2026-11-19 因負載連續重啟、升級 Medium 後，維護者同意的一組減負。
+
+**pg_cron 錯開**：原本同一分鐘最多同時啟動 10 支。全部週期性 job 一小時合計約 233 次啟動、只有 60 個分鐘（平均 3.9），所以每分鐘最多 3 支做不到，這版做到最多 4 支。不動的：`seed-auto-task-queue-10min`（`*/10`，`manual_front_pull` 靠它）、`cand-no-front-pull-hourly`（:03）、`roster-reconcile-10min`（第 7 分）、`console-fetch-hourly`（:17）、`bulletin-watch-*`、`cec-roster-mirror-5min`、`system-one-evidence-5min`、兩支整點快照。改過的 16 支（前後對照在 migration 檔頭）：
+
+| job | 變更前 | 變更後 |
+|---|---|---|
+| apply-verified-10min | `*/10`（0 起） | 9 起 |
+| cec-sync-live-10min | `*/10` | 4 起 |
+| cec-verify-10min | `*/10` | 7 起 |
+| policy-jp-seed-10min | `*/10` | 9 起 |
+| quota-snapshots-10min | `*/10` | 1 起 |
+| regions-elected-policy-count-10min | 1 起 | 9 起 |
+| roster-reconcile-units-10min | 3 起 | 2 起 |
+| system-one-followup-clarify-10min | 3 起 | 1 起 |
+| system-one-precheck-10min | 3 起 | 4 起 |
+| source-archive-10min | 7 起 | 3 起 |
+| policy-jp-system-one-precheck-10min | 7 起 | 6 起 |
+| system-one-backfill-15min | 0,15,30,45 | 6,21,36,51 |
+| agent-usage-15min | 11,26,41,56 | 1,16,31,46 |
+| system-one-legacy-30min | 11,41 | 20,50 |
+| policy-jp-vote-baseline-hourly | 17 | 30 |
+| news-fetch-hourly | 5 | 10 |
+
+（10 分鐘級「N 起」＝每小時第 N、N+10、…分。）新增週期性 job 前先看目前每分鐘的啟動數，別又疊回同一分鐘；守門 `_shared/db-tuning.test.ts` 把錯開後的分佈釘在每分鐘 ≤ 4。回滾＝新 migration 把上表改回。
+
+**`cron.job_run_details` 清理**：`cron_run_details_purge()`（設定單列表 `cron_run_details_settings`：保留 7 天、每批 5,000、最多 50 批），pg_cron `cron-run-details-purge` 每天 UTC 19:55。現在沒有任何程式或 SQL 讀這張表（只有人工查排程）；**若之後有程式去讀，保留天數要大於它的回看期**。
+
+**work_mem**：`seed_auto_task_queue()` 與 `contribution_auto_tasks_arms()`（public）函式層級 `SET work_mem = '16MB'`（seed 另有 `statement_timeout = '280s'`）。**對這兩支函式 `CREATE OR REPLACE` 時要把 SET 一起帶上**，否則 proconfig 被洗掉（守門 `db-tuning.test.ts` A5 擋）。
+
+**autovacuum 門檻**：`contribution_votes`、`contributions`、`task_dispatches`（public）analyze 0.02、vacuum 0.05；`jev_decisions` 因大量 UPDATE 且約 913 MB，放寬為 analyze 0.05、vacuum 0.1。
+
+**`autovacuum_work_mem`（未做）**：sighup 級 GUC，不能在 migration（交易內）設；目前是 -1（退回 `maintenance_work_mem`＝256 MB，3 個 autovacuum worker）。要調走 Supabase 管理面：`npx -y supabase@2 postgres-config update --project-ref <ref> --config autovacuum_work_mem=64MB`，或 Dashboard 的 Database → Settings；Supabase 只開放白名單內的參數，且資料庫角色不是 superuser、`ALTER SYSTEM` 不可用。調成 64MB 其實是把 vacuum 記憶體由 256MB 降下來。
