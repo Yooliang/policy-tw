@@ -73,12 +73,17 @@ Deno.test("A4 work_mem、statement_timeout、autovacuum 門檻", () => {
   assert(/ALTER FUNCTION public\.seed_auto_task_queue\(\) SET statement_timeout = '280s'/.test(mig));
   assert(/ALTER FUNCTION public\.seed_auto_task_queue\(\) SET work_mem = '16MB'/.test(mig));
   assert(/ALTER FUNCTION public\.contribution_auto_tasks_arms\(\) SET work_mem = '16MB'/.test(mig));
-  for (const t of ["contribution_votes", "contributions", "task_dispatches", "jev_decisions"]) {
+  for (const t of ["contribution_votes", "contributions", "task_dispatches"]) {
     assert(
       new RegExp(`ALTER TABLE public\\.${t}\\s+SET \\(autovacuum_analyze_scale_factor = 0\\.02, autovacuum_vacuum_scale_factor = 0\\.05\\)`).test(mig),
       t,
     );
   }
+  // jev_decisions：#996 會大量 UPDATE，門檻放寬（0.05 會過勤、每次全表掃 913 MB）
+  assert(
+    /ALTER TABLE public\.jev_decisions\s+SET \(autovacuum_analyze_scale_factor = 0\.05, autovacuum_vacuum_scale_factor = 0\.1\)/.test(mig),
+    "jev_decisions",
+  );
 });
 
 Deno.test("A5 之後的 migration 重定義這兩支函式要帶 work_mem（CREATE OR REPLACE 會洗掉 proconfig）", async () => {

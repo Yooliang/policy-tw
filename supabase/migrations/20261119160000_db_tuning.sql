@@ -65,8 +65,10 @@
 -- ============================================================
 -- 4. autovacuum／autoanalyze 門檻
 -- ============================================================
---   contribution_votes、contributions、task_dispatches、jev_decisions（public）：預設 analyze 0.1／vacuum 0.2 對大表太鬆
---   （整張表要變動 10%／20% 才動），改成 0.02／0.05，統計與死列清得更勤。這四張目前 reloptions 皆為 NULL。
+--   contribution_votes、contributions、task_dispatches（public）：預設 analyze 0.1／vacuum 0.2 對大表太鬆
+--   （整張表要變動 10%／20% 才動），改成 0.02／0.05，統計與死列清得更勤。
+--   jev_decisions（public，約 913 MB）另外處理：#996 會對它做大量 UPDATE，0.05 會過勤（每次全表掃），所以改 analyze 0.05／vacuum 0.1。
+--   這四張目前 reloptions 皆為 NULL。
 --
 -- 引用到的既有物件（2026-11-19 唯讀查正式庫確認存在）：cron.job（jobid、jobname、schedule）、cron.alter_job、cron.job_run_details、
 -- activity_audit()、activity_touch_updated_at()、auth.role()、public.seed_auto_task_queue()、public.contribution_auto_tasks_arms()、上述四張表。
@@ -196,4 +198,4 @@ ALTER FUNCTION public.contribution_auto_tasks_arms() SET work_mem = '16MB';
 ALTER TABLE public.contribution_votes SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_vacuum_scale_factor = 0.05);
 ALTER TABLE public.contributions      SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_vacuum_scale_factor = 0.05);
 ALTER TABLE public.task_dispatches    SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_vacuum_scale_factor = 0.05);
-ALTER TABLE public.jev_decisions      SET (autovacuum_analyze_scale_factor = 0.02, autovacuum_vacuum_scale_factor = 0.05);
+ALTER TABLE public.jev_decisions      SET (autovacuum_analyze_scale_factor = 0.05, autovacuum_vacuum_scale_factor = 0.1);
