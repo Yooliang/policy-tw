@@ -31,13 +31,27 @@
 --   交件一結案（通常幾天內），下一輪就會清。目前約 1,350 件在流程中，每件的判決列只有幾列。
 --   trace_events（/trace）只看 14 天內的系統票（interval '14 days'），保留天數的下限也是 14（設定表 CHECK），守門測試盯這件事。
 --
--- 排程：先 */10 * * * *（每輪最多 batch_size × max_batches ＝ 10 萬列），把存量幾輪內清完；函式沒事做時一次索引查詢就返回。
---   **存量清完後改成每日一次**（一行，不必再 migration）：
---     SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'jev-state-prune'), schedule => '30 19 * * *');
---   （改日排程後再開新 migration 把排程寫成 '30 19 * * *' 才算收斂；上面那行只是現場立即生效。）
+-- 排程：先每 10 分鐘（4-59/10 ＝ :04、:14、:24…，避開 :00 擠在一起的 seed／jp-seed／cec-sync），每輪最多 batch_size × max_batches ＝ 2.5 萬列，
+--   存量幾十輪內清完；函式沒事做時一次索引查詢就返回。
+--   **存量清完後改成每日一次**（一行，不必再 migration；UTC 20:05＝台北 04:05，避開 19:30 的週六 cec-sync-2024-weekly）：
+--     SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'jev-state-prune'), schedule => '5 20 * * *');
+--   （改日排程後再開新 migration 把排程寫成 '5 20 * * *' 才算收斂；上面那行只是現場立即生效。）
+--
+-- 上線順序：**enabled 預設 false**（函式直接回 0、什麼都不動）。已清的 state 不可復原，所以先小批試跑再全開：
+--     SELECT jev_decisions_prune_state(NULL, 100, 1);   -- 清 100 列，逐欄核對：判決欄與 state_hash 不變、state 只剩 supported_sources／schema／reason
+--     UPDATE jev_prune_settings SET enabled = true WHERE id = 1;
+--   （排程從 migration 套用起就在跑，但 enabled=false 時每輪只讀一列設定。）
+--
+-- 為什麼 statement_timeout 寫在 cron 指令而不是函式上的 SET：頂層語句的計時器在進函式前就已啟動，函式 SET 的新值對這一句不生效。
+--   所以 cron 指令是 'SET statement_timeout TO ''120s''; SELECT jev_decisions_prune_state();'（pg_cron 多語句指令已在正式庫驗證可行）。
+--   每輪最多 2.5 萬列（p_max_batches 預設 5），一次交易夠小，不長時間持有列鎖。lock_timeout 仍在函式上（函式內的鎖等待受它管）。
 --
 -- 回收空間：UPDATE 只是把大 state 換成小的，舊版本要等 autovacuum 釋放，而且 autovacuum 只把空間還給表自己，不還給作業系統。
 --   要真的縮小檔案得 VACUUM FULL jev_decisions（鎖表）或 pg_repack，不在這支 migration 做，指令與時段見 PR 描述。
+--
+-- 索引膨脹：state_pruned_at 是部分索引 jev_decisions_state_unpruned_idx 的述詞欄，UPDATE 它不是 HOT 更新（HOT 要求被更新的欄位不在任何索引的鍵或述詞裡），
+--   所以每一列的 UPDATE 都會在表上全部 6 個索引各新增一筆索引項，舊項等 vacuum 回收；存量清的這段時間索引會長。
+--   存量清完後做一次 VACUUM FULL（會連索引一起重建）或 REINDEX TABLE jev_decisions 回收。
 --
 -- 引用到的既有物件：jev_decisions(state, state_hash, asked_at, subject_type, subject_id)、contributions(id, status)、
 --   activity_audit()、activity_touch_updated_at()、edit_history、auth.role()、擴充 pg_cron（cron.schedule／cron.unschedule）。
@@ -83,23 +97,23 @@ CREATE INDEX IF NOT EXISTS jev_decisions_state_unpruned_idx ON jev_decisions (as
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS jev_prune_settings (
   id          SMALLINT PRIMARY KEY CHECK (id = 1),
-  enabled     BOOLEAN NOT NULL DEFAULT true,
+  enabled     BOOLEAN NOT NULL DEFAULT false,  -- 上線先關；小批試跑核對後再 UPDATE enabled = true（見檔頭）
   -- 下限 14＝/trace（trace_events）只看 14 天內的系統票；比它短，/trace 會讀到被清掉的 supported_sources
   days        INTEGER NOT NULL DEFAULT 14 CHECK (days BETWEEN 14 AND 3650),
   batch_size  INTEGER NOT NULL DEFAULT 5000 CHECK (batch_size BETWEEN 100 AND 50000),
-  max_batches INTEGER NOT NULL DEFAULT 20 CHECK (max_batches BETWEEN 1 AND 200),
+  max_batches INTEGER NOT NULL DEFAULT 5 CHECK (max_batches BETWEEN 1 AND 200),
   keep_keys   TEXT[] NOT NULL DEFAULT ARRAY['supported_sources', 'schema', 'reason'],
   note        TEXT,
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE jev_prune_settings IS
   'jev_decisions state 清理的參數（單列 id=1）。改值一行 UPDATE，例：UPDATE jev_prune_settings SET days = 30, note = ''…'' WHERE id = 1;（每次修改進 edit_history，agent_name=activity-audit）。停用：enabled = false。已清的 state 不可復原。2026-11-19';
-COMMENT ON COLUMN jev_prune_settings.enabled IS 'false＝排程照跑但什麼都不動';
+COMMENT ON COLUMN jev_prune_settings.enabled IS 'false＝排程照跑但什麼都不動（預設 false；先 jev_decisions_prune_state(NULL, 100, 1) 小批試跑核對，再改 true）';
 COMMENT ON COLUMN jev_prune_settings.days IS 'asked_at 超過幾天的判決，state 清成摘要。下限 14（/trace 的回看窗）；函式參數只能把它調長、不能調短';
 COMMENT ON COLUMN jev_prune_settings.batch_size IS '每一批最多處理幾列';
 COMMENT ON COLUMN jev_prune_settings.max_batches IS '每次排程最多跑幾批；沒做完的下一輪接著做';
 COMMENT ON COLUMN jev_prune_settings.keep_keys IS '清 state 時保留的頂層欄位（只留數字與短字串，字串截 200 字）：讀取端還在用的小欄位，見 migration 檔頭';
-INSERT INTO jev_prune_settings (id, note) VALUES (1, '初值：14 天；每批 5,000 列、最多 20 批；白名單 supported_sources／schema／reason（維護者 2026-11-19 裁示）') ON CONFLICT (id) DO NOTHING;
+INSERT INTO jev_prune_settings (id, note) VALUES (1, '初值：14 天；每批 5,000 列、最多 5 批；白名單 supported_sources／schema／reason（維護者 2026-11-19 裁示）；enabled 預設 false，小批試跑核對後才開') ON CONFLICT (id) DO NOTHING;
 
 ALTER TABLE jev_prune_settings ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Public read" ON jev_prune_settings;
@@ -119,7 +133,6 @@ CREATE OR REPLACE FUNCTION jev_decisions_prune_state(p_days INTEGER DEFAULT NULL
 RETURNS BIGINT
 LANGUAGE plpgsql
 SET lock_timeout = '3s'
-SET statement_timeout = '120s'
 AS $$
 DECLARE
   s jev_prune_settings%ROWTYPE;
@@ -172,12 +185,12 @@ REVOKE ALL ON FUNCTION jev_decisions_prune_state(INTEGER, INTEGER, INTEGER) FROM
 GRANT EXECUTE ON FUNCTION jev_decisions_prune_state(INTEGER, INTEGER, INTEGER) TO service_role;
 
 -- ------------------------------------------------------------
--- 5. 排程：每 10 分鐘（存量清完後改每日，指令見檔頭）。pg_cron 不存在的環境（本機、測試）略過
+-- 5. 排程：每 10 分鐘，:04 起算（存量清完後改每日，指令見檔頭）。pg_cron 不存在的環境（本機、測試）略過
 -- ------------------------------------------------------------
 DO $$
 BEGIN
   IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
     EXECUTE $q$SELECT cron.unschedule('jev-state-prune') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'jev-state-prune')$q$;
-    EXECUTE $q$SELECT cron.schedule('jev-state-prune', '*/10 * * * *', 'SELECT jev_decisions_prune_state();')$q$;
+    EXECUTE $q$SELECT cron.schedule('jev-state-prune', '4-59/10 * * * *', 'SET statement_timeout TO ''120s''; SELECT jev_decisions_prune_state();')$q$;
   END IF;
 END $$;

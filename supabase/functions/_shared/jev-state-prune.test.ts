@@ -81,7 +81,7 @@ CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, r
 `;
 
 /** 正式庫 migration 前的樣子：原始 DDL＋GENERATED 的 state_hash＋once_per_state（取 20260919000003 的第 1 段原文） */
-async function buildDb(migSql: string = MIG_SQL): Promise<PGlite> {
+async function buildDb(migSql: string = MIG_SQL, opts: { enable?: boolean } = {}): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(BASE);
   await db.exec(fnFromP0("activity_audit"));
@@ -91,6 +91,8 @@ async function buildDb(migSql: string = MIG_SQL): Promise<PGlite> {
   await db.exec(`ALTER TABLE jev_decisions DROP CONSTRAINT jev_decisions_subject_type_check; ALTER TABLE jev_decisions DROP CONSTRAINT jev_decisions_question_check;`);
   await db.exec(ROLLING.slice(0, ROLLING.indexOf("-- 2. 補漏候選")));
   await db.exec(migSql);
+  // 設定表預設 enabled=false（上線先關）；除了專測預設值的 B7，其餘測試都在開啟後的狀態下驗清理本身
+  if (opts.enable ?? true) await db.exec(`UPDATE jev_prune_settings SET enabled = true WHERE id = 1`);
   return db;
 }
 const q = async (db: PGlite, sql: string, params: unknown[] = []) => (await db.query(sql, params)).rows as Array<Record<string, unknown>>;
@@ -245,26 +247,31 @@ Deno.test("B6 分批上限、參數只能把保留天數調長；改值有審計
   }
 });
 
-Deno.test("B7 enabled=false 什麼都不動", async () => {
-  const db = await buildDb();
+Deno.test("B7 enabled 預設 false：函式直接回 0、什麼都不動；開啟後才清；關回去又停", async () => {
+  const db = await buildDb(MIG_SQL, { enable: false });
   try {
+    assertEquals((await q(db, `SELECT enabled, max_batches FROM jev_prune_settings WHERE id = 1`))[0], { enabled: false, max_batches: 5 }, "上線預設關、每輪最多 5 批");
     await insert(db, { id: "a", state: { t: big() }, days: 40 });
-    await db.exec(`UPDATE jev_prune_settings SET enabled = false WHERE id = 1`);
-    assertEquals(await run(db), 0);
+    assertEquals(await run(db), 0, "enabled=false 時函式直接回 0");
     assertEquals(await run(db, 14, 5000, 20), 0, "明給參數也不能繞過停用");
+    assertEquals(await run(db, null, 100, 1), 0, "小批試跑在關著時也是 0");
     assertEquals((await q(db, `SELECT state_pruned_at IS NULL u FROM jev_decisions`))[0].u, true);
     await db.exec(`UPDATE jev_prune_settings SET enabled = true WHERE id = 1`);
-    assertEquals(await run(db), 1);
+    assertEquals(await run(db, null, 100, 1), 1, "開啟後小批試跑清掉那一列");
+    await insert(db, { id: "b", state: { t: big() }, days: 40 });
+    await db.exec(`UPDATE jev_prune_settings SET enabled = false WHERE id = 1`);
+    assertEquals(await run(db), 0, "關回去又停");
   } finally {
     await db.close();
   }
 });
 
-Deno.test("B8 排程是 */10 且冪等；migration 重跑不多設定、不多觸發器；函式只有 service_role 能執行", async () => {
+Deno.test("B8 排程是 4-59/10（:04 起，避開整點擠的排程）且冪等；migration 重跑不多設定、不多觸發器；函式只有 service_role 能執行", async () => {
   const db = await buildDb();
   try {
     await db.exec(MIG_SQL);
-    assertEquals(await q(db, `SELECT jobname, schedule, command FROM cron.job`), [{ jobname: "jev-state-prune", schedule: "*/10 * * * *", command: "SELECT jev_decisions_prune_state();" }]);
+    assertEquals((await q(db, `SELECT enabled FROM jev_prune_settings WHERE id = 1`))[0].enabled, true, "重跑 migration 不把已開啟的開關改回 false");
+    assertEquals(await q(db, `SELECT jobname, schedule, command FROM cron.job`), [{ jobname: "jev-state-prune", schedule: "4-59/10 * * * *", command: "SET statement_timeout TO '120s'; SELECT jev_decisions_prune_state();" }]);
     assertEquals(Number((await q(db, `SELECT count(*) c FROM jev_prune_settings`))[0].c), 1);
     assertEquals(Number((await q(db, `SELECT count(*) c FROM pg_trigger WHERE tgrelid='jev_decisions'::regclass AND tgname='trg_jev_decisions_state_hash'`))[0].c), 1);
     const can = async (role: string) => (await q(db, `SELECT has_function_privilege('${role}', 'jev_decisions_prune_state(integer,integer,integer)', 'EXECUTE') ok`))[0].ok;
