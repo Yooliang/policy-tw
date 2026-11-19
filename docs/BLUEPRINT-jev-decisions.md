@@ -442,3 +442,15 @@ Jev 真正的價值在剩下三對，規則絕對判不出來的：
 `fetchSource` 對 PDF／試算表一律回 `pdf` 棄權；judge 對這類網址回 422 `unsupported_source`。
 參選紀錄的系統票改問中選會候選人資料庫（`_shared/cec-check.ts`：姓名查詢、只留該屆），Jev 讀的是欄位不是攤平的表格；
 2026 登記期中選會還沒資料，那段時間參選紀錄的系統票會棄權，靠代理票。
+
+## 保留政策：state 只留 14 天（2026-11-19）
+
+`jev_decisions` 是全庫最大的表（37 萬列、合計約 900 MB），空間幾乎都在 `state`（每次問 Jev 附的輸入快照：整頁正文、投稿文字、人物與新聞）。判決欄（`choice`、`probability`、`probabilities`、`model`、`cost_usd`）很小。維護者裁示：**只留判決摘要**，`asked_at` 超過 14 天的列，`state` 清成摘要；列本身不刪。
+
+- **做法**：`jev_decisions_prune_state()`（migration `20261119130000`）分批把舊列的 `state` 換成摘要，並記 `state_pruned_at`。摘要＝`{}` 加上設定表 `jev_prune_settings.keep_keys` 白名單裡的小純量（預設 `supported_sources`、`schema`、`reason`，字串截 200 字）。不動 `state_hash`、判決欄、`asked_at`。pg_cron `jev-state-prune`，存量清完前每 10 分鐘，之後改每日。
+- **為什麼 `state_hash` 要改成一般欄位**：它原本是 `GENERATED ALWAYS AS (md5(state::text))`，改 `state` 會讓指紋跟著變，「同 state 同模型只問一次」（`jev_decisions_once_per_state`）就失效，同鍵的多列也會撞唯一索引。現在由 `BEFORE INSERT` 觸發器算，既有指紋原值保留，寫入端不用改；已清的列仍擋同 state 重問。
+- **還在流程中的交件不清**：`/next` 的驗證項、票數預算影子、cec-results 自動套用、轉載檢查讀的是流程中交件的舊 `state`；交件結案（`applied`／`rejected`／`superseded`／`withdrawn`／`reverted`）後下一輪才清。
+- **讀取端不能依賴舊 state**：新增讀 `jev_decisions.state` 的程式或 SQL，只能讀「流程中交件」或 14 天內的列；要讀更久的欄位，加進 `keep_keys`。`/trace`（`trace_events()`）只看 14 天內，設定表 `days` 的 CHECK 下限也是 14，守門 `_shared/jev-state-prune.test.ts` 盯這件事。
+- **已清的 state 不可復原**。回滾＝`UPDATE jev_prune_settings SET enabled = false`（停止後續清理）；要保留更久就調大 `days`。
+- **空間**：UPDATE 只讓舊版本變成可回收，檔案不會縮；要真的縮小得 `VACUUM FULL jev_decisions`（鎖表）或 pg_repack，另排時段。
+- 範圍只有 `public.jev_decisions`；日本站 `policy_jp.jev_decisions` 另案。
