@@ -18,10 +18,9 @@ import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineageCoun
  * 「進度過半的政見」是政見不是脈絡，已移到全部政見（/tracking?focus=progress，#201）；/analysis/:policyId 深度分析頁照舊。
  */
 const { categories, lineages, lineagesComplete, ensureLineages } = useSupabase()
-const { globalRegion, setGlobalRegion } = useGlobalState()
+const { globalRegion, setGlobalRegion, globalCategory: selectedCategory } = useGlobalState()
 const { openPanel } = useDeskFilterPanel()
 const searchTerm = ref('')
-const selectedCategory = ref('All')
 
 // 縣市（全站共用，本頁只影響選擇器顯示）與分類 ↔ 網址 ?region=&category=
 useRegionQuerySync({ routeName: 'analysis', extra: { category: queryField(selectedCategory, 'All') } })

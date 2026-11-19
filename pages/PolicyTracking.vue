@@ -31,7 +31,8 @@ const { openPanel } = useDeskFilterPanel()
 const { globalRegion, setGlobalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
-const selectedCategory = ref('All')
+// 分類是全站共用狀態（useGlobalState），跨頁保留；網址 ?category= 照舊雙向同步
+const { globalCategory: selectedCategory } = useGlobalState()
 
 
 // Sync with global state
