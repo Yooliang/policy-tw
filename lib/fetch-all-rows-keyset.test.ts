@@ -9,6 +9,6 @@ Deno.test('fetchAllRows：依 id 排序走 keyset（.gt id ＋ .limit），不�
   assert(body.length > 0, '找不到 fetchAllRows')
   assert(/const keyset = orderBy === 'id'/.test(body), '依 id 排序要走 keyset 分支')
   assert(/\.gt\('id'/.test(body), 'keyset 分支要用 .gt(\'id\', 上一頁最後一個 id)')
-  const keysetPart = body.slice(body.indexOf('if (keyset)'), body.indexOf('return allData'))
+  const keysetPart = body.slice(body.indexOf('if (keyset)'), body.indexOf('while (!finished)'))
   assert(!keysetPart.includes('.range('), 'keyset 分支不能用 .range（OFFSET）')
 })

@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useSupabase } from '../composables/useSupabase'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import RegionCategoryPicker from '../components/RegionCategoryPicker.vue'
 import { Search, Waypoints } from 'lucide-vue-next'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
@@ -61,6 +62,8 @@ onMounted(() => { ensureLineages() })
           />
         </div>
       </div>
+
+      <RegionCategoryPicker />
 
       <!-- 分類篩選：手機版用下拉選單（同 PolicyTracking，18 個分類攤開會佔掉整個首屏） -->
       <div class="sm:hidden mb-6">

@@ -4,6 +4,7 @@ import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
+import RegionCategoryPicker from '../components/RegionCategoryPicker.vue'
 import { ArrowRight, MapPin, Users, Database } from 'lucide-vue-next'
 import { useRouter, useRoute } from 'vue-router'
 import { usePageHead } from '../composables/usePageHead'
@@ -209,6 +210,7 @@ usePageHead({
     </Hero>
 
     <div class="max-w-7xl mx-auto px-4 pt-20">
+      <RegionCategoryPicker />
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <!-- County Summary -->
         <div class="lg:col-span-1 space-y-6">

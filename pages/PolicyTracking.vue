@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useCheckpoints } from '../composables/useCheckpoints'
 import { useSupabase } from '../composables/useSupabase'
 import { useGlobalState } from '../composables/useGlobalState'
@@ -9,7 +10,11 @@ import { compareByPolicyDateDesc } from '../lib/policy-date'
 import PolicyCard from '../components/PolicyCard.vue'
 import Hero from '../components/Hero.vue'
 import GlobalRegionSelector from '../components/GlobalRegionSelector.vue'
-import { Search, TrendingUp, Star } from 'lucide-vue-next'
+import RegionCategoryPicker from '../components/RegionCategoryPicker.vue'
+import { Search, TrendingUp, Star, X } from 'lucide-vue-next'
+import { useDeskFilterPanel } from '../composables/useDeskFilterPanel'
+import { ALL_REGIONS } from '../lib/policy-region'
+import { TAIWAN_COUNTIES } from '../lib/election-regions'
 import { usePageHead } from '../composables/usePageHead'
 import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySync'
 import { policyMatchesRegion } from '../lib/policy-region'
@@ -20,8 +25,10 @@ import { RouterLink } from 'vue-router'
 import { CalendarClock } from 'lucide-vue-next'
 import LoadError from '../components/LoadError.vue'
 
-const { policies, politicians, locations, categories, loading, error, policiesComplete, ensurePolicies, getElectionById, dataAsOf } = useSupabase()
-const { globalRegion } = useGlobalState()
+const { policies, politicians, locations, categories, loading, error, isPolicyRegionLoaded, loadPoliciesByRegion, getElectionById, dataAsOf } = useSupabase()
+const route = useRoute()
+const { openPanel } = useDeskFilterPanel()
+const { globalRegion, setGlobalRegion } = useGlobalState()
 
 const selectedLocation = ref(globalRegion.value)
 const selectedCategory = ref('All')
@@ -60,10 +67,15 @@ const { checkpoints } = useCheckpoints()
 
 
 
+// 政見清單按縣市載入（2026-11-19）：以前進頁就載整份（14,700 筆、20.5 MB、約 11.6 秒），
+// 現在只載目前縣市「這一頁會列出的」政見（選後政見／施政）；沒選縣市（全台）也只載那一批、id 切 16 段並行。
+// 進頁時網址的 ?region= 要先看（useRegionQuerySync 在 mounted 之後才把它寫進全站狀態），不然先白載一次全台。
+const validRegion = (v: unknown): string | null => (typeof v === 'string' && TAIWAN_COUNTIES.includes(v) ? v : null)
 onMounted(() => {
-  // 政見清單是按需載入的（257 KB，公民提問頁那類頁面不需要）。這一頁要整份。
-  ensurePolicies()
+  void loadPoliciesByRegion(validRegion(route.query.region) ?? selectedLocation.value)
 })
+// 切縣市：沒載過的縣市才撈，載過的（或整份已在）直接用
+watch(selectedLocation, (region) => { void loadPoliciesByRegion(region) })
 
 onUnmounted(() => {
 })
@@ -77,12 +89,24 @@ const electionDateOf = (id: number) => getElectionById(id)?.electionDate
 /** 這一條現在叫什麼（lib/policy-stage.ts，#672）：這一頁只列「政見」階段的（當選者那一屆與任內施政），承諾不在這裡 */
 const stageOf = (p: Policy) => stageOfPolicy(p, politicianById.value.get(String(p.politicianId)), electionDateOf, today.value)
 
+// 搜尋：輸入停 200 毫秒才篩（以前每個按鍵都對整份清單 toLowerCase），標題與說明的小寫版只在清單變動時算一次
+const searchQuery = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(searchTerm, (v) => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { searchQuery.value = v.trim().toLowerCase() }, 200)
+})
+onUnmounted(() => clearTimeout(searchTimer))
+const lowered = computed(() => new Map(policies.value.map(p => [p.id, [p.title.toLowerCase(), p.description.toLowerCase()] as const])))
+
 const filteredPolicies = computed(() => {
+  const q = searchQuery.value
+  const text = lowered.value
   return policies.value.filter(policy => {
-    const matchesLocation = policyMatchesRegion(policy, politicians.value, selectedLocation.value)
+    const matchesLocation = policyMatchesRegion(policy, politicianById.value, selectedLocation.value)
     const matchesCategory = selectedCategory.value === 'All' || policy.category === selectedCategory.value
-    const matchesSearch = policy.title.toLowerCase().includes(searchTerm.value.toLowerCase()) ||
-                         policy.description.toLowerCase().includes(searchTerm.value.toLowerCase())
+    const t = text.get(policy.id)
+    const matchesSearch = q === '' || !!t && (t[0].includes(q) || t[1].includes(q))
     const matchesCheckpoints = !showCheckpointsOnly.value || checkpoints.value.includes(policy.id)
     const isPolicy = isPostElectionStage(stageOf(policy))
     const matchesFocus = focus.value === 'all' || (focus.value === 'progress' ? isProgressCase(policy) : dueIds.value.has(policy.id))
@@ -96,7 +120,7 @@ const filteredPolicies = computed(() => {
  * 期限已到只是 focus 篩選的一種：與縣市、分類、關鍵字一起疊加（#201）。
  */
 const duePolicies = computed(() => dueDeadlinePolicies(
-  policies.value.filter(p => policyMatchesRegion(p, politicians.value, selectedLocation.value)),
+  policies.value.filter(p => policyMatchesRegion(p, politicianById.value, selectedLocation.value)),
   {
     today: today.value,
     electionDateOf: (p) => (p.electionId != null ? getElectionById(p.electionId)?.electionDate : undefined),
@@ -119,13 +143,13 @@ const statusText = (p: Policy) => stageBadgeLabel(String(p.status), stageOf(p)) 
 // 看起來像壞掉。政見是跟著首屏一起載的，所以只在真的還沒有政見時才顯示骨架。
 // 預渲染的 /tracking 不帶政見（#982），整份清單進頁後才載：沒載完之前也要顯示骨架，不能先閃「沒有找到符合條件的政見」
 // 部分政見（例如從首頁帶進來的 3 筆）不算載完，所以不看 policies 是否為空；取政見失敗時改顯示 LoadError，不能永遠骨架
-const stillLoading = computed(() => !policiesComplete.value && !error.value)
+const stillLoading = computed(() => !isPolicyRegionLoaded(selectedLocation.value) && !error.value)
 
 // 篩得出來、卻因為找不到所屬政治人物而渲染不了的筆數。
 // 正常應該是 0（fetchAll 會把有政見的人物一起載進來）；不是 0 就要讓使用者知道，
 // 不要安靜地少幾張卡片。
 const unrenderablePolicies = computed(() =>
-  filteredPolicies.value.filter(policy => !politicians.value.find(c => c.id === policy.politicianId))
+  filteredPolicies.value.filter(policy => !politicianById.value.has(String(policy.politicianId)))
 )
 // 分頁（維護者 2026-10-11「一開始也載入的太多了吧，分頁功能?」）：卡片一頁 24 張；改任何篩選回第 1 頁。
 // 只畫找得到所屬人物的那些（顯示不出來的另外在上面報筆數），頁數才不會有空洞。
@@ -154,7 +178,7 @@ function goToPage(n: number) {
   page.value = Math.min(Math.max(1, n), pageCount.value)
   listTop.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
-watch([selectedLocation, selectedCategory, searchTerm, view, focus], () => { page.value = 1 })
+watch([selectedLocation, selectedCategory, searchQuery, view, focus], () => { page.value = 1 })
 // 畫面上只說「有幾筆顯示不出來」；要 debug 的人才需要 id，那進 devtools
 watch(unrenderablePolicies, (list) => {
   if (list.length > 0) {
@@ -211,6 +235,20 @@ usePageHead({
         >{{ label }}</button>
       </div>
 
+      <!-- 桌面版（md 以上）：目前的縣市／分類 chip＋筆數，點 chip 展開方塊格、✕ 清掉；面板由左欄「地區」「分類」開（手機維持 Hero 內的縣市選擇器與下方的分類選單） -->
+      <div v-if="(selectedLocation !== ALL_REGIONS || selectedCategory !== 'All')" class="hidden md:flex items-center gap-3 mb-6" data-testid="tracking-scope">
+        <span v-if="selectedLocation !== ALL_REGIONS" class="inline-flex items-center gap-1.5 rounded-full bg-navy-900 text-white pl-4 pr-2 py-2 text-sm font-bold">
+          <button type="button" class="font-bold" @click="openPanel('region')">{{ selectedLocation }}</button>
+          <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除地區" @click="setGlobalRegion(ALL_REGIONS)"><X :size="14" /></button>
+        </span>
+        <span v-if="selectedCategory !== 'All'" class="inline-flex items-center gap-1.5 rounded-full bg-navy-900 text-white pl-4 pr-2 py-2 text-sm font-bold">
+          <button type="button" class="font-bold" @click="openPanel('category')">{{ selectedCategory }}</button>
+          <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除分類" @click="selectedCategory = 'All'"><X :size="14" /></button>
+        </span>
+        <span v-if="!stillLoading" class="text-sm font-bold text-slate-400 tabular-nums">{{ filteredPolicies.length.toLocaleString('en-US') }} 筆</span>
+      </div>
+      <RegionCategoryPicker v-model:category="selectedCategory" category-enabled show-counts />
+
       <!-- 分類篩選：手機版用下拉選單。18 個分類攤開會佔掉整個首屏，
            使用者得捲過一整面按鈕才看得到第一張政見卡。 -->
       <div class="sm:hidden mb-6">
@@ -225,8 +263,8 @@ usePageHead({
         </select>
       </div>
 
-      <!-- lg 以上左側延伸區已有「政見分類」，這塊只留給沒有延伸區的中間寬度（sm～lg） -->
-      <div class="hidden sm:flex lg:hidden gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
+      <!-- md 以上的分類在主區方塊格（左欄「分類」開），這塊只留給 sm～md 的窄螢幕 -->
+      <div class="hidden sm:flex md:hidden gap-4 w-full bg-slate-100 p-2 rounded-xl mb-8">
         <!-- Left: 全部 -->
         <div class="shrink-0 flex items-center gap-3">
           <button
@@ -302,7 +340,7 @@ usePageHead({
         有 {{ unrenderablePolicies.length }} 筆政見暫時顯示不出來，重新整理通常就會出現。
       </div>
 
-      <LoadError v-if="error && !policiesComplete" />
+      <LoadError v-if="error && !isPolicyRegionLoaded(selectedLocation)" />
       <div v-else-if="stillLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         <div v-for="n in 6" :key="n" class="bg-white rounded-3xl border border-slate-200 p-6 animate-pulse">
           <div class="h-4 w-24 bg-slate-200 rounded mb-4"></div>
