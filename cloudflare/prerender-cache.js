@@ -3,7 +3,7 @@
  *
  * 首頁、/election/*、/tracking、/analysis 等預渲染頁原本由 proxy() 原樣轉發到 Firebase Hosting，
  * 源站對 ** 一律回 Cache-Control: no-cache，所以每個訪客都從 Firebase 拿一份（首頁 1.6～3.1 MB）。
- * 這裡在 Worker 內用 Cache API 存一份：新鮮 5 分鐘，過期後最多再 10 分鐘先回舊的、背景重抓（stale-while-revalidate）。
+ * 這裡在 Worker 內用 Cache API 存一份：新鮮 15 分鐘，過期後最多再 10 分鐘先回舊的、背景重抓（stale-while-revalidate）。
  *
  * 只快取：GET、沒有 Range、沒有登入／工作階段類 Cookie、回應 200 且 text/html。
  * 不快取：/assets/**（本來就一年 immutable）、/skill.md 與其他 .md／.txt（協議檔要即時）、/api/、協議端點。
@@ -14,10 +14,10 @@
 
 import { shellVersion } from './shell-version.js'
 
-export const FRESH_S = 300
+export const FRESH_S = 900
 export const STALE_S = 600
 /**
- * 給訪客與瀏覽器看的：瀏覽器每次問邊緣，邊緣 5 分鐘內不回源。
+ * 給訪客與瀏覽器看的：瀏覽器每次問邊緣，邊緣 15 分鐘內不回源。
  * 不能帶 stale-while-revalidate：Chrome 對 max-age=0＋SWR 會直接用本機舊 HTML，部署後舊頁指著被 Firebase 刪掉的 /assets 就白屏（policy-ops#37），
  * 也繞過 X-Shell-Version。舊頁再撐 10 分鐘只在 Worker 內靠 X-Prerender-Cached-At 判斷。
  */

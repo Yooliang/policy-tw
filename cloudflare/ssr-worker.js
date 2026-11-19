@@ -7,7 +7,7 @@
  *   /election/:id/:縣市、/election/:id/:縣市/:鄉鎮 → 代理到 web.app 的 ASCII 檔案路徑（見 region-path.js）；
  *   舊的 /election/:id?region=縣市&sub=鄉鎮、/election/:id/:縣市?sub=鄉鎮 → 301 到新網址
  *   其餘全部 → 反向代理到 policy-tw.web.app（原本 cloudflare/worker.js 的行為；預渲染頁、工具頁、靜態資源都在那）
- *     其中 GET 的 text/html 預渲染頁在邊緣快取 5 分鐘、舊頁再撐 10 分鐘（prerender-cache.js，#982；回應帶 X-Prerender-Cache）
+ *     其中 GET 的 text/html 預渲染頁在邊緣快取 15 分鐘、舊頁再撐 10 分鐘（prerender-cache.js，#982；回應帶 X-Prerender-Cache）
  *   /politician/:id.md、/election/:屆/:縣市.md、/category/:分類.md、/data/** → Markdown 檢視（cloudflare/markdown.js；人物讀時產生，其餘讀預產快取表 data_md_cache）
  *   GET /api/map-stats?election=&level=&parent= → 參選地圖的人數資料（cloudflare/map-stats.js；Worker 讀 Supabase 統計表、邊緣快取約 5 分鐘）
  *   POST /__purge {paths:[...]}（帶 X-Purge-Secret）→ 清掉那些頁的快取（連同它們的 .md 版）
@@ -309,7 +309,7 @@ export default {
         return markFallback(await proxy(request), 'shell', e)
       }
     }
-    // 其餘（預渲染頁、工具頁、靜態資源）：GET 的 HTML 頁在邊緣快取 5 分鐘（prerender-cache.js，#982），其他原樣代理
+    // 其餘（預渲染頁、工具頁、靜態資源）：GET 的 HTML 頁在邊緣快取 15 分鐘（prerender-cache.js，#982），其他原樣代理
     return cachedProxy(request, ctx, { cache: caches.default, proxy, currentShell: () => shellLoader.peek(), enabled: prerenderCacheEnabled(env) })
   },
 }

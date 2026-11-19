@@ -38,6 +38,7 @@
 
 - `cleanUrls: true`，輸出為 `dirStyle: nested`（`/politician/123` → `dist/politician/123/index.html`），有無尾斜線都命中
 - 拿掉 `** → /index.html` 萬用 rewrite；工具頁 rewrite 到 `/app.html`（200 ＋ noindex，客戶端渲染）
+- 快取標頭（`headers`，後面的規則蓋過前面的）：`**`（HTML，含 cleanUrls 路徑）`public, max-age=0, s-maxage=600`，瀏覽器每次都驗證、CDN 10 分鐘內直接回，部署時 Firebase 會清 CDN；刻意**不帶** `stale-while-revalidate`（Chrome 對 `max-age=0`＋SWR 會直接用本機舊 HTML，部署後舊頁指著被刪的 /assets 就白屏，policy-ops#37）。`**/*.@(md|txt|json|xml|png|svg|ico|webmanifest)` 維持 `no-cache`；`/assets/**` 一年 immutable；`/skill.md`、`/skill-types.md`、`/llms.txt` 另列明確規則維持 `no-cache`（Firebase 本來就送 ETag，If-None-Match 驗證得 304）。協議文件領先端點的部署順序靠這三個檔不被快取，**絕對不能改**
 - 其餘找不到的路徑 Firebase 自動回 `404.html`（HTTP 404），殼會啟動 app 在客戶端渲染，所以建置後才新增的政治人物頁直接打開仍能顯示，只是狀態是 404
 - 選舉頁的縣市頁／鄉鎮頁（2026-10-05 起三條，`lib/election-regions.test.ts` 守著）：
   - `/election/*/*`、`regex ^/election/[^/]+/[^/_][^/]*/[^/]+/?$` → `app.html`：直接打 policy-tw.web.app 的中文縣市頁、鄉鎮頁網址只給 app 殼（200＋noindex），預渲染檔在 ASCII 路徑、只有正見.tw 的 Worker 會去拿。regex 刻意排除 `_r` 開頭的第二段，不然亂打的縣市（Worker 換成 `_r/<十六進位>`）會從 404 變 200
