@@ -43,9 +43,11 @@ async function run(s: Scenario): Promise<{ body: Record<string, unknown>; calls:
 const base: Scenario = { submitUsed: 0, verifyUsed: 0, pool: true, queue: true };
 const tasksLeased = (calls: RestCall[]) => calls.filter((c) => c.target === "contribution_task_leases" && c.method !== "GET");
 
-Deno.test("額度都還有：照舊——隊頭（較早的）是任務就派任務；沒有任務就派驗證票；quota 欄照報", async () => {
+Deno.test("額度都還有：驗證先於任務（2026-11-19）——有合格驗證票就派驗證，即使任務排得更前面；沒有驗證票才派任務；quota 欄照報", async () => {
   const a = await run(base);
-  assertEquals(a.body.kind, "task");
+  assertEquals(a.body.kind, "verify");
+  const a2 = await run({ ...base, pool: false });
+  assertEquals(a2.body.kind, "task");
   const b = await run({ ...base, queue: false });
   assertEquals(b.body.kind, "verify");
   assert((b.body.quota as { submit: { remaining: number } }).submit.remaining > 0);

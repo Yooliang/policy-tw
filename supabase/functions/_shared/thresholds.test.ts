@@ -240,7 +240,7 @@ Deno.test("SQL 與 TS 一致：系統票的形狀、合格型別、與 −1 最�
 Deno.test("SQL 與 TS 一致：驗證池照 queue_at 排、回 queue_at；serveVerify 拿第一筆；合格判斷在 LIMIT 之前", async () => {
   const pool = await latestMigrationDefining("FUNCTION contribution_verify_pool");
   // 2026-10-02：改從快照（task_dispatches）驅動後每筆一定有列，直接照 d.queue_at 排。
-  assert(/ORDER BY COALESCE\(d\.queue_at, c\.created_at\) ASC/.test(pool) || /ORDER BY d\.queue_at ASC/.test(pool), "驗證池要照 queue_at 排");
+  assert(/ORDER BY COALESCE\(d\.queue_at, c\.created_at\) ASC/.test(pool) || /ORDER BY d\.queue_at ASC/.test(pool) || /ORDER BY d\.verify_rank ASC NULLS LAST, d\.queue_at ASC/.test(pool), "驗證池要照 queue_at 排（2026-11-19 起前面多 verify_rank：差一票與層級）");
   assert(pool.includes("queue_at TIMESTAMPTZ"), "池子要把 queue_at 回給 /next，三個來源才比得起來");
   assert(!/AS bucket/.test(pool), "桶子（訪客／裁決）退場：訪客看得到的用 1980 表達");
   assert(pool.includes("LEFT JOIN task_dispatches d ON d.task_id = 'verify:' || c.id")
