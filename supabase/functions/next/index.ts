@@ -4,7 +4,7 @@ import { loadElections, withElectionKey } from "../_shared/elections.ts";
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { ipHashOf } from "../_shared/contribute-handler.ts";
-import { fetchMyVotedRows } from "../_shared/my-votes.ts";
+import { fetchMyVotedAmong } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
@@ -94,7 +94,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 身份：ditrust:<序號> 先向 agents-verify 換成代號與身份鍵；一般代號原樣（docs/BLUEPRINT-agent-identity.md §3）
     const ipSalt = Deno.env.get("CONTRIBUTION_IP_SALT") || supabaseUrl;
     const ipHashForIdentity = await ipHashOf(req, ipSalt);
-    // 1.79.0 以前的單一 IP 雜湊：只用來查切換前投過的票（fetchMyVotedRows），其他一律用網段雜湊（#481）
+    // 1.79.0 以前的單一 IP 雜湊：只用來查切換前投過的票（my-votes.ts），其他一律用網段雜湊（#481）
     const identity = await resolveActorFromRequest(agentName, ipHashForIdentity);
     mark("identity");
     // 逐一記 11 個平行查詢各自完成的時間（累計毫秒；起點都差不多，約等於各自耗時）
@@ -150,7 +150,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // （ballyhoo-4d 2026-09-21 實測：兩隻代理共用一個代號，合計 16 任務／10 驗證，
     // 要再投 41 票才輪得到下一筆任務）。額度、投票去重、驗證池早就都按來源 IP 算，
     // 比例也改用同一把尺——下面的 ipVoteRes／ipContribRes 就是，不必另外查。
-    const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes, breakerRes] = await Promise.all([
+    const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, ipContribRes, ipVoteRes, myAnswersRows, skipsRes, breakerRes] = await Promise.all([
       timed("pool", pendingQuery),
       timed("counts", cachedQueueCounts(region, () => supabase.rpc("contribution_queue_task_counts", { p_region: region })) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單；最多 60 秒前的值（2026-11-19，每次 1.0～1.5 秒） */),
       timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）；全站共用，最多 60 秒前的清單（2026-11-19，見 _shared/pending-adjudications-cache.ts）
@@ -165,13 +165,6 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       timed("auto", // 任務列的候選（自動缺口＋open 的手動任務，同一張佇列；2026-10-08 起手動任務也由排程寫進 task_dispatches）（2026-10-02 移到這裡跟其他查詢平行跑；原本排在後面單獨 await）。
       // 「有人回報查無」改成下面只查候選的那幾十筆，不再翻整張貢獻表。
       supabase.rpc("contribution_queue_tasks", { p_type: null, p_region: region, p_limit: QUEUE_WINDOW, p_seed: seed, p_ip_hash: ipHash, p_agent: agentName })),
-      timed("my_votes", // 這台機器投過票的貢獻。身份只看來源 IP（2026-09-19 裁決：代號可以共用，IP 不會重複）。
-      // 用途：裁決要排掉這些——對原貢獻投過票的人再去裁決同一件爭議，不是第三方裁決。
-      // 驗證池的排除已經在 SQL 裡做了（contribution_verify_pool），這份只是給裁決用。
-      // 這一份只會成長（沒有狀態篩選）：gcp-verifier 一小時 35 票，破 1000 之後
-      // 代理會一直拿到自己投過的東西，白做一次查證再吃 409（2026-09-18 實查 589 票）
-      // 過渡期（#481，1.79.0）：切換前的票存單一 IP 雜湊，新票存網段雜湊，兩個都查（_shared/my-votes.ts）
-      fetchMyVotedRows(supabase, { agentName, actorId: actor.actor_id })),
       timed("ip_contrib", // 匿名：「每個來源 IP 每個時段」，同一台機器多個代號共用一份（按 agent_name 數會偏低）。
       // DiTrust 帳號：按帳號（actor_id）數，見 submitQuotaFor。
       supabase.from("contributions").select("id", { count: "exact", head: true })
@@ -205,7 +198,28 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const mySubmittedTaskIds = new Set<string>([...(mySubmittedRows as any[]), ...(myAnswersRows as any[])]
       .map((r) => r.task_id).filter((v): v is string => typeof v === "string"));
     // deno-lint-ignore no-explicit-any
-    const myVotedOriginalIds = new Set<string>((myVotedOnRows as any[]).map((r) => r.contribution_id).filter((v): v is string => typeof v === "string"));
+    // 這個投票人投過票的貢獻 id，只查「這次會比對到的那幾筆」（驗證池候選、它們若是裁決則含原貢獻、佇列裡的裁決任務的原貢獻）。
+    // 以前是把他的全部歷史票翻頁撈回來（ilike 無索引，一頁約 350ms、約佔資料庫總耗時一成）；現在帶 id 清單走 contribution_id 索引。
+    // 用途與身份判斷不變：裁決要排掉對原貢獻投過票的人；驗證池本身在 SQL 排過，這份是第二道（見 _shared/my-votes.ts）。
+    const myVotedOriginalIds = new Set<string>();
+    const myVotedChecked = new Set<string>();
+    const loadMyVoted = async (ids: readonly string[]): Promise<void> => {
+      const todo = [...new Set(ids)].filter((id) => !myVotedChecked.has(id));
+      if (todo.length === 0) return;
+      for (const id of await fetchMyVotedAmong(supabase, { agentName, actorId: actor.actor_id }, todo)) myVotedOriginalIds.add(id);
+      for (const id of todo) myVotedChecked.add(id);
+    };
+    const originalIdOfPayload = (payload: unknown): string[] => {
+      const v = payload && typeof payload === "object" ? (payload as Record<string, unknown>).contribution_id : null;
+      return typeof v === "string" ? [v] : [];
+    };
+    const votedIdsForPool = (rows: readonly { id: string; contribution_type: string; payload: unknown }[]): string[] =>
+      rows.flatMap((r) => [r.id, ...(r.contribution_type === "adjudication" ? originalIdOfPayload(r.payload) : [])]);
+    const votedIdsForQueue = (rows: readonly { task_type: string; target: unknown }[]): string[] =>
+      rows.filter((t) => t.task_type === "adjudicate").flatMap((t) => originalIdOfPayload(t.target));
+    // deno-lint-ignore no-explicit-any
+    await loadMyVoted([...votedIdsForPool((pendingRes.data ?? []) as any[]), ...votedIdsForQueue((autoRes.data ?? []) as any[])]);
+    mark("my_votes");
 
     type PendingRow = {
   /** contribution_verify_pool 回的有效門檻（2026-09-20） */
@@ -230,6 +244,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     // 候選整理（驗證池的原始列 → 可派清單）：排自己的、裁決不給原提交者、零人握著的排前面、退空操作的更正。
     // 抽成函式是因為「整池都被握滿」時要用同一套再整理一次（refillHeld）。
     const prepareCandidates = async (rows: PendingRow[]): Promise<PendingRow[]> => {
+      await loadMyVoted(votedIdsForPool(rows)); // 第一次已查過的會略過；refillHeld 帶來新列時才再查
       const rawCandidates = filterVerifyCandidates(rows, me);
       // 裁決的驗證不派給原貢獻的提交者。
       // 2026-09-21 起這一段主要在 SQL（contribution_verify_pool，LIMIT 之前）：放在這裡篩，
