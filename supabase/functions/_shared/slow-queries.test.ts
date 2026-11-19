@@ -65,7 +65,8 @@ Deno.test("S4 election_result_cec_matches 本體沒動：只有 ALTER FUNCTION �
 
 Deno.test("S5 前端：整份政見清單在伺服器端濾 removed_at；人物頁、政見頁、深度分析、我的關注不再撈整份", async () => {
   const sup = await readRepo("composables/useSupabase.ts");
-  assertStringIncludes(sup, "fetchAllRows<RawPolicy>('policies_with_logs', '*', 'id', { notRemoved: true })");
+  // 整份載入可另帶 parallel（id 切段並行），但 notRemoved 一定要在：伺服器端濾 removed_at
+  assert(/fetchAllRows<RawPolicy>\('policies_with_logs', '\*', 'id', \{ notRemoved: true(, parallel: \d+)? \}\)/.test(sup), "整份政見清單要帶 notRemoved: true（可再帶 parallel）");
   assertStringIncludes(sup, "supabase.from(tableName).select(selectStr).is('removed_at', null)");
   for (const fn of ["loadPoliciesByPolitician", "loadPoliciesByIds"]) {
     const a = sup.indexOf(`async function ${fn}(`);
