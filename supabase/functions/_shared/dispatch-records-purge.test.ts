@@ -550,7 +550,7 @@ CREATE TABLE contribution_tasks (id uuid PRIMARY KEY, source text);
 CREATE TABLE queue_settings (id int PRIMARY KEY, redispatch_cooldown_seconds int NOT NULL DEFAULT 14400);
 INSERT INTO queue_settings (id) VALUES (1);
 CREATE TABLE contribution_task_leases (task_id text PRIMARY KEY, agent_name text, ip_hash text, leased_until timestamptz);
-CREATE TABLE task_dispatches (task_id text PRIMARY KEY, queue_at timestamptz NOT NULL DEFAULT now(), verify_target int);
+CREATE TABLE task_dispatches (task_id text PRIMARY KEY, queue_at timestamptz NOT NULL DEFAULT now(), verify_target int, verify_rank smallint);
 CREATE TABLE edit_history (id bigserial PRIMARY KEY, table_name text NOT NULL, record_id text NOT NULL, field text NOT NULL, old_value jsonb, new_value jsonb,
   contribution_id uuid, agent_name text, applied_at timestamptz NOT NULL DEFAULT now(), reverted_at timestamptz, reverted_by text);
 CREATE FUNCTION contribution_effective_agree(uuid) RETURNS int LANGUAGE sql AS $$ SELECT 3 $$;

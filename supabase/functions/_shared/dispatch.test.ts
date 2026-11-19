@@ -275,6 +275,7 @@ Deno.test("/next 不再有 3:1：沒有 chooseKind；驗證派出去也要蓋章
   const src = await Deno.readTextFile(new URL("../next/index.ts", import.meta.url));
   assert(!/chooseKind\(/.test(src), "3:1 已退場，/next 不該再呼叫 chooseKind");
   assert(/task_dispatched", \{ p_task_id: `verify:\$\{pick\.id\}` \}/.test(src), "驗證派出去要蓋 task_dispatched('verify:<id>')");
-  assert(/pickQueueHead\(\[/.test(src), "三個來源要用 pickQueueHead 合成");
+  assert(/pickDispatchKind\(\{/.test(src), "驗證先於任務：要用 pickDispatchKind 決定這一輪派哪一類");
+  assert(!/pickQueueHead\(/.test(src), "/next 不再讓驗證跟任務比 queue_at（任務之間的比較在 pickDispatchKind 裡）");
 });
 

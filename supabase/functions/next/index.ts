@@ -8,7 +8,7 @@ import { fetchMyVotedRows } from "../_shared/my-votes.ts";
 import { fetchAllRows } from "../_shared/fetch-all.ts";
 import { retireIfNoOp } from "../_shared/noop-sweep.ts";
 import { withTaskPolitician } from "../_shared/task-politician.ts";
-import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, orderVerifyByHold, pickQueueHead, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
+import { excludeOwnAdjudications, filterAdjudicateTasks, filterAnsweredQuestionTasks, filterLeasedTasks, filterOwnSubmittedTasks, filterReportedDeadEnds, filterSkippedTasks, filterSaturatedTasks, filterVerifyCandidates, orderVerifyByHold, pickDispatchKind, fullQuestionIdsOf, LEASE_MINUTES, isManualTaskId, pickQueueTaskHead, taskTargetKey } from "../_shared/dispatch.ts";
 import { bulletinSourceUrl, requiredAgree } from "../_shared/consensus.ts";
 import { claimVerifyCandidate } from "../_shared/verify-claim.ts";
 import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFromRequest } from "../_shared/actor.ts";
@@ -410,7 +410,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
       if (claim.taken.length > 0) console.log(JSON.stringify({ event: "verify_claim_taken", endpoint: "next", agent_name: agentName, net: ipHash.slice(0, 8), taken: claim.taken, served: claim.pick?.id ?? null }));
       const pick = claim.pick;
       if (!pick) return null;
-      // 派過就排到隊尾（task_dispatched 蓋 now()）；記不成不影響派工
+      // 派過就往後排（task_dispatched：dispatch_count＋1，觸發器重算 queue_at；有票的驗證票只往後 1 小時，沒票 7 天）；記不成不影響派工
       try { await supabase.rpc("task_dispatched", { p_task_id: `verify:${pick.id}` }); } catch (e) { console.error("task_dispatched(verify):", e instanceof Error ? e.message : String(e)); }
       // profile_gap 交的沒帶 politician_id：跟落庫一樣用任務編號指的那位，驗證者看到的身份比對才跟落庫一致（#215 的原則）
       const verifyPayload = (withTaskPolitician(pick.contribution_type, pick.payload && typeof pick.payload === "object" ? pick.payload : {}, pick.task_id)) as Record<string, unknown>;
@@ -604,25 +604,23 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     }
 
     // SQL 已經排好序：第一筆就是最佳候選；手動任務並列第一時用 seed 散開（pickQueueTaskHead）。
-    // 只用 id 分辨種類（auto: 開頭是自動缺口），種類給 pickQueueHead 比同一刻的先後。
+    // 只用 id 分辨種類（auto: 開頭是自動缺口），種類給 pickDispatchKind 比同一刻的先後。
     const taskHead = pickQueueTaskHead(freeQueue, seed);
     const manualHead = taskHead && isManualTaskId(taskHead.task_id) ? taskHead : null;
     const autoHead = taskHead && !manualHead ? taskHead : null;
-    // 單一佇列（2026-09-22）：驗證、手動任務、自動缺口各出一個最前的，誰的 queue_at 最早誰先。
-    // 驗證不再有自己的節奏（3:1 退場）：它只是特定類型的任務。
+    // 驗證先於任務（2026-11-19）：驗證隊伍有能派給這隻代理的票就先派，沒有才在手動任務與自動缺口之間比 queue_at（pickDispatchKind）。
+    // 驗證隊伍內的順序在 SQL（contribution_verify_pool）：差一票的先 → 層級 → queue_at；沒有 3:1，驗證也不再跟任務比先後。
     const verifyHead = verifyFull ? null : (candidates[0] ?? null);
-    const taskHeads = [
-      manualHead ? { kind: "manual" as const, queue_at: manualHead.queue_at } : null,
-      autoHead ? { kind: "auto" as const, queue_at: autoHead.queue_at } : null,
-    ];
-    let head = pickQueueHead([
-      verifyHead ? { kind: "verify", queue_at: verifyHead.queue_at ?? verifyHead.created_at } : null,
-      ...taskHeads,
-    ]);
+    const taskHeads = {
+      manual: manualHead ? { queue_at: manualHead.queue_at } : null,
+      auto: autoHead ? { queue_at: autoHead.queue_at } : null,
+    };
+    let head = pickDispatchKind({ verifyAvailable: verifyHead !== null, ...taskHeads });
     if (head === "verify") {
       const served = await serveVerify();
       if (served) return served;
-      head = pickQueueHead(taskHeads);
+      // 驗證沒派成（併發被別人搶走、領取失敗）：退回任務
+      head = pickDispatchKind({ verifyAvailable: false, ...taskHeads });
     }
     if (submitFull) {
       // 提交額度用完：隊頭若是任務，驗證還沒試過——先派隊列中最前面那張合格驗證票
@@ -640,8 +638,8 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
         : `這個時段提交額度已用完（${resetClock} 台北重置），但驗證額度還有、驗證還可以做；目前剛好沒有你能驗證的票（不派任務，免得查完交件吃 429）；幾分鐘後再來，有新的待驗證票就會派給你`;
       return json({ ...base, kind: "none", reason, retry_after_min: retryMin });
     }
-    // 每台機器自己的 2:1（2026-09-24）與插隊期間的 1:2（09-27）2026-10-13 起拿掉：驗證與任務只照排序鍵（queue_at）先後，
-    // 驗證列本身多 14 天（queue_settings.verify_priority_seconds），自己能驗的就排在前面（docs/decisions/2026-10-13-派工排序改秒數.md）
+    // 每台機器自己的 2:1（2026-09-24）與插隊期間的 1:2（09-27）2026-10-13 起拿掉：任務之間照排序鍵（queue_at）先後；
+    // 2026-11-19 起驗證先於任務（有票可驗就先驗，見上面 pickDispatchKind；docs/decisions/2026-11-19-驗證先於任務.md）
     const manualFirst = head === "manual";
 
     // 隊頭是手動任務：用 id 單筆查描述等內容（不撈清單）。併發下它可能剛被關掉（派工列由觸發器收回，但這一輪的清單是之前讀的）——

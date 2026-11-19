@@ -31,4 +31,5 @@ _shared/slow-queries.test.ts /^S5 /
 _shared/sources-stage2b-read.test.ts
 _shared/term-policy-missing.test.ts
 _shared/verify-dispatches-private.test.ts
+_shared/verify-first-rank.test.ts
 _shared/village-progress-cooling.test.ts /^A7 /

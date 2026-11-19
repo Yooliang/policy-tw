@@ -169,7 +169,8 @@ INSERT INTO queue_settings VALUES (1, ${BS}, 0);
 CREATE TABLE task_boosts (id BIGINT PRIMARY KEY, label TEXT, filter JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE edit_history (id BIGSERIAL PRIMARY KEY, table_name TEXT, record_id TEXT, field TEXT, old_value JSONB, new_value JSONB, agent_name TEXT);
 CREATE TABLE task_dispatches (task_id TEXT PRIMARY KEY, boost_seconds BIGINT NOT NULL DEFAULT 0, last_dispatched_at TIMESTAMPTZ, priority_seconds INT, cool_until TIMESTAMPTZ,
-  dispatch_count INT NOT NULL DEFAULT 0, defer_seconds BIGINT NOT NULL DEFAULT 0, verify_follows_task BOOLEAN NOT NULL DEFAULT true, dispatch_base_at TIMESTAMPTZ, queue_at TIMESTAMPTZ);
+  dispatch_count INT NOT NULL DEFAULT 0, defer_seconds BIGINT NOT NULL DEFAULT 0, verify_follows_task BOOLEAN NOT NULL DEFAULT true, dispatch_base_at TIMESTAMPTZ, queue_at TIMESTAMPTZ,
+  verify_has_votes BOOLEAN NOT NULL DEFAULT false, verify_level SMALLINT, verify_rank SMALLINT);
 -- 命中名單：假的 task_boost_matches（回放 _hits）
 CREATE TABLE _hits (task_id TEXT, kind TEXT);
 CREATE FUNCTION task_boost_matches(p_filter JSONB) RETURNS TABLE(task_id TEXT, kind TEXT) LANGUAGE sql AS $f$ SELECT task_id, kind FROM _hits $f$;
@@ -179,6 +180,9 @@ CREATE FUNCTION verify_ticket_defer_seconds(p_task_id TEXT, p_flag BOOLEAN) RETU
 -- 驗證列的新排序鍵（20261104120000，policy-ops#198）：這支測的是取消 #92（任務列），驗證列只要能入列
 CREATE FUNCTION verify_ticket_base(a TEXT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT now() $f$;
 CREATE FUNCTION verify_ticket_step_seconds(a TEXT) RETURNS INT LANGUAGE sql AS $f$ SELECT 0 $f$;
+CREATE FUNCTION verify_ticket_step_seconds(a TEXT, b BOOLEAN) RETURNS INT LANGUAGE sql AS $f$ SELECT 0 $f$;
+CREATE FUNCTION verify_ticket_has_votes(a TEXT) RETURNS BOOLEAN LANGUAGE sql AS $f$ SELECT false $f$;
+CREATE FUNCTION verify_ticket_level(a TEXT) RETURNS SMALLINT LANGUAGE sql AS $f$ SELECT 1::smallint $f$;
 CREATE FUNCTION verify_ticket_freeze_base(a TIMESTAMPTZ, b INT, c BIGINT, d INT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT a $f$;
 CREATE FUNCTION verify_ticket_key(a TIMESTAMPTZ, b INT, c BIGINT, d INT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT now() $f$;
 CREATE FUNCTION verify_queue_key(a TEXT, b BOOLEAN, c TIMESTAMPTZ, d INT, e BIGINT, f BIGINT) RETURNS TIMESTAMPTZ LANGUAGE sql AS $f$ SELECT now() $f$;

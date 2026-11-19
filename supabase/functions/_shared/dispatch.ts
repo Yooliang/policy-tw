@@ -1,8 +1,10 @@
 /**
  * GET /next 的派工決策（純函式，可測）。
  *
- * 單一佇列（2026-09-22，使用者裁示）：驗證也是任務，不再另外排程、不再 3:1 交錯。
- * 三個來源（待驗證貢獻、手動任務、自動缺口）各出一個最前的候選，誰的 queue_at 最早誰先（pickQueueHead）。
+ * 驗證先於任務（2026-11-19，小良哥拍板，取代 2026-09-22「驗證與任務同一條佇列、誰的 queue_at 最早誰先」）：
+ * 驗證隊伍裡有能派給這隻代理的票就先派（pickDispatchKind）；沒有，才在手動任務與自動缺口之間比 queue_at（pickQueueHead）。
+ * 驗證隊伍內的順序在 SQL（contribution_verify_pool，20261119100000）：差一票的先 → 層級（縣市 → 鄉鎮 → 村里）→ queue_at。
+ * 仍然沒有 3:1：驗證不另外排程、也不交錯，只是「有票可驗就先驗」。
  * queue_at 是 task_dispatches 的單一排序鍵：新項目＝進佇列的當下；派過＝派出的當下（回到隊尾）；
  * 1980 年段＝有人插隊（task_boost，一次性）。
  * 派 verify 時排除：自己提交（agent_name 或 ip_hash 相同）、已投過、分數已達目標（在 SQL 池子裡做）。
@@ -25,6 +27,24 @@ export function pickQueueHead(heads: ReadonlyArray<{ kind: QueueHeadKind; queue_
     if (!best || t < best.t || (t === best.t && HEAD_ORDER[h.kind] < HEAD_ORDER[best.kind])) best = { kind: h.kind, t };
   }
   return best?.kind ?? null;
+}
+
+/**
+ * 這一輪該派哪一類（2026-11-19 驗證先於任務）：
+ *   驗證隊伍有能派給這隻代理的票（verifyAvailable）→ "verify"，不跟任務比先後；
+ *   沒有 → 手動任務與自動缺口比 queue_at（pickQueueHead，同一刻手動任務先）；兩個都沒有 → null。
+ * 呼叫端派驗證沒派成（併發被別人搶走）要自己退回 pickQueueHead([manual, auto])。
+ */
+export function pickDispatchKind(input: {
+  verifyAvailable: boolean;
+  manual: { queue_at: string | null | undefined } | null;
+  auto: { queue_at: string | null | undefined } | null;
+}): QueueHeadKind | null {
+  if (input.verifyAvailable) return "verify";
+  return pickQueueHead([
+    input.manual ? { kind: "manual", queue_at: input.manual.queue_at } : null,
+    input.auto ? { kind: "auto", queue_at: input.auto.queue_at } : null,
+  ]);
 }
 
 /**

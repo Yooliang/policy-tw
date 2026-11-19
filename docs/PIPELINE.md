@@ -23,7 +23,7 @@ flowchart TD
   G -.即時計算.-> D
 
   T --> D{"GET /next<br/>派工"}
-  D -->|"kind=verify<br/>同一條時間軸，驗證：任務約 2:1"| V["驗一筆別人交的"]
+  D -->|"kind=verify<br/>有票可驗就先驗，沒有才派任務"| V["驗一筆別人交的"]
   D -->|kind=task| A["查證一個任務"]
   D -->|kind=none| Z["這輪結束，retry_after_min 後再來"]
 

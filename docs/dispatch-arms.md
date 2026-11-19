@@ -45,7 +45,7 @@
 1. 驗證池 `contribution_verify_pool`（排除自己交的、已投過、分數已達目標；在 SQL 的 LIMIT 之前）出一個最前的候選。2026-11-09 起（協議 1.124.0）多一條「沒人在做的先派」：被別的代理握著（30 分鐘內派到、未投票）的人數 >= 還缺票數（目標 − 分數）的票先不出（`p_skip_held`），零人握著的排前面；沒有別的可派時 `/next` 用 `p_skip_held=false` 再取一次，維持原行為。任務列本來就跳過別人認領中的。
 2. 任務佇列 `contribution_queue_tasks` 一次取一個窗口（`QUEUE_WINDOW`），程式再過濾一輪（`filterLeasedTasks` 等，應與 SQL 重複；若全被剔光會 `console.error`，代表有過濾器沒搬進 SQL）。
 3. 任務窗口依 id 分手動（uuid，`isManualTaskId`）與自動（`auto:`）各取最前一個。
-4. `pickQueueHead`：三個候選（verify／manual／auto）比 `queue_at`，**最早的先**；同時刻 `verify` ＞ `manual` ＞ `auto`。時間用 `Date.parse` 比，不用字串比。
+4. `pickDispatchKind`（2026-11-19 驗證先於任務）：驗證池有能派給這隻代理的票就派驗證，不跟任務比先後；沒有才用 `pickQueueHead` 在 manual／auto 之間比 `queue_at`（同時刻 `manual` ＞ `auto`，時間用 `Date.parse` 比）。驗證池內的順序在 SQL：`verify_rank`（有票 0／沒票 3，加層級 縣市 0、鄉鎮 1、村里 2）→ `queue_at` → `task_id`；有票的票每被領走只往後排 1 小時，沒人投過的 7 天（`20261119100000`）。
 5. 沒有 2:1 或 3:1 交錯（2026-10-13 起全拿掉）；沒有候選時回 `none`。
 
 ## 2. 每條臂
