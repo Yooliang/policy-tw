@@ -15,6 +15,7 @@ import { agentNameProblem, anonReservedBlock, nextIdentityFields, resolveActorFr
 import { QUOTA_DEFAULTS, submitQuotaFor } from "../_shared/contribute-handler.ts";
 import { loadQuotaLimits } from "../_shared/quota-settings.ts";
 import { cachedQueueCounts } from "../_shared/queue-counts-cache.ts";
+import { cachedPendingAdjudications } from "../_shared/pending-adjudications-cache.ts";
 import { verifyQuotaFor } from "../_shared/verify-handler.ts";
 import { serveStrongLane } from "../_shared/strong-lane-claim.ts";
 import { agentToolNoticeOnce } from "../_shared/agent-tool-hint.ts";
@@ -152,10 +153,11 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
     const [pendingRes, countsRes, adjRows, mySubmittedRows, autoRes, myVotedOnRows, ipContribRes, ipVoteRes, myAnswersRows, skipsRes, breakerRes] = await Promise.all([
       timed("pool", pendingQuery),
       timed("counts", cachedQueueCounts(region, () => supabase.rpc("contribution_queue_task_counts", { p_region: region })) /* 佇列上各型別的任務數（自動缺口＋手動任務）：open_tasks 讀計數，不撈清單；最多 60 秒前的值（2026-11-19，每次 1.0～1.5 秒） */),
-      timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）
-      fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
-        supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
-          .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to))),
+      timed("adj", // 未定案的裁決（等它的票就好，先不再派同一筆的裁決任務）；全站共用，最多 60 秒前的清單（2026-11-19，見 _shared/pending-adjudications-cache.ts）
+      cachedPendingAdjudications(() =>
+        fetchAllRows<{ payload: Record<string, unknown> }>("pending adjudications", (from, to) =>
+          supabase.from("contributions").select("payload").eq("contribution_type", "adjudication")
+            .in("status", ["pending", "verified"]).order("created_at", { ascending: true }).range(from, to)))),
       timed("my_submitted", // 這個代理（同代號或同來源 IP）交過、還在等票的任務（資料庫還沒變，缺口會被重算出來，不該再派）
       fetchAllRows<{ task_id: string }>("my submitted tasks", (from, to) =>
         supabase.from("contributions").select("task_id").or(`agent_name.eq.${agentName},contributor_ip_hash.eq.${ipHash}`)
