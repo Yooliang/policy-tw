@@ -282,6 +282,7 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 - 插隊：`20260921000030_single_queue_boosts.sql`、`20261019050000_boost_no_seed.sql`、`20261104110000_boost_maintainer_only.sql`、`20261029050000_cand_no_front_pull_hourly.sql`（之後多次改定義，現行見 `pg_get_functiondef`）
 - 停放：`20261028130000_park_village_policy_web_requests.sql`
 - 網站請求併入缺口：`20261111010000_web_request_merge_gap.sql`（視圖 `web_request_coverage`、函式 `web_request_gap_sync()`／`web_request_gap_boost()`／`web_request_close_filled()`、pg_cron `web-request-gap-sync-10min`；決策 `docs/decisions/2026-11-11-網站請求併入既有缺口.md`）
+- 對帳提速：`20261119180000_web_request_has_pledges_use_index.sql`（`web_request_has_pledges` 改以 uuid 比對人物、走 `policies_visible_idx`；`web_request_gap_sync` 每輪約 5 秒花在這，改後結案那一步約 0.26 秒，語意不變）
 - `/next`：`supabase/functions/next/index.ts`、`supabase/functions/_shared/dispatch.ts`（`pickQueueHead`）
 - 規則與決策的來源：`CLAUDE.md`「派工佇列」條目、`docs/DECISIONS.md`、`docs/PIPELINE.md`（自動缺口任務一覽）、`docs/PLAN-tasks-as-rows.md`（歷史設計）
 
