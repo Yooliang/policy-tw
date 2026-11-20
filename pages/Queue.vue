@@ -9,10 +9,10 @@ import Hero from '../components/Hero.vue'
 import { ListOrdered } from 'lucide-vue-next'
 
 // 派工佇列（2026-10-19，#684）：跟站務主控台隊列頁同一份資料，來源是 console_queue_state()（migration 20261017000201 起，anon 可執行、唯讀）。
-// 隊頭前 60 名（任務與驗證票合併，照 /next 順序）；維護者：正式頁不自動重新整理，只有手動「重新整理」。
+// 隊頭前 60 名（照 /next 實際順序：驗證票先於任務；驗證票依 verify_rank → queue_at，任務依 queue_at；#989）；維護者：正式頁不自動重新整理，只有手動「重新整理」。
 // 整頁照搬（維護者 10-19：提供透明度），只拿掉「隊頭第一筆可派」卡片；投太多輪區塊含各票代號與理由，函式本來就是 anon 可讀。
 type Status = 'ready' | 'dead_end' | 'saturated' | 'question_full' | 'parked' | 'cooling' | 'blocked'
-type HeadRow = { pos: number; kind?: 'task' | 'verify'; task_type: string; source: string; status: Status; subject: string; queue_at: string; dispatch_count: number; last_dispatched_at: string | null }
+type HeadRow = { pos: number; kind?: 'task' | 'verify'; verify_rank?: number | null; task_type: string; source: string; status: Status; subject: string; queue_at: string; dispatch_count: number; last_dispatched_at: string | null }
 type OvervotedItem = { contribution_id?: string; contribution_type?: string; subject?: string; status?: string; votes?: number; stopped?: boolean; verdicts?: { verdict?: string; agent?: string; reason?: string }[] }
 type Overvoted = { baseline?: number; flag_votes?: number; stop_votes?: number; total?: number; items?: OvervotedItem[] }
 type State = {
@@ -354,7 +354,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
       </section>
 
       <section class="bg-white rounded-2xl shadow-lg border border-slate-200 p-4 sm:p-5">
-        <h2 class="font-black text-navy-900 mb-3">隊頭前 {{ state.head.length }} 名</h2>
+        <h2 class="font-black text-navy-900 mb-3">隊頭前 {{ state.head.length }} 名<span class="ml-2 rounded px-1.5 py-0.5 text-xs font-normal whitespace-nowrap" :style="chipStyle('kind_verify')">驗證先於任務</span></h2>
         <div class="overflow-x-auto">
           <table class="w-full min-w-[44rem]">
             <thead class="text-left text-xs text-slate-500">
