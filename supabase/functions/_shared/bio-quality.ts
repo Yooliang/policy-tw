@@ -18,6 +18,8 @@ export const BIO_RULES: readonly BioRule[] = [
   { kind: "提到工具或指令", re: /pdftotext|bbox|pymupdf|\bcurl\b|\bAPI\b|\bJSON\b|\.pdf\b|[0-9a-f]{16,}/i },
   { kind: "在描述查證過程", re: /我用|核過|核對|查詢結果|回\s*\d+\s*筆|第\s*\d+\s*頁|搜尋了|搜了/ },
   { kind: "在自述查無或留空", re: /查無|未載|留空|不填|尚未發布故/ },
+  // 「代理」是職稱的一部分時（代理人、代理鄉長、代理市長、代理主任…）不算
+  { kind: "提到 AI／代理／系統", re: /(?<![A-Za-z])(?:AI|agents?|LLM|Claude|GPT|Gemini|Jev)(?![A-Za-z])|人工智慧|代理(?!人|.?長|主任|主席|議員|委員)|本站|系統|自動|模型/i },
   { kind: "出現對讀者無意義的系統詞", re: /任務|交件|驗證者|politician_id/i },
 ];
 
@@ -40,7 +42,7 @@ export function bioProblems(bio: string): string[] {
 export function bioJudgePrompt(): string {
   return "這一題判斷 state.bio 這段文字是不是「人物介紹」。簡介只能描述這個人本身：身分、現任職務、經歷、參選紀錄。" +
     "不能描述「我怎麼查、查到什麼沒查到」：例如用了什麼工具或指令、查了哪個資料庫或網站、查詢回幾筆、第幾頁、某項資料查無或尚未公布所以留空，都不是人物介紹。" +
-    "只要整段或其中一部分是在交代查證過程或資料缺漏，就選 not_intro；整段都在介紹這個人才選 intro。";
+    "另外，簡介裡提到 AI、人工智慧、代理（agent，不含「代理人」「代理鄉長」這類職稱）、本站、系統、自動、模型、Claude、GPT、Gemini、Jev 之類的字眼，也一律選 not_intro。只要整段或其中一部分是在交代查證過程或資料缺漏，就選 not_intro；整段都在介紹這個人才選 intro。";
 }
 
 export function bioQuestion(): JevQuestion {
