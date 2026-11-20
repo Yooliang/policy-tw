@@ -175,3 +175,30 @@ Deno.test("B10 還原驗證：括號規則拿掉，B1 必須轉紅（括號裡�
   assert((await bio(ids.bad)) !== REAL_BAD_WANT);
   await db.close();
 });
+
+Deno.test("B11 AI／代理／系統字眼：提到就整句刪；職稱「代理○長」與一般詞彙不誤砍", async () => {
+  const db = new PGlite();
+  await db.exec(MIG_SQL.replace(/^WITH cand AS[\s\S]*$/m, ""));
+  const f = async (s: string) => (await db.query<{ v: string | null }>(`SELECT bio_strip_process_sentences($1) AS v`, [s])).rows[0].v;
+  // 該刪
+  assertEquals(await f("甲候選人。由 AI 代理整理。"), "甲候選人。");
+  assertEquals(await f("甲候選人。本站資料由 agent 彙整。"), "甲候選人。");
+  assertEquals(await f("甲候選人。內容由語言模型自動整理。"), "甲候選人。");
+  assertEquals(await f("甲候選人。Claude 與 Gemini 皆查無。"), "甲候選人。");
+  assertEquals(await f("甲候選人。資料經 Jev 判定。"), "甲候選人。");
+  assertEquals(await f("甲候選人。本系統自動產生。"), "甲候選人。");
+  assertEquals(await f("甲候選人。由代理處理。"), "甲候選人。");
+  // 該留
+  for (
+    const keep of [
+      "曾任代理鄉長。", "曾任代理市長、代理縣長與代理區長。", "委託代理人出席。",
+      "資訊系統工程師，推動自動化產線。", "曾任模型工廠廠長。",
+      "任職於NAPIER公司。", "擔任FAIR組織理事。",
+      "曾任大林國小代理教師、民眾黨市黨部代理主委。", "曾在馬祖酒代理等家族產業歷練。", "長期投入兒童程式與AI教育推廣。", "任職於 AI 科技公司擔任業務。", "2023年1月起代理富里鄉長。",
+    ]
+  ) assertEquals(await f(keep), keep, keep);
+  // 英文要整字：獨立的 API／AI 要刪
+  assertEquals(await f("甲。查詢API回傳空值。"), "甲。");
+  assertEquals(await f("甲。使用 AI 協助。"), "甲。");
+  await db.close();
+});
