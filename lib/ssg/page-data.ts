@@ -4,6 +4,7 @@ import type { Lineage, Policy, Politician } from '../../types'
 import { isRunningCandidate } from '../candidate-status'
 import { taipeiToday } from '../policy-stage'
 import { isProgressCase, lineageMateIdsOf } from '../policy-chain'
+import { lineagePeople } from '../lineage-page'
 import { slimRoutePart } from './slim-routes'
 import { trimPolicySources } from '../sources'
 import { isCounty, SPECIAL_MUNICIPALITIES } from '../election-regions'
@@ -38,14 +39,7 @@ function paramString(value: string | string[] | undefined): string {
   return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 }
 
-/** 政策脈絡頁提到的人（#349）：政見提出者、參與者、交接的前後任。預渲染與邊緣 SSR 共用 */
-export function lineagePeople(lineage: Lineage, policies: readonly Policy[]): string[] {
-  return [...new Set([
-    ...policies.map((p) => String(p.politicianId)),
-    ...lineage.participants.map((p) => p.politicianId),
-    ...lineage.handovers.flatMap((h) => [h.fromPoliticianId, h.toPoliticianId]),
-  ])]
-}
+export { lineagePeople }
 
 function politiciansReferencedBy(policies: Policy[], all: Politician[]): Politician[] {
   const ids = new Set(policies.map((p) => String(p.politicianId)))

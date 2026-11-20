@@ -220,13 +220,12 @@ Deno.test('參與者：每一列帶 representative 旗標（頁面只對民意�
   assertEquals(participantRows([], [pol('p1', 'a', 2022)], nameOf)[0].representative, false, '沒給判斷函式一律不是（不替人多講一句沒查證的）')
 })
 
-Deno.test('脈絡頁：交接標題與「還沒有交接紀錄」掛在交接區條件上、「還沒有官方紀錄的角色」只對民意代表', async () => {
+Deno.test('脈絡頁：「尚無交接紀錄」掛在交接區條件上、「尚無官方紀錄」只對民意代表（#675 第三期改成白名單標籤）', async () => {
   const page = (await Deno.readTextFile(new URL('../pages/LineagePage.vue', import.meta.url))).replace(/\r\n/g, '\n')
-  assert(/<h2 v-if="showHandovers"[^\n]*前後任怎麼交接/.test(page), '「前後任怎麼交接」標題只在交接區成立時才出現')
-  assert(/<p v-if="showHandovers && lineage\.handovers\.length === 0"[^>]*>\s*還沒有交接紀錄/.test(page), '「還沒有交接紀錄」不能無條件顯示')
-  assert(/<span v-if="row\.representative"[^>]*>還沒有官方紀錄的角色/.test(page), '「還沒有官方紀錄的角色」只對民意代表')
+  assert(/<p v-if="showHandovers && lineage\.handovers\.length === 0"[^>]*>\{\{ T\.handoverMissing \}\}/.test(page), '「尚無交接紀錄」不能無條件顯示')
+  assert(/<span v-if="row\.representative"[^>]*>\{\{ T\.noOfficialRole \}\}/.test(page), '「尚無官方紀錄」只對民意代表')
   assert(/needsHandoverRecord\(/.test(page) && /hasBeenRepresentative\(/.test(page), '頁面要用 lib/lineage.ts 的判斷，不是自己另寫一份')
-  assertEquals(page.split('前後任怎麼交接').length - 1, 1, '交接標題只能出現一次')
+  assert(!page.includes('前後任怎麼交接'), '交接標題與說明不再放在主頁（交接併進大事記）')
 })
 
 Deno.test('別處不預設脈絡有交接：政見頁的脈絡卡不寫交接說明、脈絡一覽 0 筆交接不顯示', async () => {
