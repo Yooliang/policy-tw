@@ -709,12 +709,12 @@ Deno.test("D3 立場可掛政見（policy_id）；政見刪掉只清空不連坐
   assertEquals(f.length, 1);
 });
 
-Deno.test("D4 起跑日 dispatch_start_on 預設 2026-11-29（只加欄、沒有函式讀它）", async () => {
+Deno.test("D4 起跑日 dispatch_start_on 預設 2026-11-29（一期只加欄；二期 20261120170000 才讀，守門在 lineage-arms-start-date.test.ts）", async () => {
   const db = await buildDb();
   assertEquals((await rows<{ d: string }>(db, `SELECT dispatch_start_on::text AS d FROM lineage_settings WHERE id = 1`))[0].d, "2026-11-29");
   for (const n of await migrationNames()) {
-    if (n === MIG_NAME) continue;
-    assertFalse((await readMig(n)).includes("dispatch_start_on"), `${n} 不該讀 dispatch_start_on（一期只加欄）`);
+    if (n === MIG_NAME || n === "20261120170000_lineage_arms_start_date.sql") continue;
+    assertFalse((await readMig(n)).includes("dispatch_start_on"), `${n} 不該讀 dispatch_start_on（只有二期那支讀）`);
   }
   assertFalse(code(MIG).replace(/ALTER TABLE lineage_settings[^;]*;/g, "").replace(/COMMENT ON COLUMN lineage_settings\.dispatch_start_on IS '[^']*';/g, "").replace(/'[^']*'/g, "").includes("dispatch_start_on"), "migration 本身只有 ADD COLUMN");
 });

@@ -80,8 +80,11 @@ Deno.test("A3 帶清單指紋的臂（task_id 末段是 .fp）全部登記在 ta
   for (const n of await migrationNames()) for (const a of fpArms(await readMig(n))) found.add(a);
   // 掃得到這三臂（正見的 lineage／duplicate_policy 與日本站的 duplicate_policy），不是掃空了就過
   for (const a of registered) assert(found.has(a), `掃描沒有抓到 ${a}`);
-  assertEquals([...found].sort(), registered, "有臂的 task_id 末段是 .fp 卻沒登記進 task_rekey_arms（換指紋就排回隊尾）：加進清單，或確認它的末段不是清單指紋");
-  // 日本站的清單與正見同一份
+  // 二期（20261120170000）加兩支脈絡缺口臂：現行清單＝這支的三臂＋它們；日本站暫不跟（走樣測試用 before 登記）
+  const latest = armsOfFn(await readMig("20261120170000_lineage_arms_start_date.sql"), "task_rekey_arms");
+  assertEquals(latest, [...registered, "lineage_event_missing", "lineage_stance_missing"].sort());
+  assertEquals([...found].sort(), latest, "有臂的 task_id 末段是 .fp 卻沒登記進 task_rekey_arms（換指紋就排回隊尾）：加進清單，或確認它的末段不是清單指紋");
+  // 日本站的清單是 20261019 的三臂
   const jp = await readMig(JP_MIG_NAME);
   assertEquals(armsOfFn(jp, "policy_jp.task_rekey_arms"), registered);
   // 偵測器：假的臂抓得到，handover_missing 那種「指紋是交接本身的鍵」不算
