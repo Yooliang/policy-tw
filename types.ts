@@ -327,6 +327,53 @@ export interface LineageStatus {
   source: LineageSource | null;
 }
 
+export type StanceKind = 'support' | 'oppose' | 'conditional';
+export type DatePrecision = 'day' | 'month' | 'year';
+export type LineageEventType = 'decided' | 'approved' | 'budget_added' | 'budget_cut' | 'started' | 'completed' | 'paused' | 'cancelled' | 'resumed' | 'other';
+
+/** 脈絡的立場（lineages_full.stances，#675）：誰在哪天表態、原文摘句、出處；人物合併後 politicianId 已是保留者 */
+export interface LineageStance {
+  id: string;
+  politicianId: string;
+  name: string;
+  stance: StanceKind;
+  /** 有條件時的條件；其他立場是 null */
+  condition: string | null;
+  statedOn: string;
+  datePrecision: DatePrecision;
+  quote: string;
+  note: string | null;
+  sourceUrl: string;
+  sourceLocator: string;
+  source: LineageSource | null;
+}
+
+/** 脈絡的事件（lineages_full.events，#675）：政府或議會做的決定 */
+export interface LineageEvent {
+  id: string;
+  eventType: LineageEventType;
+  occurredOn: string;
+  datePrecision: DatePrecision;
+  level: LineageLevel;
+  region: string | null;
+  subRegion: string | null;
+  decidedBy: string;
+  description: string;
+  /** 誰提案或爭取；沒有就是 null */
+  initiator: { politicianId: string; name: string; note: string | null } | null;
+  sourceUrl: string;
+  sourceLocator: string;
+  source: LineageSource | null;
+}
+
+/** 涵蓋地方的一格（lineages_full.coverage，#675）：由合格政見推導 */
+export interface LineageCoverage {
+  level: LineageLevel;
+  region: string | null;
+  subRegion: string | null;
+  policyCount: number;
+}
+
 /** 一條政策脈絡（視圖 lineages_full 一列，#349）：一件事在某一層級、某一地方的來龍去脈 */
 export interface Lineage extends LineageSummary {
   policyIds: string[];
@@ -335,6 +382,15 @@ export interface Lineage extends LineageSummary {
   links: LineageLink[];
   /** 現行現況；還沒有就是 null（畫面不顯示） */
   status?: LineageStatus | null;
+  /** #675 第一期新欄；舊視圖沒有這些欄（缺欄當空） */
+  searchTerms?: string[];
+  coverage?: LineageCoverage[];
+  /** 脈絡本身（摘要的依據）的出處 */
+  sources?: LineageSource[];
+  stances?: LineageStance[];
+  events?: LineageEvent[];
+  /** 現況歷史共幾列 */
+  statusCount?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -676,6 +732,13 @@ export interface RawLineage extends RawLineageSummary {
   handovers?: Array<{ id: string; from_politician_id: string; from_name?: string | null; from_election_id?: number | null; to_politician_id: string; to_name?: string | null; to_election_id?: number | null; handover_type: string; decided_on?: string | null; note: string; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
   links?: Array<{ id: string; direction: string; lineage_id: string; title: string; level: string; region?: string | null; sub_region?: string | null; link_type: string; note: string; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
   status?: { phase?: string | null; text?: string | null; as_of?: string | null; source_url?: string | null; source?: RawLineageSource | null } | null;
+  /** #675 第一期尾端新欄；舊視圖沒有 */
+  coverage?: Array<{ level: string; region?: string | null; sub_region?: string | null; policy_count?: number | null }> | null;
+  search_terms?: string[] | null;
+  sources?: RawLineageSource[] | null;
+  stances?: Array<{ id: string; politician_id: string; name?: string | null; stance: string; condition?: string | null; stated_on: string; date_precision?: string | null; quote: string; note?: string | null; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
+  events?: Array<{ id: string; event_type: string; occurred_on: string; date_precision?: string | null; level: string; region?: string | null; sub_region?: string | null; decided_by: string; description: string; initiator?: { politician_id: string; name?: string | null; note?: string | null } | null; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
+  status_count?: number | null;
 }
 
 export interface RawPolicyElement {

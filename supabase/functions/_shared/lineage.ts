@@ -242,6 +242,45 @@ export const STATUS_TEXT_MAX = 120;
 export const STATUS_NOTE_MIN = 20;
 export const STATUS_NOTE_MAX = 300;
 
+// ── 立場、事件（policy-tw#675 第一期；SQL：migration 20261120120000_lineage_stances_events.sql 的 lineage_stances／lineage_events）──
+// **只有資料櫃的常數**：第一期沒有任何交件型別、驗證或派工臂會用到它們（第二期才接，預設關；lineage-stances-events.test.ts 守住「現在派不出、收不進」）。
+// 列舉值與字數跟 SQL CHECK 同一組，測試逐案比對。
+export const STANCE_KINDS = ["support", "oppose", "conditional"] as const;
+export type StanceKind = (typeof STANCE_KINDS)[number];
+export const STANCE_LABEL: Record<StanceKind, string> = { support: "支持", oppose: "反對", conditional: "有條件" };
+export const STANCE_CONDITION_MIN = 6;
+export const STANCE_CONDITION_MAX = 200;
+export const STANCE_QUOTE_MIN = 8;
+export const STANCE_QUOTE_MAX = 300;
+export const STANCE_NOTE_MAX = 200;
+/** 日期精度：老的質詢紀錄常只確定年份，只知道年或月就填該期間第一天並標精度 */
+export const DATE_PRECISIONS = ["day", "month", "year"] as const;
+export type DatePrecision = (typeof DATE_PRECISIONS)[number];
+export const EVENT_TYPES = ["decided", "approved", "budget_added", "budget_cut", "started", "completed", "paused", "cancelled", "resumed", "other"] as const;
+export type EventType = (typeof EVENT_TYPES)[number];
+export const EVENT_TYPE_LABEL: Record<EventType, string> = {
+  decided: "拍板",
+  approved: "核定",
+  budget_added: "編列預算",
+  budget_cut: "預算刪減",
+  started: "動工或開辦",
+  completed: "完工或上路",
+  paused: "暫緩",
+  cancelled: "喊卡或終止",
+  resumed: "重啟",
+  other: "其他",
+};
+export const EVENT_DECIDED_BY_MIN = 2;
+export const EVENT_DECIDED_BY_MAX = 40;
+export const EVENT_DESCRIPTION_MIN = 10;
+export const EVENT_DESCRIPTION_MAX = 300;
+export const EVENT_INITIATOR_NOTE_MIN = 2;
+export const EVENT_INITIATOR_NOTE_MAX = 30;
+/** 往外擴用的專有名詞（lineages.search_terms）：最多幾個、每個幾字；必須是標題的子字串（SQL 函式 lineage_terms_in_title） */
+export const SEARCH_TERMS_MAX = 5;
+export const SEARCH_TERM_MIN = 2;
+export const SEARCH_TERM_MAX = 12;
+
 /** lineage_status 交件 → 要寫進 lineage_statuses 的值（schema 已驗過形狀；source_url 沒給就是這筆交件的第一個來源） */
 export interface StatusValues {
   phase: StatusPhase;
