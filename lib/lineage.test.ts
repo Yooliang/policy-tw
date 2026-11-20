@@ -11,6 +11,7 @@ import {
   BASIS_LABEL, buildTimeline, EVENT_TYPE_LABEL, STANCE_LABEL, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace, lineageTotal,
   mapLineage, mapLineageSummary, needsHandoverRecord, officeTermEnd, ORIGIN_LABEL, participantRows, policyMeta, ROLE_LABEL, termRoleLabel,
 } from './lineage.ts'
+import { policyStage } from './policy-stage.ts'
 import * as shared from '../supabase/functions/_shared/lineage.ts'
 import type { Lineage, LineageHandover, LineageParticipant, Policy, RawLineage } from '../types.ts'
 
@@ -102,9 +103,17 @@ Deno.test('時間軸的職位：當選才寫職位，沒當選或還沒投票寫
   assertEquals(termRoleLabel(person, 2022, new Map(), today), '縣市長參選人', '查不到投票日就當還沒投票')
   assertEquals(termRoleLabel(undefined, 2022), '')
   const label = (s: string) => ({ 'Campaign Pledge': '競選承諾', 'In Progress': '進行中' } as Record<string, string>)[s] ?? s
-  assertEquals(policyMeta({ origin: 'pledge', status: 'Campaign Pledge' as Policy['status'] }, label), '競選承諾')
-  assertEquals(policyMeta({ origin: 'pledge', status: 'In Progress' as Policy['status'] }, label), '競選承諾・進行中')
-  assertEquals(policyMeta({ origin: null, status: 'In Progress' as Policy['status'] }, label), '進行中')
+  assertEquals(policyMeta({ origin: 'pledge', status: 'Campaign Pledge' as Policy['status'] }, label, 'policy'), '政見', '當選＋Campaign Pledge')
+  assertEquals(policyMeta({ origin: 'pledge', status: 'Proposed' as Policy['status'] }, label, 'policy'), '政見', 'Proposed 也算還沒開始')
+  assertEquals(policyMeta({ origin: 'pledge', status: 'In Progress' as Policy['status'] }, label, 'governance'), '施政・進行中', '當選＋In Progress')
+  assertEquals(policyMeta({ origin: 'policy_address', status: 'In Progress' as Policy['status'] }, label, 'governance'), '施政・施政報告・進行中', '階段・來源・進度')
+  assertEquals(policyMeta({ origin: null, status: 'In Progress' as Policy['status'] }, label, 'governance'), '施政・進行中')
+  assertEquals(policyMeta({ origin: 'pledge', status: 'Campaign Pledge' as Policy['status'] }, label, 'pledge'), '承諾', '理論上脈絡裡沒有，算出承諾就照印')
+  // 階段由 policyStage 算：已投票且當選（洪孟楷式）
+  const elected = [{ electionId: 7, candidacyStatus: 'elected', electionDate: '2024-01-13' }]
+  const stageOf = (status: string) => policyStage({ status: status as Policy['status'], origin: 'pledge', electionId: 7 }, elected, '2026-11-20')
+  assertEquals(policyMeta({ origin: 'pledge', status: 'Campaign Pledge' as Policy['status'] }, label, stageOf('Campaign Pledge')), '政見')
+  assertEquals(policyMeta({ origin: 'pledge', status: 'In Progress' as Policy['status'] }, label, stageOf('In Progress')), '施政・進行中')
 })
 
 const L = (id: string, level: Lineage['level'], region: string | null, category = '交通建設', title = id): Lineage => ({

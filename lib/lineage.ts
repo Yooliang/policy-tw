@@ -14,7 +14,8 @@ import type {
   DatePrecision, HandoverType, Lineage, LineageCoverage, LineageEvent, LineageEventType, LineageHandover, LineageLevel, LineageLink, LineageLinkType,
   LineageParticipant, LineageSource, LineageStance, LineageStatus, StanceKind, LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
 } from '../types'
-import { isElectedTerm, isElectionVoted, taipeiToday } from './policy-stage'
+import { isElectedTerm, isElectionVoted, stageWord, taipeiToday } from './policy-stage'
+import type { PolicyStage } from './policy-stage'
 
 export const LINEAGE_NAME = '政策脈絡'
 export const LINEAGE_SHORT_NAME = '脈絡'
@@ -341,11 +342,18 @@ export function hasBeenRepresentative(
   })
 }
 
-/** 時間軸上一條政見的小字：政見從哪裡來＋目前進度；「競選承諾」本身是來源不是進度，不重複印 */
-export function policyMeta(p: Pick<Policy, 'origin' | 'status'>, statusLabel: (s: string) => string): string {
-  const parts: string[] = []
-  if (p.origin) parts.push(ORIGIN_LABEL[p.origin])
-  if (String(p.status) !== 'Campaign Pledge' || !p.origin) parts.push(statusLabel(String(p.status)))
+/**
+ * 時間軸上一條政見的小字：階段詞（承諾／政見／施政，2026-11-05 四階段，脈絡只收當選後的政見）＋來源＋進度，用「・」連、去重。
+ *   - 第一段永遠是階段詞（stageWord(stage)）；不特判，算出「承諾」就照印
+ *   - origin 不是 pledge 才接來源（施政報告、議會提案、預算）；pledge 就是階段詞本身，不重複
+ *   - 狀態還在 Campaign Pledge／Proposed（還沒開始）不接，離開才接 statusLabel
+ * 例：當選＋Campaign Pledge →「政見」；當選＋In Progress →「施政・進行中」；policy_address＋In Progress →「施政・施政報告・進行中」
+ */
+export function policyMeta(p: Pick<Policy, 'origin' | 'status'>, statusLabel: (s: string) => string, stage: PolicyStage): string {
+  const parts: string[] = [stageWord(stage)]
+  if (p.origin && p.origin !== 'pledge') parts.push(ORIGIN_LABEL[p.origin])
+  const status = String(p.status)
+  if (status !== 'Campaign Pledge' && status !== 'Proposed') parts.push(statusLabel(status))
   return [...new Set(parts)].join('・')
 }
 
