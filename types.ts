@@ -343,6 +343,8 @@ export interface LineageStance {
   datePrecision: DatePrecision;
   quote: string;
   note: string | null;
+  /** 有爭議（disputed_at 有值）：公開仍顯示，畫面標「有爭議」；下架的列視圖已濾掉 */
+  disputed: boolean;
   sourceUrl: string;
   sourceLocator: string;
   source: LineageSource | null;
@@ -361,6 +363,8 @@ export interface LineageEvent {
   description: string;
   /** 誰提案或爭取；沒有就是 null */
   initiator: { politicianId: string; name: string; note: string | null } | null;
+  /** 有爭議，同立場 */
+  disputed: boolean;
   sourceUrl: string;
   sourceLocator: string;
   source: LineageSource | null;
@@ -736,8 +740,8 @@ export interface RawLineage extends RawLineageSummary {
   coverage?: Array<{ level: string; region?: string | null; sub_region?: string | null; policy_count?: number | null }> | null;
   search_terms?: string[] | null;
   sources?: RawLineageSource[] | null;
-  stances?: Array<{ id: string; politician_id: string; name?: string | null; stance: string; condition?: string | null; stated_on: string; date_precision?: string | null; quote: string; note?: string | null; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
-  events?: Array<{ id: string; event_type: string; occurred_on: string; date_precision?: string | null; level: string; region?: string | null; sub_region?: string | null; decided_by: string; description: string; initiator?: { politician_id: string; name?: string | null; note?: string | null } | null; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
+  stances?: Array<{ id: string; removed_at?: string | null; disputed_at?: string | null; politician_id: string; name?: string | null; stance: string; condition?: string | null; stated_on: string; date_precision?: string | null; quote: string; note?: string | null; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
+  events?: Array<{ id: string; removed_at?: string | null; disputed_at?: string | null; event_type: string; occurred_on: string; date_precision?: string | null; level: string; region?: string | null; sub_region?: string | null; decided_by: string; description: string; initiator?: { politician_id: string; name?: string | null; note?: string | null } | null; source_url: string; source_locator: string; source?: RawLineageSource | null }> | null;
   status_count?: number | null;
 }
 

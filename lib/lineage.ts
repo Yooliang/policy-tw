@@ -83,7 +83,7 @@ const EVENT_TYPES = new Set(['decided', 'approved', 'budget_added', 'budget_cut'
 const PRECISIONS = new Set(['day', 'month', 'year'])
 const precision = (v: unknown): DatePrecision => (typeof v === 'string' && PRECISIONS.has(v) ? v as DatePrecision : 'day')
 
-/** 立場、事件的中文標籤（跟後端 _shared/lineage.ts 同一份，lib/lineage.test.ts 盯兩邊一致）；第三期主頁才會用 */
+/** 立場、事件的中文標籤（跟後端 _shared/lineage.ts 同一份，lib/lineage.test.ts 盯兩邊一致）；主頁（第三期）用 */
 export const STANCE_LABEL: Readonly<Record<StanceKind, string>> = { support: '支持', oppose: '反對', conditional: '有條件' }
 export const EVENT_TYPE_LABEL: Readonly<Record<LineageEventType, string>> = {
   decided: '拍板', approved: '核定', budget_added: '編列預算', budget_cut: '預算刪減', started: '動工或開辦', completed: '完工或上路',
@@ -122,19 +122,20 @@ export function mapLineage(row: RawLineage): Lineage | null {
     : null
   // #675 第一期新欄：舊視圖沒有就是空；認不得的列舉值丟掉（不讓它冒充值域裡的一個）
   const stances: LineageStance[] = (row.stances ?? [])
-    .filter((s) => STANCES.has(s.stance) && typeof s.politician_id === 'string' && typeof s.quote === 'string')
+    .filter((s) => !s.removed_at && STANCES.has(s.stance) && typeof s.politician_id === 'string' && typeof s.quote === 'string')
     .map((s) => ({
       id: s.id, politicianId: s.politician_id, name: s.name ?? '', stance: s.stance as StanceKind, condition: str(s.condition),
-      statedOn: String(s.stated_on).slice(0, 10), datePrecision: precision(s.date_precision), quote: s.quote, note: str(s.note),
+      statedOn: String(s.stated_on).slice(0, 10), datePrecision: precision(s.date_precision), quote: s.quote, note: str(s.note), disputed: !!s.disputed_at,
       sourceUrl: s.source_url, sourceLocator: s.source_locator, source: mapSource(s.source, s.source_url),
     }))
   const events: LineageEvent[] = (row.events ?? [])
-    .filter((e) => EVENT_TYPES.has(e.event_type) && isLevel(e.level) && typeof e.description === 'string')
+    .filter((e) => !e.removed_at && EVENT_TYPES.has(e.event_type) && isLevel(e.level) && typeof e.description === 'string')
     .map((e) => ({
       id: e.id, eventType: e.event_type as LineageEventType, occurredOn: String(e.occurred_on).slice(0, 10), datePrecision: precision(e.date_precision),
       level: e.level as LineageLevel, region: str(e.region), subRegion: str(e.sub_region), decidedBy: e.decided_by, description: e.description,
       initiator: e.initiator && typeof e.initiator.politician_id === 'string'
         ? { politicianId: e.initiator.politician_id, name: e.initiator.name ?? '', note: str(e.initiator.note) } : null,
+      disputed: !!e.disputed_at,
       sourceUrl: e.source_url, sourceLocator: e.source_locator, source: mapSource(e.source, e.source_url),
     }))
   const coverage: LineageCoverage[] = (row.coverage ?? [])
