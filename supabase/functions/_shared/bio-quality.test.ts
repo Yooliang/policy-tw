@@ -36,8 +36,8 @@ Deno.test("b. 各類規則各有代表句；句子截 100 字", () => {
 });
 
 Deno.test("b. 提到 AI／代理／系統的字眼命中；代理是職稱時不命中", () => {
-  for (const s of ["由 AI 代理整理", "本系統自動產生", "此簡介由 Claude 撰寫", "依 LLM 模型彙整", "agent 補充", "本站資料", "人工智慧整理"]) assert(bioProblems(s).length > 0, s);
-  for (const s of ["曾任代理鄉長", "曾任代理市長，現任議員", "擔任其代理人", "曾任代理主任", "曾任代理議長", "AIR 公司董事"]) assertEquals(bioProblems(s), [], s);
+  for (const s of ["由 AI 代理整理", "本系統自動產生", "此簡介由 Claude 撰寫", "依 LLM 模型彙整", "agent 補充", "本站資料", "人工智慧整理", "系統自動抓取", "使用語言模型", "AI 模型彙整", "自動整理而成"]) assert(bioProblems(s).length > 0, s);
+  for (const s of ["曾任代理鄉長", "曾任代理市長，現任議員", "擔任其代理人", "曾任代理主任", "曾任代理議長", "AIR 公司董事", "資訊系統工程師，推動自動化產線", "曾任模型工廠廠長", "醫療系統顧問"]) assertEquals(bioProblems(s), [], s);
   assert(bioJudgePrompt().includes("代理"), "提示詞也要寫這條");
 });
 
