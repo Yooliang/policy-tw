@@ -35,7 +35,7 @@ Deno.test("A1 總表＝20261105200000 的現行定義只多兩行 UNION；臂名
   const prev = fnText(PREV, "contribution_auto_tasks_arms");
   const now = fnText(MIG, "contribution_auto_tasks_arms");
   const added = "  UNION ALL SELECT 'lineage_stances' AS arm, t.* FROM contribution_auto_tasks_lineage_stances() t\n  UNION ALL SELECT 'lineage_events' AS arm, t.* FROM contribution_auto_tasks_lineage_events() t\n";
-  assertEquals(now.replace(added, ""), prev);
+  assertEquals(now.replace(added, "").replace("LANGUAGE sql STABLE SET work_mem = '16MB' AS $$", () => "LANGUAGE sql STABLE AS $$"), prev);
   assertEquals(fnText(MIG, "activity_arm_names").replace("    'lineage_status',\n    'lineage_stances',\n    'lineage_events'\n", "    'lineage_status'\n"), fnText(PREV, "activity_arm_names"));
   const prevRekey = fnText(await readMig("20261019040000_rekey_keeps_queue_position.sql"), "task_rekey_arms");
   assertEquals(fnText(MIG, "task_rekey_arms").replace(", 'lineage_stance_missing', 'lineage_event_missing'", ""), prevRekey);

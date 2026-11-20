@@ -327,7 +327,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT, arm TEXT, opened_by JSONB)
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE SET work_mem = '16MB' AS $$
   WITH raw AS (SELECT * FROM contribution_auto_tasks_raw()),
        due AS (SELECT * FROM contribution_auto_tasks_deadline_due()),
        -- 姓名看起來是測試資料的人物（2026-10-08）：他們的任務只走 placeholder_politician（見檔頭）
