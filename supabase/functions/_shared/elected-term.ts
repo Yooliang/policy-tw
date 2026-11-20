@@ -35,3 +35,23 @@ export function isElectionVoted(electionDate: string | null | undefined, today: 
 export function isElectedTerm(f: ElectedTermFacts, today: string = taipeiToday()): boolean {
   return isElectionVoted(f.election_date, today) && f.candidacy_statuses.includes("elected");
 }
+
+/** 一筆參選紀錄與那一屆的任期起訖（election_term_start／election_term_end 算出來的值；迄日沒有就給 null） */
+export interface ElectedTermWindow {
+  election_date: string | null;
+  candidacy_status: string | null;
+  term_start: string | null;
+  term_end: string | null;
+}
+
+/**
+ * 這個日期是不是落在某一個當選任期內（立場的表態日、事件的決定日用；policy-tw#675 第一期）。
+ * 那一屆已投票（投票日當天算還沒）、當選，而且 term_start ≤ 日期 ≤ term_end（迄日沒有就當沒有迄日）。
+ * SQL 那一份是 lineage_stance_within_elected_term(人物, 日期, 今天)（migration 20261120120000），lineage-stances-events.test.ts 逐案比對。
+ */
+export function isDateWithinElectedTerm(windows: ReadonlyArray<ElectedTermWindow>, date: string, today: string = taipeiToday()): boolean {
+  const d = date.slice(0, 10);
+  return windows.some((w) =>
+    isElectedTerm({ election_date: w.election_date, candidacy_statuses: [w.candidacy_status] }, today) &&
+    w.term_start !== null && d >= w.term_start.slice(0, 10) && (w.term_end === null || d <= w.term_end.slice(0, 10)));
+}

@@ -8,7 +8,7 @@
  */
 import { assert, assertEquals } from 'jsr:@std/assert@1'
 import {
-  BASIS_LABEL, buildTimeline, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace, lineageTotal,
+  BASIS_LABEL, buildTimeline, EVENT_TYPE_LABEL, STANCE_LABEL, filterLineages, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, isRetiredExecutive, LEVEL_LABEL, LINK_LABEL, lineagePlace, lineageTotal,
   mapLineage, mapLineageSummary, needsHandoverRecord, officeTermEnd, ORIGIN_LABEL, participantRows, policyMeta, ROLE_LABEL, termRoleLabel,
 } from './lineage.ts'
 import * as shared from '../supabase/functions/_shared/lineage.ts'
@@ -250,4 +250,35 @@ Deno.test('方塊格的脈絡條數：中央層級每個縣市都算、空脈絡
   assertEquals(lineageTotal(list, '桃園市'), 1, '沒有地方脈絡的縣市只剩中央層級的')
   assertEquals(lineageTotal(list, 'All', '社會福利'), 0)
   assertEquals(lineageTotal(list, '台中市'), filterLineages(list.filter(isLineageListed), { region: '台中市' }).length, '跟一覽同一套規則')
+})
+
+Deno.test('立場、事件的標籤跟後端同一份（#675 第一期）', () => {
+  assertEquals({ ...STANCE_LABEL }, { ...shared.STANCE_LABEL })
+  assertEquals({ ...EVENT_TYPE_LABEL }, { ...shared.EVENT_TYPE_LABEL })
+})
+
+Deno.test('mapLineage 讀 #675 新欄：立場、事件、涵蓋地方、出處；舊視圖沒有這些欄就是空；認不得的值丟掉', () => {
+  const old = mapLineage(RAW)!
+  assertEquals([old.stances, old.events, old.coverage, old.sources, old.searchTerms, old.statusCount], [[], [], [], [], [], 0])
+  const l = mapLineage({
+    ...RAW,
+    search_terms: ['藍線'],
+    status_count: 2,
+    coverage: [{ level: 'county', region: '台中市', sub_region: null, policy_count: 3 }, { level: 'planet', region: null, policy_count: 1 }],
+    sources: [{ url: 'https://www.gov.tw/a', title: '公告' }],
+    stances: [
+      { id: 's1', politician_id: 'x', name: '甲', stance: 'conditional', condition: '環評通過後', stated_on: '2026-03-01', date_precision: 'month', quote: '原文摘句要夠長才行', source_url: 'https://a.tw', source_locator: 'p1' },
+      { id: 's2', politician_id: 'x', name: '甲', stance: 'maybe', stated_on: '2026-03-02', quote: '原文摘句要夠長才行', source_url: 'https://a.tw', source_locator: 'p1' },
+    ],
+    events: [
+      { id: 'e1', event_type: 'approved', occurred_on: '2026-02-01', level: 'county', region: '台中市', decided_by: '市議會', description: '市議會三讀通過預算案。', initiator: { politician_id: 'x', name: '甲', note: '市府提案' }, source_url: 'https://a.tw', source_locator: 'p2' },
+      { id: 'e2', event_type: 'weird', occurred_on: '2026-02-02', level: 'county', decided_by: '市議會', description: '不認得的型態', source_url: 'https://a.tw', source_locator: 'p2' },
+    ],
+  })!
+  assertEquals(l.searchTerms, ['藍線'])
+  assertEquals(l.statusCount, 2)
+  assertEquals(l.coverage, [{ level: 'county', region: '台中市', subRegion: null, policyCount: 3 }])
+  assertEquals(l.sources?.map((s) => s.url), ['https://www.gov.tw/a'])
+  assertEquals(l.stances?.map((s) => [s.id, s.stance, s.condition, s.datePrecision]), [['s1', 'conditional', '環評通過後', 'month']])
+  assertEquals(l.events?.map((e) => [e.id, e.eventType, e.initiator?.note, e.datePrecision]), [['e1', 'approved', '市府提案', 'day']])
 })

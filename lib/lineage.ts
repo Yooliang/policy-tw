@@ -11,8 +11,8 @@
  * 零執行期依賴（只有型別），能被 deno 直接測。
  */
 import type {
-  HandoverType, Lineage, LineageHandover, LineageLevel, LineageLink, LineageLinkType, LineageParticipant, LineageSource,
-  LineageStatus, LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
+  DatePrecision, HandoverType, Lineage, LineageCoverage, LineageEvent, LineageEventType, LineageHandover, LineageLevel, LineageLink, LineageLinkType,
+  LineageParticipant, LineageSource, LineageStance, LineageStatus, StanceKind, LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
 } from '../types'
 import { isElectedTerm, isElectionVoted, taipeiToday } from './policy-stage'
 
@@ -78,6 +78,17 @@ const ROLES = new Set(['proposer', 'co_proposer', 'cosigner', 'advocate'])
 const BASES = new Set(['official_record', 'self_claim'])
 const HANDOVERS = new Set(['keep', 'pivot', 'shrink', 'stop', 'resume'])
 const LINKS = new Set(['top_down', 'bottom_up'])
+const STANCES = new Set(['support', 'oppose', 'conditional'])
+const EVENT_TYPES = new Set(['decided', 'approved', 'budget_added', 'budget_cut', 'started', 'completed', 'paused', 'cancelled', 'resumed', 'other'])
+const PRECISIONS = new Set(['day', 'month', 'year'])
+const precision = (v: unknown): DatePrecision => (typeof v === 'string' && PRECISIONS.has(v) ? v as DatePrecision : 'day')
+
+/** 立場、事件的中文標籤（跟後端 _shared/lineage.ts 同一份，lib/lineage.test.ts 盯兩邊一致）；第三期主頁才會用 */
+export const STANCE_LABEL: Readonly<Record<StanceKind, string>> = { support: '支持', oppose: '反對', conditional: '有條件' }
+export const EVENT_TYPE_LABEL: Readonly<Record<LineageEventType, string>> = {
+  decided: '拍板', approved: '核定', budget_added: '編列預算', budget_cut: '預算刪減', started: '動工或開辦', completed: '完工或上路',
+  paused: '暫緩', cancelled: '喊卡或終止', resumed: '重啟', other: '其他',
+}
 
 /** lineages_full 一列 → 前端型別；認不得的角色、型態丟掉（不讓它冒充值域裡的一個） */
 export function mapLineage(row: RawLineage): Lineage | null {
@@ -109,8 +120,35 @@ export function mapLineage(row: RawLineage): Lineage | null {
   const status: LineageStatus | null = st && typeof st.text === 'string' && st.text && typeof st.as_of === 'string' && st.as_of && typeof st.source_url === 'string' && st.source_url
     ? { phase: str(st.phase) ?? '', text: st.text, asOf: st.as_of.slice(0, 10), sourceUrl: st.source_url, source: mapSource(st.source, st.source_url) }
     : null
+  // #675 第一期新欄：舊視圖沒有就是空；認不得的列舉值丟掉（不讓它冒充值域裡的一個）
+  const stances: LineageStance[] = (row.stances ?? [])
+    .filter((s) => STANCES.has(s.stance) && typeof s.politician_id === 'string' && typeof s.quote === 'string')
+    .map((s) => ({
+      id: s.id, politicianId: s.politician_id, name: s.name ?? '', stance: s.stance as StanceKind, condition: str(s.condition),
+      statedOn: String(s.stated_on).slice(0, 10), datePrecision: precision(s.date_precision), quote: s.quote, note: str(s.note),
+      sourceUrl: s.source_url, sourceLocator: s.source_locator, source: mapSource(s.source, s.source_url),
+    }))
+  const events: LineageEvent[] = (row.events ?? [])
+    .filter((e) => EVENT_TYPES.has(e.event_type) && isLevel(e.level) && typeof e.description === 'string')
+    .map((e) => ({
+      id: e.id, eventType: e.event_type as LineageEventType, occurredOn: String(e.occurred_on).slice(0, 10), datePrecision: precision(e.date_precision),
+      level: e.level as LineageLevel, region: str(e.region), subRegion: str(e.sub_region), decidedBy: e.decided_by, description: e.description,
+      initiator: e.initiator && typeof e.initiator.politician_id === 'string'
+        ? { politicianId: e.initiator.politician_id, name: e.initiator.name ?? '', note: str(e.initiator.note) } : null,
+      sourceUrl: e.source_url, sourceLocator: e.source_locator, source: mapSource(e.source, e.source_url),
+    }))
+  const coverage: LineageCoverage[] = (row.coverage ?? [])
+    .filter((c) => isLevel(c.level))
+    .map((c) => ({ level: c.level as LineageLevel, region: str(c.region), subRegion: str(c.sub_region), policyCount: typeof c.policy_count === 'number' ? c.policy_count : 0 }))
+  const sources: LineageSource[] = (row.sources ?? []).map((s) => mapSource(s)).filter((s): s is LineageSource => s !== null)
   return {
     ...base,
+    searchTerms: (row.search_terms ?? []).filter((t): t is string => typeof t === 'string'),
+    coverage,
+    sources,
+    stances,
+    events,
+    statusCount: typeof row.status_count === 'number' ? row.status_count : 0,
     policyIds: (row.policy_ids ?? []).filter((x): x is string => typeof x === 'string'),
     participants,
     handovers,
