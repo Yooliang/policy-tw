@@ -28,6 +28,7 @@ import { positionSpec } from '../lib/election-levels'
 import { yearShort } from '../lib/election-breadcrumbs'
 import type { PersonCrumb } from '../composables/useMobileHeader'
 import type { BreadcrumbItem } from '../composables/usePageHead'
+import { shouldNoImageIndex } from '../lib/person-image'
 import { personShareImage, personTrackingText, publicImageUrl } from '../lib/seo'
 import { electionPeers, primaryElection } from '../lib/election-peers'
 import { ballotLabel, ballotNoOfElection } from '../lib/ballot-number'
@@ -484,6 +485,8 @@ usePageHead({
   type: 'article',
   // firebase.json 把 /politician/** rewrite 到殼檔回 200，不存在的 id 也會是 200；確定沒資料就標 noindex 免得被當 soft 404 收錄
   noindex: () => !loading.value && !politicianLoading.value && !politician.value,
+  // #975：本人沒有照片時不讓搜尋引擎收這頁的圖（頁面下方有別人的照片，會被當成本人的）；本人有照片不加
+  noimageindex: () => shouldNoImageIndex(politician.value),
   markdown: () => !!politician.value, // 本頁網址加 .md ＝ Markdown 版（lib/md/politician.ts，由 Worker 現場產生）
   // 分享圖（#461）：本人照片（公開 https 網址才用，簽名網址、內網、svg 都不用），沒有就站內預設圖
   image: () => politician.value ? personShareImage(politician.value.avatarUrl, politician.value.name) : undefined,
@@ -859,7 +862,7 @@ usePageHead({
             </div>
             <!-- 同選區候選人分頁：用 v-show，非作用中時 HTML 裡仍有每個人的 <a href>（爬蟲走得到）；卡片重用選舉頁的 PoliticianGrid -->
             <div v-if="peers.length > 0" v-show="activeTab === 'peers'" :class="panelClass('peers')" data-testid="election-peers">
-              <PoliticianGrid :politicians="peers" :title="peerDistrict" :columns="3" :election-id="primaryRecord?.electionId" />
+              <PoliticianGrid :politicians="peers" :title="peerDistrict" :columns="3" :election-id="primaryRecord?.electionId" portrait-as-background />
               <RouterLink v-if="primaryRecord && isCounty(primaryRecord.region)" :to="electionRegionPath(segmentOfId(elections, primaryRecord.electionId), primaryRecord.region)" class="inline-block -mt-6 text-sm font-bold text-violet-700 hover:underline">
                 看 {{ primaryRecord.region }} 全部候選人 →
               </RouterLink>
