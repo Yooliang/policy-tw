@@ -6,6 +6,7 @@ import { usePaneActive } from './usePane'
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel } from '../lib/site'
 import { defaultShareImage, shareImageMeta, type ShareImage } from '../lib/seo'
 import { canonicalPath, pageUrlOf } from '../lib/page-url'
+import { robotsContent } from '../lib/person-image'
 
 // 站名、網址、政見狀態標籤、授權與發布者放在 lib/site.ts（純常數，Markdown 檢視 lib/md 也要用；單一份）
 export { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel, canonicalPath }
@@ -19,6 +20,8 @@ interface PageHeadOptions {
   description?: MaybeRefOrGetter<string | undefined>
   /** 工具頁／後台：不讓搜尋引擎索引。內容頁可給 getter，資料確定不存在時翻成 true（避免 soft 404 被收錄）。 */
   noindex?: MaybeRefOrGetter<boolean | undefined>
+  /** 不讓搜尋引擎收這一頁的圖片（#975：人物頁本人沒有照片時，免得別人的照片被當成本人的）。與 noindex 並存，合成同一個 robots 標籤。 */
+  noimageindex?: MaybeRefOrGetter<boolean | undefined>
   /** og:type，內容頁用 article，其餘 website。 */
   type?: 'website' | 'article'
   /** schema.org 結構化資料（JSON-LD）。搜尋引擎與 AI 讀得懂「這是誰的政見、出處在哪、由誰驗證、怎麼引用」。 */
@@ -101,6 +104,8 @@ export function usePageHead(options: PageHeadOptions): void {
   // 中文路徑（縣市頁 /election/2026/台北市）一律寫成 percent-encoded：預渲染時 route.path 是原字、瀏覽器裡是編碼過的，兩邊要一致
   const pageUrl = computed(() => pageUrlOf(SITE_URL, route.path, toValue(options.canonical)))
 
+  const robots = computed(() => robotsContent({ noindex: !!toValue(options.noindex), noimageindex: !!toValue(options.noimageindex) }))
+
   useHead({
     title: computed(() => (paneActive.value ? title.value : undefined)),
     link: computed(() => !paneActive.value ? [] : [
@@ -115,7 +120,7 @@ export function usePageHead(options: PageHeadOptions): void {
       { property: 'og:description', content: description.value },
       { property: 'og:url', content: pageUrl.value },
       ...shareImageMeta(toValue(options.image) ?? defaultShareImage()),
-      ...(toValue(options.noindex) ? [{ name: 'robots', content: 'noindex' }] : []),
+      ...(robots.value ? [{ name: 'robots', content: robots.value }] : []),
     ]),
     script: computed(() => {
       if (!paneActive.value) return []

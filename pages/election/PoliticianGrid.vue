@@ -6,6 +6,7 @@ import { useSupabase } from '../../composables/useSupabase'
 import type { Politician, CandidacyStatus } from '../../types'
 import { pledgeCountOf, pledgeCountKnown } from '../../lib/policy-counts'
 import { Megaphone, Check } from 'lucide-vue-next'
+import { cssUrl } from '../../lib/person-image'
 import { getAvatarUrl } from '../../composables/useAvatar'
 import { thumbFor } from '../../composables/useAvatarThumb'
 import { officeTitles, withdrawalText } from '../../lib/politician-office'
@@ -24,6 +25,11 @@ const props = defineProps<{
    * 未標屆別的不算進來：那是「政見缺屆別」的資料缺口，不是當屆政見。
    */
   electionId?: number
+  /**
+   * 人像改畫成 CSS background-image（span role="img"），不用 <img>（#975）。
+   * 人物頁的「同選區候選人」用：整頁的 <img> 會被圖片搜尋當成本頁主圖，別人的臉不能掛在本人名下。選舉頁、鄉鎮頁是多人頁，照舊 <img>。
+   */
+  portraitAsBackground?: boolean
   /**
    * 標題列的「政見 PK」按鈕連到哪裡（2026-10-06 維護者：拿掉「大頭照／清單」切換，同一個位置放這顆）：
    * 選舉頁「政見 PK」頁籤、已選好這個區塊的職位與選區、帶入這一組全部的參選人（網址規則在 lib/policy-compare.ts）。
@@ -178,7 +184,15 @@ const splitNote = (note?: string): { text: string | null; url: string | null } =
         class="group relative bg-white rounded-xl border border-slate-200 hover:border-violet-300 hover:shadow-lg transition-all cursor-pointer overflow-hidden flex flex-col h-full"
       >
         <div class="relative aspect-[3/4] bg-slate-100 overflow-hidden">
+          <!-- 人物頁：背景圖＋role="img"（縮圖取預設的 330 寬，沒有縮圖用原圖）；content-visibility 讓畫面外的卡片先不畫 -->
+          <span
+            v-if="portraitAsBackground"
+            role="img" :aria-label="politician.name"
+            class="block w-full h-full bg-cover bg-top bg-no-repeat group-hover:scale-105 transition-transform"
+            :style="{ backgroundImage: cssUrl(portraitThumb(politician)?.src ?? portraitSrc(politician)), contentVisibility: 'auto', containIntrinsicSize: '240px 320px' }"
+          ></span>
           <img
+            v-else
             :src="portraitThumb(politician)?.src ?? portraitSrc(politician)"
             :srcset="portraitThumb(politician)?.srcset"
             :sizes="portraitThumb(politician) ? '(min-width: 1024px) 180px, 34vw' : undefined"
