@@ -309,6 +309,9 @@ const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   lineage_link: ["upper_lineage_id", "lower_lineage_id", "link_type", "note", "source_locator"],
   // 脈絡現況（policy-ops#201 第 2 期）
   lineage_status: ["lineage_id", "phase", "text", "as_of", "source_locator"],
+  // 脈絡立場、事件（policy-tw#675 第二期）
+  lineage_stance: ["lineage_id", "stances", "note"],
+  lineage_event: ["lineage_id", "events", "note"],
   // 政黨資訊（#346 第二階段）：每個政黨改了什麼、依據怎麼說
   party_info: ["parties", "note"],
 };

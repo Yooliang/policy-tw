@@ -825,7 +825,9 @@ export async function handleContribute(
   const precheckProblems = await precheckApplyTargets(supabase, validation.items, precheckSkip);
   if (precheckProblems.length > 0) {
     const allTargetNotFound = precheckProblems.every((p) => p.code === "target_not_found");
-    const code = allTargetNotFound ? "target_not_found" : "apply_would_fail";
+    // 全是同一種原因才用那個碼（脈絡立場、事件的日期不在當選任期內＝date_outside_elected_term）；混在一起一律 apply_would_fail，errors 裡每筆仍帶自己的碼
+    const allOutsideTerm = precheckProblems.every((p) => p.code === "date_outside_elected_term");
+    const code = allTargetNotFound ? "target_not_found" : allOutsideTerm ? "date_outside_elected_term" : "apply_would_fail";
     try {
       await supabase.from("gate_rejections").insert(precheckProblems.map((p) => ({ gate: p.code, endpoint: via, contribution_id: null, ip_hash: ipHash })));
     } catch { /* 記不成不影響回應 */ }

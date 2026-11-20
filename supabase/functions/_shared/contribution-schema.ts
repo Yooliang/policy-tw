@@ -19,6 +19,9 @@ import {
   HANDOVER_TYPES, isOfficialUrl, isUnreadableSocial, LINEAGE_LEVELS, LINEAGE_MAX_POLICIES, LINEAGE_NOTE_MAX, LINEAGE_NOTE_MIN,
   LINEAGE_SUMMARY_MAX, LINEAGE_TITLE_MAX, LINEAGE_TITLE_MIN, LINK_NOTE_MAX, LINK_NOTE_MIN, LINK_TYPES, LOCATOR_MAX, MAX_PARTICIPANTS,
   STATUS_NOTE_MAX, STATUS_NOTE_MIN, STATUS_PHASES, STATUS_TEXT_MAX, STATUS_TEXT_MIN, taipeiToday,
+  DATE_PRECISIONS, EVENT_DECIDED_BY_MAX, EVENT_DECIDED_BY_MIN, EVENT_DESCRIPTION_MAX, EVENT_DESCRIPTION_MIN, EVENT_INITIATOR_NOTE_MAX, EVENT_INITIATOR_NOTE_MIN,
+  EVENT_TYPES, eventItemKey, ITEMS_NOTE_MAX, ITEMS_NOTE_MIN, MAX_EVENTS, MAX_STANCES, STANCE_CONDITION_MAX, STANCE_CONDITION_MIN, STANCE_KINDS,
+  STANCE_NOTE_MAX, STANCE_QUOTE_MAX, STANCE_QUOTE_MIN, stanceItemKey,
   PARTICIPANT_BASES, PARTICIPANT_NOTE_MAX, PARTICIPANT_ROLES, POLICY_ORIGINS,
 } from "./lineage.ts";
 
@@ -38,10 +41,10 @@ export const isTaskIdShape = (v: unknown): boolean =>
 // election_results（整批補已投票選舉的結果，2026-10-06）：同樣四處一起加
 // cand_numbers（整批補號次，2026-10-30，#781）：同樣四處一起加
 // reassign_candidacy（同名人物接錯、參選紀錄改掛，2026-10-06）：同樣四處一起加
-export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers", "policy_subtopics", "lineage_status"] as const;
+export const CONTRIBUTION_TYPES = ["politician", "candidacy", "policy", "policy_progress", "correction", "task_suggestion", "no_change", "adjudication", "question_answer", "removal", "roster_check", "merge_politician", "district_seats", "policy_elements", "lineage", "lineage_participants", "lineage_handover", "lineage_link", "party_info", "election_results", "reassign_candidacy", "regional_stat", "cand_numbers", "policy_subtopics", "lineage_status", "lineage_stance", "lineage_event"] as const;
 // 2026-09-18 補上 policy_validity／election_result_missing／candidate_status_stale：這三種早就在派（自動缺口），
 // 清單卻沒跟上，代理用 task_suggestion 提議這三種任務會被擋下來。資料庫的 task_type 是 TEXT、沒有限制，照樣寫得進去。
-export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "region_mismatch", "other", "issue_too_broad", "lineage_status_stale"] as const;
+export const TASK_TYPES = ["policy_missing", "profile_gap", "policy_source_missing", "progress_stale", "candidacy_source_missing", "audit", "adjudicate", "question", "roster_check", "news_sweep", "fix_disputed", "policy_election_missing", "policy_validity", "election_result_missing", "candidate_status_stale", "duplicate_politician", "duplicate_policy", "not_running_recheck", "legacy_audit", "policy_election_mismatch", "source_mismatch", "term_policy_missing", "profile_detail_gap", "district_seats_missing", "policy_elements_missing", "deadline_due", "lineage_candidate", "handover_missing", "lineage_roles_missing", "lineage_link_candidate", "placeholder_politician", "party_info_missing", "election_results_missing", "candidacy_owner_mismatch", "regional_stat_missing", "avatar_choice", "region_mismatch", "other", "issue_too_broad", "lineage_status_stale", "lineage_stance_missing", "lineage_event_missing"] as const;
 
 /**
  * 地方基本統計（issue #508）：縣市與鄉鎮市區的人口、面積、總預算歲出、65 歲以上比例。
@@ -330,22 +333,91 @@ function validateIdList(v: unknown, path: string, what: string, push: (path: str
 }
 
 /** 政策脈絡（#349）：地方要跟層級對得上——中央不填地方、縣市填 region、鄉鎮填 region＋sub_region */
-function validateLineagePlace(nl: Obj, push: (path: string, message: string) => void): void {
+function validateLineagePlace(nl: Obj, push: (path: string, message: string) => void, base = "payload.new_lineage"): void {
   if (!oneOf(LINEAGE_LEVELS, nl.level)) {
-    push("payload.new_lineage.level", "level 要是 national（中央）／county（縣市）／township（鄉鎮市區）：這件事在哪一級政府決定、執行");
+    push(`${base}.level`, "level 要是 national（中央）／county（縣市）／township（鄉鎮市區）：這件事在哪一級政府決定、執行");
     return;
   }
   const region = typeof nl.region === "string" ? nl.region.trim() : "";
   const sub = typeof nl.sub_region === "string" ? nl.sub_region.trim() : "";
   if (nl.level === "national") {
-    if ((region && region !== "全國") || sub) push("payload.new_lineage.region", "中央層級的脈絡不填 region／sub_region（或 region 填「全國」）");
+    if ((region && region !== "全國") || sub) push(`${base}.region`, "中央層級的脈絡不填 region／sub_region（或 region 填「全國」）");
   } else if (!region || region.length > 20) {
-    push("payload.new_lineage.region", "縣市、鄉鎮層級要填 region（縣市，例：台中市）");
+    push(`${base}.region`, "縣市、鄉鎮層級要填 region（縣市，例：台中市）");
   } else if (nl.level === "county" && sub) {
-    push("payload.new_lineage.sub_region", "縣市層級不填 sub_region；這件事在鄉鎮公所決定、執行的話 level 填 township");
+    push(`${base}.sub_region`, "縣市層級不填 sub_region；這件事在鄉鎮公所決定、執行的話 level 填 township");
   } else if (nl.level === "township" && (!sub || sub.length > 20)) {
-    push("payload.new_lineage.sub_region", "鄉鎮層級要填 sub_region（鄉鎮市區，例：大雅區）");
+    push(`${base}.sub_region`, "鄉鎮層級要填 sub_region（鄉鎮市區，例：大雅區）");
   }
+}
+
+/** 立場、事件交件的共同形狀：lineage_id＋1～max 項的陣列，逐項驗證；項目鍵不可重複 */
+function validateItemList(p: Obj, field: "stances" | "events", max: number, push: (path: string, message: string) => void, kind: "stance" | "event"): void {
+  if (!isUuid(p.lineage_id)) push("payload.lineage_id", "lineage_id 必填（這條脈絡的 uuid，任務的 target.lineage_id）");
+  const list = p[field];
+  if (!Array.isArray(list) || list.length === 0 || list.length > max) {
+    push(`payload.${field}`, `${field} 必填：1～${max} 項（一次放太多，一項錯整筆被退）`);
+    return;
+  }
+  const today = taipeiToday();
+  const seen = new Set<string>();
+  list.forEach((raw, i) => {
+    const at = `payload.${field}[${i}]`;
+    if (!isObj(raw)) { push(at, "每一項要是物件"); return; }
+    const remove = raw.remove === true;
+    if (raw.remove !== undefined && raw.remove !== null && typeof raw.remove !== "boolean") push(`${at}.remove`, "remove 要是 true（把標錯的這一項拿掉）或不填");
+    for (const k of Object.keys(raw)) {
+      if (k !== "remove" && raw[k] !== null && raw[k] !== undefined && typeof raw[k] !== "string") push(`${at}.${k}`, "要是字串");
+    }
+    const dateOf = kind === "stance" ? "stated_on" : "occurred_on";
+    const d = raw[dateOf];
+    if (!isRealDate(d)) push(`${at}.${dateOf}`, `${dateOf} 必填（YYYY-MM-DD）：${kind === "stance" ? "表態那天" : "做出決定那天（不是報導日）"}；只知道年或月就填該期間第一天並標 date_precision`);
+    else if (d > today) push(`${at}.${dateOf}`, `${dateOf} 不能是未來的日期（以台北日期為準）`);
+    if (kind === "stance") {
+      if (!isUuid(raw.politician_id)) push(`${at}.politician_id`, "politician_id 必填（人物 uuid）；人物還不在網站上的先不要標");
+      if (!isStr(raw.quote, STANCE_QUOTE_MIN, STANCE_QUOTE_MAX)) push(`${at}.quote`, `quote 必填（${STANCE_QUOTE_MIN}～${STANCE_QUOTE_MAX} 字）：出處裡一字不差的原文`);
+      if (isUuid(raw.politician_id) && isRealDate(d) && typeof raw.quote === "string") {
+        const key = stanceItemKey(raw.politician_id, d, raw.quote);
+        if (seen.has(key)) push(`${at}.quote`, "同一個人同一天同一句只能出現一次（要改日期：一項 remove 舊的、一項加新的）");
+        seen.add(key);
+      }
+    } else {
+      if (!oneOf(EVENT_TYPES, raw.event_type)) push(`${at}.event_type`, `event_type 要是 ${EVENT_TYPES.join("／")} 之一`);
+      if (!isStr(raw.decided_by, EVENT_DECIDED_BY_MIN, EVENT_DECIDED_BY_MAX)) push(`${at}.decided_by`, `decided_by 必填（${EVENT_DECIDED_BY_MIN}～${EVENT_DECIDED_BY_MAX} 字）：做決定的機關，例：縣議會、行政院、交通部`);
+      if (typeof raw.event_type === "string" && isRealDate(d) && typeof raw.decided_by === "string") {
+        const key = eventItemKey(raw.event_type, d, raw.decided_by);
+        if (seen.has(key)) push(`${at}.decided_by`, "同一天同一機關同一種型態只能出現一次：多項決定合併成一筆、description 分點寫");
+        seen.add(key);
+      }
+    }
+    if (remove) return; // 拿掉一項只要能指到那一列（立場：人＋日期＋原文；事件：型態＋日期＋機關）
+    if (raw.date_precision !== undefined && raw.date_precision !== null && !oneOf(DATE_PRECISIONS, raw.date_precision)) push(`${at}.date_precision`, "date_precision 要是 day／month／year（只確定年或月時標精度）");
+    if (kind === "stance") {
+      if (!oneOf(STANCE_KINDS, raw.stance)) push(`${at}.stance`, "stance 要是 support（支持）／oppose（反對）／conditional（有條件）之一");
+      const cond = typeof raw.condition === "string" ? raw.condition.trim() : "";
+      if (raw.stance === "conditional") {
+        if (cond.length < STANCE_CONDITION_MIN || cond.length > STANCE_CONDITION_MAX) push(`${at}.condition`, `有條件要在 condition 寫條件（${STANCE_CONDITION_MIN}～${STANCE_CONDITION_MAX} 字，照原文）`);
+      } else if (cond) {
+        push(`${at}.condition`, "只有 stance＝conditional 才填 condition");
+      }
+      if (raw.policy_id !== undefined && raw.policy_id !== null && raw.policy_id !== "" && !isUuid(raw.policy_id)) push(`${at}.policy_id`, "policy_id 要是 uuid（這句話屬於哪條政見，選填）");
+      if (raw.note !== undefined && raw.note !== null && raw.note !== "" && !isStr(raw.note, 1, STANCE_NOTE_MAX)) push(`${at}.note`, `項目備註最多 ${STANCE_NOTE_MAX} 字`);
+    } else {
+      validateLineagePlace(raw, push, at);
+      if (!isStr(raw.description, EVENT_DESCRIPTION_MIN, EVENT_DESCRIPTION_MAX)) push(`${at}.description`, `description 必填（${EVENT_DESCRIPTION_MIN}～${EVENT_DESCRIPTION_MAX} 字）：只寫發生了什麼，不寫評價`);
+      const ini = raw.initiator_politician_id;
+      if (ini !== undefined && ini !== null && ini !== "" && !isUuid(ini)) push(`${at}.initiator_politician_id`, "initiator_politician_id 要是人物 uuid（誰提案或爭取，選填）");
+      const iniNote = typeof raw.initiator_note === "string" ? raw.initiator_note.trim() : "";
+      if (iniNote && !isUuid(ini)) push(`${at}.initiator_note`, "沒填推動者（initiator_politician_id）就不能填 initiator_note");
+      else if (iniNote && (iniNote.length < EVENT_INITIATOR_NOTE_MIN || iniNote.length > EVENT_INITIATOR_NOTE_MAX)) push(`${at}.initiator_note`, `initiator_note ${EVENT_INITIATOR_NOTE_MIN}～${EVENT_INITIATOR_NOTE_MAX} 字（例：縣府提案、立委爭取）`);
+    }
+    const locator = typeof raw.source_locator === "string" ? raw.source_locator.trim() : "";
+    if (!locator || charLength(locator) > LOCATOR_MAX) push(`${at}.source_locator`, `source_locator 必填（1～${LOCATOR_MAX} 字）：這一項在出處的哪裡（議事錄日期與案由、公告第幾點、報導哪一段）`);
+    for (const k of ["source_url", "second_source_url"]) {
+      const v = raw[k];
+      if (v !== undefined && v !== null && v !== "" && !isHttpUrl(v)) push(`${at}.${k}`, `${k} 要是 http(s) 網址，而且是這筆 source_urls 的其中一個`);
+    }
+  });
 }
 
 function validateHints(p: Obj, push: (path: string, message: string) => void): void {
@@ -604,6 +676,17 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       const locator = typeof p.source_locator === "string" ? p.source_locator.trim() : "";
       if (!locator || charLength(locator) > LOCATOR_MAX) push("payload.source_locator", `source_locator 必填（1～${LOCATOR_MAX} 字）：這句現況在出處的哪裡（公告第幾點、議事錄日期與案由、報導哪一段）`);
       if (p.source_url !== undefined && p.source_url !== null && p.source_url !== "" && !isHttpUrl(p.source_url)) push("payload.source_url", "source_url 要是 http(s) 網址，而且是這筆 source_urls 的其中一個");
+      break;
+    }
+    case "lineage_stance": {
+      // 脈絡立場（policy-tw#675 第二期）：某人在某天對這件事表態支持／反對／有條件，附原文摘句與出處；一筆 1～MAX_STANCES 項，每項各自出處、各自被核。
+      // 日期必須落在當選任期內（承諾防線）：schema 只管形狀與「不是未來」，任期由 apply-precheck 與落庫觸發器判（date_outside_elected_term）。
+      validateItemList(p, "stances", MAX_STANCES, push, "stance");
+      break;
+    }
+    case "lineage_event": {
+      // 脈絡事件（policy-tw#675 第二期）：政府或議會對這件事做的決定（拍板、核定、編預算…），附決定機關、日期、出處；一筆 1～MAX_EVENTS 項
+      validateItemList(p, "events", MAX_EVENTS, push, "event");
       break;
     }
     case "lineage_link": {
@@ -942,6 +1025,19 @@ export function lineageSourceProblems(type: string, payload: unknown, sourceUrls
       if (!isObj(item) || item.remove === true) return;
       check(item.source_url, `payload.participants[${i}]`, item.basis === "official_record");
     });
+  } else if (type === "lineage_stance" || type === "lineage_event") {
+    // 每一項實際依據的網址（自己的 source_url，沒給就是第一個）與第二來源都要是 source_urls 之一、不是讀不到的社群
+    const field = type === "lineage_stance" ? "stances" : "events";
+    (Array.isArray(p[field]) ? p[field] as unknown[] : []).forEach((item, i) => {
+      if (!isObj(item) || item.remove === true) return;
+      const at = `payload.${field}[${i}]`;
+      check(item.source_url, at, false);
+      const second = typeof item.second_source_url === "string" ? item.second_source_url.trim() : "";
+      if (second && isHttpUrl(second)) {
+        if (!listedSet.has(second)) out.push({ path: `${at}.second_source_url`, message: "second_source_url 要是這筆 source_urls 的其中一個（驗證者只會打開 source_urls）" });
+        else if (isUnreadableSocial(second)) out.push({ path: `${at}.second_source_url`, message: "臉書、IG、Threads 讀不到（驗證者與系統都打不開），不收：請改附官方紀錄、本人官網或報導的網址" });
+      }
+    });
   } else if (type === "lineage_handover" || type === "lineage_link" || (type === "lineage_status" && p.remove !== true)) {
     check(p.source_url, "payload", false);
   }
@@ -1060,6 +1156,11 @@ function validateContributionRequestInner(body: unknown, rosterCap: number, bund
     if (isObj(raw.payload) && raw.payload.person_key === undefined && typeof raw.person_key === "string" && raw.person_key.trim()) raw.payload.person_key = raw.person_key.trim();
     resolveElectionKeys(raw.payload, push);
     validatePayload(raw.contribution_type, raw.payload, push);
+    // 立場、事件：外層 note＝交件說明（20～300 字：指的是哪件事、為什麼是同一件事）；放頂層或 payload.note 都收，項目自己的備註是另一個欄位
+    if (raw.contribution_type === "lineage_stance" || raw.contribution_type === "lineage_event") {
+      const outer = typeof raw.note === "string" ? raw.note : raw.payload.note;
+      if (!isStr(outer, ITEMS_NOTE_MIN, ITEMS_NOTE_MAX)) push("note", `note 必填（${ITEMS_NOTE_MIN}～${ITEMS_NOTE_MAX} 字）：交件說明，這${raw.contribution_type === "lineage_stance" ? "些人" : "些決定"}指的是哪件事、為什麼是同一件事（每一項自己的備註放在項目的 note）`);
+    }
     // 三要素的每個要素指的出處，要是這筆交件的 source_urls 之一：驗證者只會打開 source_urls，指到別處等於沒給人核對
     if (raw.contribution_type === "policy_elements" && Array.isArray(raw.payload.elements) && Array.isArray(sourceUrls)) {
       const listed = new Set((sourceUrls as unknown[]).filter((u): u is string => typeof u === "string").map((u) => u.trim()));
@@ -1069,7 +1170,7 @@ function validateContributionRequestInner(body: unknown, rosterCap: number, bund
       });
     }
     // 政策脈絡（#349）：角色、交接、關聯各自的出處要是這筆 source_urls 之一；臉書讀不到不收；官方紀錄要附官方網址
-    if (Array.isArray(sourceUrls) && (raw.contribution_type === "lineage_participants" || raw.contribution_type === "lineage_handover" || raw.contribution_type === "lineage_link" || raw.contribution_type === "lineage_status")) {
+    if (Array.isArray(sourceUrls) && (raw.contribution_type === "lineage_participants" || raw.contribution_type === "lineage_handover" || raw.contribution_type === "lineage_link" || raw.contribution_type === "lineage_status" || raw.contribution_type === "lineage_stance" || raw.contribution_type === "lineage_event")) {
       for (const problem of lineageSourceProblems(raw.contribution_type, raw.payload, sourceUrls as unknown[])) push(problem.path, problem.message);
     }
     // 政黨資訊（#346）：臉書、IG、Threads 讀不到（驗證者與系統都打不開），不算出處——跟學經歷、政策脈絡同一份清單

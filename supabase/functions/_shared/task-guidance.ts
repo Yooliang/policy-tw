@@ -313,6 +313,23 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "什麼都查不到 → no_change，outcome=not_found，checked_urls 列你查過的網址。" +
     SOLE_SOURCE_TASK_NOTE.replace("交 policy／policy_progress 時", "交 policy／policy_progress／lineage_handover／lineage_status 時"),
 
+  lineage_stance_missing:
+    "補立場：target.lineage_title 這件事（target 的 people[] 列出該表態的人與原因）。**只收當選上任之後的表態**：議會質詢、議事錄發言、記者會、施政報告、新聞稿；選前的競選主張是承諾、不是立場，日期在他上任之前的不收（會被擋回，回應碼 date_outside_elected_term）。" +
+    "每一位找到的表態用 lineage_stance 交一項：stance＝support 支持／oppose 反對／conditional 有條件（有條件要寫 condition，照原文）、stated_on＝表態那天（不是報導日；只知道年或月就填該期間第一天並標 date_precision）、" +
+    "quote＝出處裡**一字不差**的原文摘句（8～300 字）、source_locator 寫在出處哪裡。同一人表態變過就每次各一項；一筆最多 10 項，一項錯整筆會被退，沒把握的先不要放。" +
+    "外層 note（交件說明，20～300 字）寫這些人指的是哪件事、為什麼是同一件事。標錯的項目用 remove=true＋同一組 politician_id／stated_on／quote 拿掉。" +
+    "查不到公開表態 → no_change，outcome=not_found，checked_urls 列你查過的議事錄與新聞。" +
+    "**媒體不能當唯一出處（每一項各自算）**：每一項的 source_url 是官方來源（議會議事錄、政府公告、選舉公報）就過；是媒體或其他非官方網站，該項就要再附 second_source_url＝另一個不同網站、同樣寫到這件事的來源（兩個網址都要列在 source_urls）。不能拿別的項目的來源湊，缺的項目整筆會被擋回（不算被拒，補好重送）。",
+
+  lineage_event_missing:
+    "補事件：target.lineage_title 這件事，政府或議會**已經做成的決定**（拍板、核定、編列預算、預算刪減、動工、完工、暫緩、喊卡、重啟）。提案、規劃、受訪表示不算。" +
+    "用 lineage_event 交一項：event_type 十選一、occurred_on＝決定當天（不是報導日）、level／region／sub_region＝哪一級在哪個地方做的決定、decided_by＝機關名（縣議會、行政院、交通部…）、" +
+    "description＝只寫發生了什麼的事實（10～300 字，不評價）、source_locator 寫在出處哪裡；知道是誰提案或爭取的，填 initiator_politician_id（網站上已有的人物，日期要在他的任期內）。" +
+    "日期必須落在這件事涉及的人的當選任期內，選前的不收（回應碼 date_outside_elected_term）。同一天同一機關同一種型態的多項決定合併成一項、description 分點寫。一筆最多 10 項。" +
+    "外層 note（交件說明，20～300 字）寫這些決定為什麼是同一件事。標錯的項目用 remove=true＋同一組 event_type／occurred_on／decided_by 拿掉。" +
+    "查不到 → no_change，outcome=not_found，checked_urls 列你查過的網址。" +
+    "**媒體不能當唯一出處（每一項各自算）**：每一項的 source_url 是官方來源（議會議事錄、政府公告、選舉公報）就過；是媒體或其他非官方網站，該項就要再附 second_source_url＝另一個不同網站、同樣寫到這件事的來源（兩個網址都要列在 source_urls）。不能拿別的項目的來源湊，缺的項目整筆會被擋回（不算被拒，補好重送）。",
+
   lineage_link_candidate:
     "判斷上下級：這條脈絡（target.lineage_id）跟 target.upper_candidates 裡上一級的脈絡，有沒有**實際的法規、預算或政策連結**。" +
     "上級立法或補助、這裡配套執行 → top_down（例：中央條例或前瞻補助核定 → 縣市的執行計畫）；這裡先做或爭取、上級後來採納 → bottom_up（例：縣市試辦或連署 → 中央入法、編列預算）。" +
@@ -455,6 +472,15 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
     "payload：lineage_id（照任務 target）、phase（proposed 提案階段／planning 規劃中／approved 已核定／in_progress 進行中／completed 已完成／paused 暫緩／cancelled 已終止）、" +
     "text（8～120 字的一句現況，只寫出處有的事實）、as_of（出處講到這個狀態的日期 YYYY-MM-DD，不是查詢日、不能是未來）、source_locator（這句話在出處的哪裡）、" +
     "source_url（出自 source_urls 的哪一個，不填＝第一個）。撤回：remove=true＋as_of（要撤回的那一列的截至日）＋note（20～300 字，為什麼是錯的），不必填其他欄；取代：replace_as_of（被取代的那一列的截至日）＋新內容。",
+  lineage_stance:
+    "payload：lineage_id（照任務 target）、stances[]（1～10 項，每項 {politician_id、stance：support 支持／oppose 反對／conditional 有條件、condition（有條件才填，照原文 6～200 字）、" +
+    "stated_on（表態那天 YYYY-MM-DD，要在這個人的當選任期內、不能是未來）、date_precision（day／month／year，不填＝day）、quote（原文摘句 8～300 字，一字不差）、policy_id（這句話屬於哪條政見，選填）、" +
+    "source_locator（在出處哪裡，必填）、source_url（出自 source_urls 的哪一個，不填＝第一個）、second_source_url（出處不是官方時必填、要是不同網站且列在 source_urls）、note（項目備註 1～200 字，選填）、remove（true＝拿掉標錯的這一項）}）、" +
+    "外層 note（交件說明 20～300 字：指的是哪件事、為什麼是同一件事）。",
+  lineage_event:
+    "payload：lineage_id（照任務 target）、events[]（1～10 項，每項 {event_type：decided 拍板／approved 核定／budget_added 編列預算／budget_cut 預算刪減／started 動工或開辦／completed 完工或上路／paused 暫緩／cancelled 喊卡或終止／resumed 重啟／other 其他、" +
+    "occurred_on（決定當天，要在任期內、不能是未來）、date_precision、level（national／county／township）＋region／sub_region（依層級）、decided_by（機關名 2～40 字）、description（10～300 字，只寫事實）、" +
+    "initiator_politician_id（選填）、initiator_note（選填，有推動者才能填）、source_locator、source_url、second_source_url（出處不是官方時必填）、remove}）、外層 note（交件說明 20～300 字）。",
   lineage_link:
     "payload：upper_lineage_id（上一級那條）、lower_lineage_id（下一級那條）、link_type（top_down 上級立法或補助，下級執行／bottom_up 下級爭取，上級採納）、" +
     "note（20～500 字：哪一份法規、補助核定或執行計畫把兩件事連起來）、source_locator（條文、公文字號或頁碼）、source_url（選填，不填＝第一個）。",
@@ -828,6 +854,31 @@ function buildPayload(
         text: "（8～120 字：一句現況，只寫出處有的事實）",
         as_of: "（YYYY-MM-DD：出處講到這個狀態的日期，不是查詢日）",
         source_locator: "（這句話在出處的哪裡）",
+      };
+    case "lineage_stance":
+      return {
+        lineage_id: asText(t.lineage_id) ?? "（脈絡 id）",
+        stances: [{
+          politician_id: "（人物 id，從 target.people 抄）",
+          stance: "（support／oppose／conditional）",
+          stated_on: "（YYYY-MM-DD：表態那天，要在他上任之後）",
+          quote: "（出處裡一字不差的原文，8～300 字）",
+          source_locator: "（在出處的哪裡：議事錄日期與案由、報導段落）",
+        }],
+        note: "（20～300 字：這些人指的是哪件事、為什麼是同一件事）",
+      };
+    case "lineage_event":
+      return {
+        lineage_id: asText(t.lineage_id) ?? "（脈絡 id）",
+        events: [{
+          event_type: "（decided／approved／budget_added／budget_cut／started／completed／paused／cancelled／resumed／other）",
+          occurred_on: "（YYYY-MM-DD：決定當天，不是報導日）",
+          level: "（national／county／township）",
+          decided_by: "（機關名：縣議會、行政院…）",
+          description: "（10～300 字：只寫發生了什麼）",
+          source_locator: "（在出處的哪裡）",
+        }],
+        note: "（20～300 字：這些決定為什麼是同一件事）",
       };
     case "lineage_link": {
       const uppers = Array.isArray(t.upper_candidates) ? t.upper_candidates as Array<Record<string, unknown>> : [];

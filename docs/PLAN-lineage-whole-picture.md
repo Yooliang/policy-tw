@@ -186,14 +186,14 @@
 | `stated_on` | DATE NOT NULL | 表態當天；只知道年或月就填該期間第一天並標精度（不用 `CURRENT_DATE` 做 CHECK，晚於今天由交件守門擋） |
 | `date_precision` | TEXT NOT NULL DEFAULT `day` CHECK IN (`day`,`month`,`year`) | 老的質詢紀錄常只確定年份（示意圖就是「2019」） |
 | `quote` | TEXT NOT NULL CHECK 8～300 字 | **原文摘句**，驗證者要在出處找得到一字不差 |
-| `quote_hash` | TEXT GENERATED ALWAYS AS (`md5(quote)`) STORED | 唯一鍵用，讓同一天的多次表態不互相覆蓋 |
+| `quote_hash` | TEXT GENERATED ALWAYS AS (`md5(btrim(quote))`) STORED | 唯一鍵用，讓同一天的多次表態不互相覆蓋；多 `btrim` 避免同一句多一個空白變兩筆（#1010 實作，2026-11-20 回改） |
 | `policy_id` | UUID NULL → `policies` | 這句話屬於哪條政見（選填，可追溯）；沒有對應政見就空。這個欄位**只用來追溯，不改變**「承諾不進脈絡」的守門：它指到的政見不要求在脈絡內，也不影響政見的歸屬 |
 | `removed_at` | TIMESTAMPTZ NULL | **軟刪除**：`remove` 項與維護者下架都是填這一欄、不刪列；公開讀取（視圖與 RLS）一律濾掉 `removed_at IS NOT NULL` 的列，查核履歷仍留 |
 | `disputed_at`／`dispute_note` | TIMESTAMPTZ NULL／TEXT NULL 1～300 字 | **爭議旗標**：被當事人或維護者質疑但尚未定案時標上；公開讀取端照常顯示並在該列標「有爭議」，定案後取消旗標或下架。代理交件不能設，只有維護者經 service_role 函式能設 |
 | `source_url`／`source_locator` | NOT NULL；locator 1～200 字 | 同現有三張子表（網址格式 CHECK、位置＝議事紀錄日期與案由、報導段落等） |
 | `note` | 選填 1～200 字 | **子表的備註**，對應交件裡「每一項」的 `note`；跟交件外層那個 `note`（交件說明，20～300 字、存在 `contributions.note`）是兩個不同的欄位，協議兩處分開寫、分開命名（外層叫「交件說明」、項目內叫「備註」），避免代理把 201～300 字的說明填進備註而撞 CHECK |
 | `contribution_id`、`created_at`、`updated_at` | 同現有三張子表 | |
-| 唯一鍵 | `UNIQUE (lineage_id, politician_id, stated_on, quote_hash)` | 同一人同一天**同一句**一筆；同一天的不同句子各自一筆、不互相覆蓋。重交同一句＝覆蓋，查核履歷記每欄舊值；同鍵但已被軟刪除的列，重交視為新增並清掉 `removed_at`（履歷照記）。「現行立場」＝同一人最新一天的列（同一天有多句就都列），立場變過看全部列 |
+| 唯一鍵 | **部分唯一索引** `UNIQUE (lineage_id, politician_id, stated_on, quote_hash) WHERE removed_at IS NULL`（#1010 實作，2026-11-20 回改；原寫整張表唯一鍵） | 同一人同一天**同一句**一筆；同一天的不同句子各自一筆、不互相覆蓋。重交同一句＝覆蓋，查核履歷記每欄舊值；**同鍵但已被軟刪除的列，重交＝新開一列**（二期落庫採此做法，與部分唯一索引一致；舊的下架列留著、不復活，履歷照記）。「現行立場」＝同一人最新一天的列（同一天有多句就都列），立場變過看全部列 |
 | **只收當選任期內的表態**（承諾防線，內容層） | 資料庫函式 `lineage_stance_within_elected_term(politician_id, stated_on)`；交件守門與落庫各判一次 | `stated_on` 必須落在該人物**某一個當選任期**之內：該人物有一筆參選紀錄 `candidacy_status='elected'`、那一屆已投票（同 `policy_is_elected_term` 的條件，投票日當天算還沒投票），且 `election_term_start(…) <= stated_on <=` 任期迄日（`election_term_end(…)`，現任無迄日）。**選前的「我主張」一律不收**（那是承諾，不是脈絡的立場）；這補上金魚審查指出的缺口——只擋政見歸入、不擋以立場形式進來的選前發言。判斷與 `policy_is_elected_term` 同源（共用「已投票且當選」那一段，`_shared/elected-term.ts` 的 TS 與 SQL 兩份由測試逐案比對），不另寫第二套 |
 
 **`lineage_events`**
@@ -209,7 +209,7 @@
 | `initiator_politician_id` | 選填 → `politicians` | 誰提案或爭取（關係圖畫「爭取 → 核定」的虛線箭頭用；不填就不畫箭頭）；`initiator_note` 選填 2～30 字（例：「縣府提案」「立委爭取」） |
 | `source_url`／`source_locator`、`contribution_id`、時間欄 | 同上 | |
 | `removed_at`、`disputed_at`／`dispute_note` | 同立場表 | 軟刪除與爭議旗標，規則同 `lineage_stances`；公開讀取端濾掉已下架的列 |
-| **只收當選任期內的事件**（承諾防線，內容層） | 資料庫函式 `lineage_event_within_elected_term(lineage_id, initiator_politician_id, occurred_on)` | 有填推動者時，`occurred_on` 要落在**該人**的某個當選任期內；沒填推動者時，要落在**這條脈絡涉及的任一人**（政見持有人、參與者、交接雙方）的某個當選任期內——這樣前任核定、後任動工都收得進來，只擋掉與任何當選任期都無關的日期。任期判斷與立場表同一支底層（`policy_is_elected_term` 同源）。「沒填推動者」的範圍是本次改版的解讀，若維護者要更嚴或更寬，改這支函式一處即可 |
+| **只收當選任期內的事件**（承諾防線，內容層） | 資料庫函式 `lineage_event_within_elected_term(lineage_id, initiator_politician_id, occurred_on)` | 有填推動者時，`occurred_on` 要落在**該人**的某個當選任期內；沒填推動者時，要落在**這條脈絡涉及的任一人**（政見持有人、交接雙方；**參與者不計**，#1010 實作、2026-11-20 回改）的某個當選任期內——這樣前任核定、後任動工都收得進來，只擋掉與任何當選任期都無關的日期。任期判斷與立場表同一支底層（`policy_is_elected_term` 同源）。「沒填推動者」的範圍是本次改版的解讀，若維護者要更嚴或更寬，改這支函式一處即可 |
 | 唯一鍵 | `UNIQUE (lineage_id, event_type, occurred_on, decided_by)` | **已知取捨**：同一天、同一機關、同一型態的兩項決定（例：議會同日兩筆預算刪減）會撞鍵，後交的覆蓋先交的。協議與任務說明明寫「同日同機關同型態的多項決定合併成一筆、`description` 分點寫」；覆蓋時查核履歷會記下舊值，不會無聲丟失。不把描述雜湊放進鍵，否則同一件事改幾個字重交就變成兩筆 |
 
 **`lineage_statuses`**
@@ -570,8 +570,8 @@
 
 | 期 | 內容 | migration／協議 | 為什麼可以單獨上線、不破壞現有資料與網址 |
 |---|---|---|---|
-| **一 定義與骨架** 🔄 | 裁決檔（`docs/decisions/YYYY-MM-DD-<slug>.md`，**更正 10-06「政策脈絡第一階段」與「畫面」兩條**，再跑 `scripts/decisions-index.ts`）；一支 migration：三張新表＋`lineage_settings`＋`lineages.search_terms`＋`lineage_links` 加 `contains` 與新觸發器＋`source_refs` 清單＋`lineage_touch_parent`＋`lineages_full` 尾端加欄＋`lineages_list`＋`lineage_terms`＋新函式＋**改 `merge_politician()` 與空殼人物那一段（2.9，不放到後面期：新表一建好就可能有人物外鍵，合併路徑要同時到位；前一版整支存進 PR 說明供回滾）**；立場與事件的 `*_within_elected_term` 函式、`removed_at`／`disputed_at`、`policy_id`、`quote_hash`（2.4）；`lineage` 交件的 `search_terms` 與主辦更正、`term` 檢查；TS 型別與 `mapLineage`（缺欄當空）；`skill-types.md` 的定義段改寫；`CLAUDE.md` 的脈絡描述由主線改 | `<配號 A>`；協議 `1.(N+1).0` | 只加表、欄、視圖尾端欄，沒有任何交件型別開放，頁面與任務照舊；舊 `link_type` 值保留 |
-| **二 三種交件與缺口臂** ⏳（現況、事件、立場**一個 PR**，主線採 agy 建議：三者改的是同一批約 15 個共用檔案，拆三次要連升三次協議版、連過三次部署佇列，衝突風險比審查便利大；PR 內依現況→事件→立場分三個 commit，審查可以逐段看） | CHECK 加三個型別、`apply-contribution`／`apply-precheck`／`contribution-schema`／`consensus`／`system-one`／`vote-budget`／`task-*`／`verification-sources`／`summary`／`history`／`same-claims`／`task-labels`、`skill-types.md` 三個型別段與 `type_spec`、新臂三處（總表、臂名清單、規則；總表一次加三支）、**起跑日機制（2.7、4.1：加 `dispatch_start_on`、`lineage_status` 規則改 `enabled=true`、三支臂讀起跑日、改 `lineage-status.test.ts` A4／B1／B3 與 `activity-arms.test.ts` 清單、登記 `DEVIATED_LINEAGE`）**、三支臂的 `gap_not_found_days` 冷卻（**不動** `PROGRESS_COOLDOWN_TASK_TYPES`）、`needsTwoIps` 的 `cancelled`（陣列）、`SOLE_SOURCE_GUARDED_TYPES` 與逐項檢查 | `<配號 B>`；協議**只升一次**：`1.(N+2).0` | 三種型別各自完整（資料、守門、任務、協議）才開；資料先進庫，頁面還沒顯示也不影響 |
+| **一 定義與骨架** ✅ | 裁決檔（`docs/decisions/YYYY-MM-DD-<slug>.md`，**更正 10-06「政策脈絡第一階段」與「畫面」兩條**，再跑 `scripts/decisions-index.ts`）；一支 migration：三張新表＋`lineage_settings`＋`lineages.search_terms`＋`lineage_links` 加 `contains` 與新觸發器＋`source_refs` 清單＋`lineage_touch_parent`＋`lineages_full` 尾端加欄＋`lineages_list`＋`lineage_terms`＋新函式＋**改 `merge_politician()` 與空殼人物那一段（2.9，不放到後面期：新表一建好就可能有人物外鍵，合併路徑要同時到位；前一版整支存進 PR 說明供回滾）**；立場與事件的 `*_within_elected_term` 函式、`removed_at`／`disputed_at`、`policy_id`、`quote_hash`（2.4）；`lineage` 交件的 `search_terms` 與主辦更正、`term` 檢查；TS 型別與 `mapLineage`（缺欄當空）；`skill-types.md` 的定義段改寫；`CLAUDE.md` 的脈絡描述由主線改 | `<配號 A>`；協議 `1.(N+1).0` | 只加表、欄、視圖尾端欄，沒有任何交件型別開放，頁面與任務照舊；舊 `link_type` 值保留 |
+| **二 三種交件與缺口臂** 🔄（現況、事件、立場**一個 PR**，主線採 agy 建議：三者改的是同一批約 15 個共用檔案，拆三次要連升三次協議版、連過三次部署佇列，衝突風險比審查便利大；PR 內依現況→事件→立場分三個 commit，審查可以逐段看） | CHECK 加三個型別、`apply-contribution`／`apply-precheck`／`contribution-schema`／`consensus`／`system-one`／`vote-budget`／`task-*`／`verification-sources`／`summary`／`history`／`same-claims`／`task-labels`、`skill-types.md` 三個型別段與 `type_spec`、新臂三處（總表、臂名清單、規則；總表一次加三支）、**起跑日機制（2.7、4.1：加 `dispatch_start_on`、`lineage_status` 規則改 `enabled=true`、三支臂讀起跑日、改 `lineage-status.test.ts` A4／B1／B3 與 `activity-arms.test.ts` 清單、登記 `DEVIATED_LINEAGE`）**、三支臂的 `gap_not_found_days` 冷卻（**不動** `PROGRESS_COOLDOWN_TASK_TYPES`）、`needsTwoIps` 的 `cancelled`（陣列）、`SOLE_SOURCE_GUARDED_TYPES` 與逐項檢查 | `<配號 B>`；協議**只升一次**：`1.(N+2).0` | 三種型別各自完整（資料、守門、任務、協議）才開；資料先進庫，頁面還沒顯示也不影響 |
 | **三 主頁** ⏳ | 第 5.1、5.4 節：`LineagePage.vue` 重排、`lib/lineage.ts` 與 `types.ts` 補型別與純函式、`loadLineagePage`／`lineagePeople()`、一覽頁改讀 `lineages_list`、JSON-LD、空脈絡 `noindex`、`lineages_list` 缺時退回。**主頁在這一期完全不出現「看完整關係圖」按鈕、也不出現指向 `/graph` 的任何連結**（含立場表「曾變」那顆；這一期「曾變」只是文字標籤）——路由要到第四期才存在，先放連結讀者會點到不存在的頁（agy 審查，主線選「第四期才出現」，不併三四期，因為關係圖的排版純函式與元件是整份工作量最大的一塊，不該擋住主頁上線） | 無 migration；無協議 | 網址不變；新欄還沒資料時各區塊顯示標籤式空值；舊資料 10 條照樣顯示；沒有指向未上線頁面的連結 |
 | **四 關係圖** ⏳ | 第 5.2、5.3 節：路由、`lib/lineage-graph.ts`、元件與抽屜、`usePageHead` 的 `canonical` 選項、Worker 標頭、網站地圖的建置檢查、`HANDOVER_LABEL` 同步；**同一個 PR 才把主頁的「看完整關係圖 →」按鈕與「曾變」連結加上去**（路由與連結同時上線，不會有空窗） | 無 migration；若 `HANDOVER_LABEL` 的後端那份動到 `_shared/lineage.ts`，協議文字跟著小改（併在下一次版號） | 新路由，上線前沒有人連到它，不影響既有頁；不進網站地圖 |
 | **五 派工臂改格與往外擴** ⏳ | 4.2、4.3、4.5：`lineage_cell_scope`／`lineage_cell_key`、改寫 `lineage_candidates`、新 `lineage_expand`、重寫並重新啟用 `lineage_links`、`handover_missing` 小改、協議任務說明；實測臂成本；登記 #670 PR 4 的換號家族 | `<配號 C>`；協議 `1.(N+3).0` | 臂內容換、新舊 `task_id` 不重疊，seed 照規則收回舊的；已落庫與在途交件不受影響；格與往外擴都只產生「請代理判斷」的任務，不直接寫資料 |
@@ -584,8 +584,8 @@
 
 | 期 | 狀態 | 對應 PR | 現況一句話 |
 |---|---|---|---|
-| 一 定義與骨架 | 🔄 | #872（現況櫃，已合）；立場、事件櫃與其餘骨架：**進行中、PR 尚未開（分支開出後補編號）** | 現況表、參數表（三欄）、`lineages_full.status` 已上線；立場表、事件表與其餘骨架（`search_terms`、`contains`、`lineages_list`、`lineage_terms`、人物合併連動 2.9）還沒上 |
-| 二 三種交件與缺口臂 | ⏳ | 未開 | 包含：立場與事件的交件型別與落庫；`/next`、`/report` 接線；三支臂（現況、立場、事件）；起跑日設定；守門。現況的交件型別與臂本體 #872 已有，二期把規則改成啟用、並讓三支臂讀「起跑日」 |
+| 一 定義與骨架 | ✅ | #872（現況櫃）、#1010（立場、事件櫃與其餘骨架） | 現況表、參數表、立場表、事件表、`search_terms`、`contains`、`lineages_list`、`lineage_terms`、人物合併連動 2.9 都已上線 |
+| 二 三種交件與缺口臂 | 🔄 | 2a：交件型別與落庫（本 PR，編號見 PR）；2b：三支臂與起跑日（接著開） | 包含：立場與事件的交件型別與落庫；`/next`、`/report` 接線；三支臂（現況、立場、事件）；起跑日設定；守門。現況的交件型別與臂本體 #872 已有，二期把規則改成啟用、並讓三支臂讀「起跑日」 |
 | 三 主頁 | ⏳ | 未開 | 主頁重排、一覽頁加現況標籤 |
 | 四 關係圖 | ⏳ | 未開 | 路由、泳道圖、手機直式 |
 | 五 派工臂改格與往外擴 | ⏳ | 未開 | 順序不變，在二期之後 |

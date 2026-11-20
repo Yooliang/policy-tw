@@ -446,6 +446,35 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
       miss: { key: "source_date", means: "截至日就是出處講到的日期" },
     },
   ],
+  // 脈絡立場、事件（policy-tw#675 第二期）：出錯的方式是「原文不是這個人說的／不是這件事」與「把提案、受訪當成已做成的決定」
+  lineage_stance: [
+    {
+      key: "quote_not_in_source",
+      instructions: "每一項的原文摘句，在出處裡一字不差找得到嗎？說這句話的就是標的那個人（不是幕僚、黨團或政黨聲明）嗎？",
+      hit: { key: "quote_missing_or_other_speaker", means: "原文找不到，或說話的不是這個人" },
+      miss: { key: "quote_verbatim", means: "原文一字不差、發言人就是這個人" },
+    },
+    {
+      key: "stance_or_subject_wrong",
+      instructions: "講的是這條脈絡的這件事嗎（不是同名的另一件）？支持／反對／有條件與原文的方向相符嗎（不是把「討論」當成「支持」）？日期是表態那天、不是報導日嗎？",
+      hit: { key: "wrong_subject_or_direction", means: "標的不同、立場方向反了，或日期是報導日" },
+      miss: { key: "matches", means: "標的、方向、日期都對" },
+    },
+  ],
+  lineage_event: [
+    {
+      key: "not_a_decision",
+      instructions: "每一項的出處寫的是已經做成的決定嗎？還是只是提案、規劃或受訪表示？",
+      hit: { key: "proposal_only", means: "只是提案、規劃或受訪，不是已做成的決定" },
+      miss: { key: "decided", means: "出處寫明是已做成的決定" },
+    },
+    {
+      key: "date_agency_type_wrong",
+      instructions: "決定日、決定機關與事件型態（核定不是拍板、預算刪減要寫明哪筆預算）對得上出處嗎？描述有沒有帶評價？",
+      hit: { key: "mismatch", means: "日期、機關或型態對不上，或描述帶評價" },
+      miss: { key: "matches", means: "日期、機關、型態都對，描述只有事實" },
+    },
+  ],
   lineage_link: [
     {
       key: "topic_only",

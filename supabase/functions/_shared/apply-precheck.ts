@@ -34,7 +34,7 @@ export interface PrecheckItem {
   payload: unknown;
 }
 
-export type PrecheckCode = "target_not_found" | "apply_would_fail";
+export type PrecheckCode = "target_not_found" | "apply_would_fail" | "date_outside_elected_term";
 
 export interface PrecheckProblem {
   index: number;
@@ -319,6 +319,20 @@ export async function precheckApplyTargets(
         for (const k of ["upper_lineage_id", "lower_lineage_id"]) { const lid = str(p[k]); if (lid) lineageIds.add(lid.toLowerCase()); }
         break;
       }
+      // 立場、事件：脈絡、表態者（或推動者）、掛的政見都要在
+      case "lineage_stance":
+      case "lineage_event": {
+        const lid = str(p.lineage_id);
+        if (lid) lineageIds.add(lid.toLowerCase());
+        for (const it of Array.isArray(p[item.contribution_type === "lineage_stance" ? "stances" : "events"]) ? p[item.contribution_type === "lineage_stance" ? "stances" : "events"] as unknown[] : []) {
+          if (!it || typeof it !== "object" || (it as Obj).remove === true) continue;
+          const pid = str((it as Obj)[item.contribution_type === "lineage_stance" ? "politician_id" : "initiator_politician_id"]);
+          if (pid) politicianIds.add(pid);
+          const pol = str((it as Obj).policy_id);
+          if (pol) policyIds.add(pol.toLowerCase());
+        }
+        break;
+      }
       // 現況：脈絡要在；撤回、取代指到的那一列也要在（只有這兩種才多查一次現況表）
       case "lineage_status": {
         const lid = str(p.lineage_id);
@@ -520,6 +534,74 @@ export async function precheckApplyTargets(
         for (const k of ["from_politician_id", "to_politician_id"]) {
           const pid = str(p[k]);
           if (pid) checkPolitician(i, pid, `payload.${k}`, "記不了交接");
+        }
+        break;
+      }
+      // 立場：人要在、掛的政見要在；表態日要落在這個人的當選任期內（承諾防線，跟落庫的觸發器同一支 SQL 函式；選前的主張是承諾，不是立場）
+      case "lineage_stance": {
+        const lid = str(p.lineage_id);
+        if (lid) checkLineage(i, lid, "payload.lineage_id");
+        const list = Array.isArray(p.stances) ? p.stances as unknown[] : [];
+        for (let k = 0; k < list.length; k++) {
+          const it = list[k];
+          if (!it || typeof it !== "object") continue;
+          const o = it as Obj;
+          if (o.remove === true) continue; // 拿掉一項不需要在任期內（要拿掉的可能本來就是不該在的）
+          const pid = str(o.politician_id), at = `payload.stances[${k}]`;
+          if (!pid) continue; // 形狀問題 schema 已擋
+          const okPerson = checkPolitician(i, pid, `${at}.politician_id`, "這個人還不在網站上，先不要標他的立場");
+          const pol = str(o.policy_id);
+          if (pol) checkPolicy(i, pol, `${at}.policy_id`, "這句話掛不上去：請確認 policy_id", "不要掛這條政見");
+          const date = str(o.stated_on);
+          if (okPerson && date) {
+            try {
+              const { data, error } = await supabase.rpc("lineage_stance_within_elected_term", { p_politician_id: pid, p_date: date });
+              if (error) console.error("precheck stance term lookup failed:", error.message);
+              else if (data === false) {
+                problems.push({ index: i, code: "date_outside_elected_term", path: `${at}.stated_on`, message: `表態日 ${date} 不在這個人的任何一個當選任期內：選前的主張是承諾、不是立場，不收；請改附他當選上任之後的表態（任期內的議事錄、質詢、記者會）` });
+              }
+            } catch (e) {
+              console.error("precheck stance term lookup threw:", e instanceof Error ? e.message : String(e));
+            }
+          }
+        }
+        break;
+      }
+      // 事件：推動者要在；決定日要落在推動者（沒填推動者就是這條脈絡涉及的人）的當選任期內；地方要對得到內政部行政區
+      case "lineage_event": {
+        const lid = str(p.lineage_id)?.toLowerCase() ?? null;
+        if (lid) checkLineage(i, lid, "payload.lineage_id");
+        const list = Array.isArray(p.events) ? p.events as unknown[] : [];
+        for (let k = 0; k < list.length; k++) {
+          const it = list[k];
+          if (!it || typeof it !== "object") continue;
+          const o = it as Obj;
+          if (o.remove === true) continue;
+          const at = `payload.events[${k}]`;
+          const ini = str(o.initiator_politician_id);
+          const okPerson = ini ? checkPolitician(i, ini, `${at}.initiator_politician_id`, "這個人還不在網站上，先不要標他是推動者") : true;
+          if (o.level === "county" || o.level === "township") {
+            try {
+              const place = await resolveLineagePlace(supabase, o.level, o.region, o.sub_region);
+              if ("error" in place) problems.push({ index: i, code: "target_not_found", path: `${at}.region`, message: place.error });
+            } catch (e) {
+              console.error("precheck event place lookup failed:", e instanceof Error ? e.message : String(e));
+            }
+          }
+          const date = str(o.occurred_on);
+          if (okPerson && date && lid && lineages.ok && lineageRows.has(lid)) {
+            try {
+              const { data, error } = await supabase.rpc("lineage_event_within_elected_term", { p_lineage_id: lid, p_initiator_politician_id: ini, p_date: date });
+              if (error) console.error("precheck event term lookup failed:", error.message);
+              else if (data === false) {
+                problems.push({ index: i, code: "date_outside_elected_term", path: `${at}.occurred_on`, message: ini
+                  ? `決定日 ${date} 不在推動者的任何一個當選任期內：選前的主張是承諾、不是事件；請確認日期，或不填推動者`
+                  : `決定日 ${date} 不在這條脈絡涉及的人（政見持有人、交接雙方）的任何一個當選任期內：選前的主張是承諾、不是事件；請確認日期，或填 initiator_politician_id 指出是誰推動的` });
+              }
+            } catch (e) {
+              console.error("precheck event term lookup threw:", e instanceof Error ? e.message : String(e));
+            }
+          }
         }
         break;
       }

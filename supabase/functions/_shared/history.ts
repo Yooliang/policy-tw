@@ -88,7 +88,7 @@ const TYPE_LABEL: Record<string, string> = {
   politician: "更新人物欄位", candidacy: "參選狀態", policy: "新增政見", policy_progress: "進度更新", correction: "更正",
   task_suggestion: "任務提議", no_change: "無異動", adjudication: "裁決", answer: "回答提問", audit: "文件核對",
   // 政策脈絡（#349）
-  lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯", lineage_status: "脈絡現況",
+  lineage: "政策脈絡", lineage_participants: "脈絡參與角色", lineage_handover: "脈絡交接", lineage_link: "脈絡上下級關聯", lineage_status: "脈絡現況", lineage_stance: "脈絡立場", lineage_event: "脈絡事件",
   // 政黨（#346 第二階段）
   party_info: "政黨資訊",
   // 日本站人物頭像（policy-ops#162）
@@ -107,6 +107,9 @@ const FIELD_LABEL: Record<string, string> = {
   // 政策脈絡（#349）
   lineage_id: "所屬脈絡", origin: "政見來源", summary: "摘要", role: "角色", basis: "依據", note: "說明",
   handover_type: "交接型態", decided_on: "判定日期", link_type: "關聯型態",
+  // 脈絡立場、事件（#675 第二期）
+  stance: "立場", condition_text: "條件", stated_on: "表態日", date_precision: "日期精度", quote: "原文摘句", removed_at: "下架時間",
+  event_type: "事件型態", occurred_on: "決定日", decided_by: "決定機關", initiator_politician_id: "推動者", initiator_note: "推動方式",
   // 參選紀錄（#345 後續）：退選前有沒有登記；不參選重查蓋的章
   withdrawn_after_filing: "退選前有沒有登記", verified: "核對過登記名冊",
   // 參選紀錄的政黨：觸發器 politician_election_party_from_candidacy 補 party 時寫（20261018020000）
@@ -117,6 +120,7 @@ const FIELD_LABEL: Record<string, string> = {
 const TABLE_LABEL: Record<string, string> = {
   politicians: "人物", politician_elections: "參選紀錄", policies: "政見", tracking_logs: "追蹤紀錄", contribution_tasks: "任務", policy_elements: "政見三要素",
   lineages: "政策脈絡", lineage_participants: "脈絡參與角色", handovers: "脈絡交接", lineage_links: "脈絡上下級關聯", lineage_candidate_reviews: "脈絡候選清查",
+  lineage_statuses: "脈絡現況", lineage_stances: "脈絡立場", lineage_events: "脈絡事件",
   parties: "政黨",
 };
 

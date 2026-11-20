@@ -27,6 +27,8 @@ import { shapeTaskCurrent } from "./task-context.ts";
 
 const MIG_NAME = "20261105200000_lineage_status.sql";
 const MIG = await readMig(MIG_NAME);
+// 現行的貢獻型別 CHECK 由最後一支改它的 migration 決定（二期 20261120160000 加了 lineage_stance／lineage_event）
+const TYPES_MIG = await readMig("20261120160000_lineage_stance_event_types.sql");
 const u = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 const LID = u(1);
 
@@ -57,8 +59,8 @@ Deno.test("A2 lineages_full＝20261019020000 的現行定義只在最後多 stat
 });
 
 Deno.test("A3 兩個 CHECK：型別清單＝TS 的 CONTRIBUTION_TYPES；source_refs 目標表＝正式庫現況加 lineage_statuses", () => {
-  const a = MIG.indexOf("ADD CONSTRAINT contributions_contribution_type_check");
-  const chk = MIG.slice(a, MIG.indexOf(";", a));
+  const a = TYPES_MIG.indexOf("ADD CONSTRAINT contributions_contribution_type_check");
+  const chk = TYPES_MIG.slice(a, TYPES_MIG.indexOf(";", a));
   const sqlTypes = [...chk.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
   assertEquals(sqlTypes.sort(), [...CONTRIBUTION_TYPES].sort(), "SQL CHECK 與 TS 清單要同一組");
   const b = MIG.indexOf("ADD CONSTRAINT source_refs_target_table_check");
