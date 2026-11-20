@@ -6,6 +6,8 @@
 --   * 以 。；！？與換行切句（全形／半形括號內的標點不切，括號段落算所在那一句的一部分）；
 --   * 括號段落裡有查證標記的，只拿掉那一段括號、句子留著（「…完成候選人登記（…第 81 頁，我用 pdftotext 核過）。」→「…完成候選人登記。」）；
 --   * 「第 N 頁」只拿掉那個子句（到最近的逗號／頓號）、API／JSON／PDF 只拿掉那個詞，除非同句有失敗結果詞（查無／回 N 筆／留空／空白／不填）才整句刪；
+--   * 「第 N 頁」只拿掉那個子句（到最近的逗號／頓號）、API／JSON／PDF 只拿掉那個詞，除非同句有失敗結果詞（查無／回 N 筆／留空／空白／不填）才整句刪；
+--   * 「第 N 頁」只拿掉那個子句（到最近的逗號／頓號）、API／JSON／PDF 只拿掉那個詞，除非同句有失敗結果詞（查無／回 N 筆／留空／空白／不填）才整句刪；
 --   * 拿掉括號後的句子仍符合 bio_is_process_sentence() 就整句刪：①標記字（我用／pdftotext／bbox／API／核對／查無／留空／任務／交件…，以及提到 AI／代理／本系統／本站／自動整理／語言模型／Claude／GPT／Jev 的句子；API、JSON、PDF、AI 要整字，「代理人」「代理鄉長」等職稱不算，「系統」「自動」「模型」單獨出現不算）
 --     ②「出處」「來源」只在同句還有「查」「核」「附」才算（避免誤砍「依中選會公告…」這類描述）；
 --   * 刪完去頭尾空白、連續標點壓成一個；整段切到只剩空白或標點 → 寫 NULL（讓 profile_gap 臂之後派代理重寫）；
@@ -34,11 +36,33 @@ LANGUAGE sql IMMUTABLE AS $$
   SELECT regexp_replace(s, '（(?=[^）\n]*(?:我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)|(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])|第 ?[0-9]+ ?頁))[^）\n]*）|\((?=[^)\n]*(?:我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)|(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])|第 ?[0-9]+ ?頁))[^)\n]*\)|（(?=[^）\n]*(?:出處|來源))(?=[^）\n]*(?:查證|查核|核對|核過|附))[^）\n]*）|\((?=[^)\n]*(?:出處|來源))(?=[^)\n]*(?:查證|查核|核對|核過|附))[^)\n]*\)', '', 'g')
 $$;
 
--- 來源引用只拿掉那一小段、保留描述：含「第 N 頁」的子句（到最近的逗號／頓號為止）、「查詢 API」「JSON」「PDF」這個詞
+-- 來源引用只拿掉所在子句（以逗號／頓號為界；括號段落當一個整體、切點不會落在括號內）：含「第 N 頁」或 API／JSON／PDF 的子句整段拿掉。
 -- 「2026年村里長登記冊第273頁，115年8月31日再次…登記參選同里。」→「115年8月31日再次…登記參選同里。」
+-- 拿掉後剩下的字（不含標點）少於 6 個，就回 NULL＝整句刪；例外：只有頁碼子句、整句是單一子句（沒有合法切點）而且夠長（≥ 15 字）時整句保留。
 CREATE OR REPLACE FUNCTION bio_strip_process_clauses(s TEXT) RETURNS TEXT
-LANGUAGE sql IMMUTABLE AS $$
-  SELECT regexp_replace(regexp_replace(s, '[^，、；。！？\n]*第 ?[0-9]+ ?頁[^，、；。！？\n]*[，、]?', '', 'g'), '(?:查詢 ?)?(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z]) ?', '', 'g')
+LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+  v_term TEXT := COALESCE(substring(s from '[。；！？
+]+$'), '');
+  v_body TEXT := regexp_replace(s, '[。；！？
+]+$', '');
+  v_dropped BOOLEAN;
+  v_api BOOLEAN;
+  v_kept TEXT;
+BEGIN
+  SELECT COALESCE(bool_or(c.m[1] ~ '第 ?[0-9]+ ?頁' OR c.m[1] ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])'), false), COALESCE(bool_or(c.m[1] ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])'), false),
+         string_agg(c.m[1], '' ORDER BY c.ord) FILTER (WHERE NOT (c.m[1] ~ '第 ?[0-9]+ ?頁' OR c.m[1] ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])'))
+    INTO v_dropped, v_api, v_kept
+    FROM regexp_matches(v_body, '((?:[^（(，、]|（[^）\n]*）?|\([^)\n]*\)?)+[，、]?)', 'g') WITH ORDINALITY AS c(m, ord);
+  IF NOT v_dropped THEN RETURN s; END IF;
+  v_kept := regexp_replace(COALESCE(v_kept, ''), '[，、]+$', '');
+  IF char_length(regexp_replace(v_kept, '[，、。；！？ \t　,.;:!?]', '', 'g')) < 6 THEN
+    -- 只有頁碼、沒有合法切點（整句就是一個子句，常是切點落在括號內）且句子夠長：整句保留不切；來源是 API／JSON／PDF 的照規則整句刪
+    IF NOT v_api AND char_length(regexp_replace(v_body, '[，、。；！？ \t　,.;:!?]', '', 'g')) >= 15 THEN RETURN s; END IF;
+    RETURN NULL;
+  END IF;
+  RETURN v_kept || v_term;
+END
 $$;
 
 -- 切掉查證句；沒有任何句子或括號命中就原樣回傳；切到沒內容回 NULL
@@ -53,7 +77,7 @@ BEGIN
          string_agg(CASE WHEN u.proc THEN NULL ELSE u.s2 END, '' ORDER BY u.ord)
     INTO v_hit, v_kept
     FROM (
-      SELECT w.ord, w.s, bio_is_process_sentence(w.s0) AS proc, bio_strip_process_clauses(w.s0) AS s2
+      SELECT w.ord, w.s, (bio_is_process_sentence(w.s0) OR bio_strip_process_clauses(w.s0) IS NULL) AS proc, COALESCE(bio_strip_process_clauses(w.s0), w.s0) AS s2
         FROM (
           SELECT t.ord, t.m[1] AS s, bio_strip_process_parens(t.m[1]) AS s0
             FROM regexp_matches(p_bio,

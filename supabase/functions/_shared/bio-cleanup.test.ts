@@ -219,11 +219,48 @@ Deno.test("B12 負向案例：任務小組／核心主張＋來源不砍；第 N
   // 第 N 頁：只去掉子句，保留後面的描述
   assertEquals(await f("2026年村里長登記冊第273頁，115年8月31日再次以中國國民黨登記參選同里。"), "115年8月31日再次以中國國民黨登記參選同里。");
   assertEquals(await f("依彙總表第83頁載明，他於115/09/03登記參選。"), "他於115/09/03登記參選。");
-  assertEquals(await f("甲候選人，見第3頁。"), "甲候選人。");
+  assertEquals(await f("甲某某候選人參選，見第3頁。"), "甲某某候選人參選。");
   // API／JSON／PDF 當來源引用：沒有失敗結果詞就只去掉那個詞
-  assertEquals(await f("中選會候選人查詢 API 載其2022年當選。"), "中選會候選人載其2022年當選。");
-  assertEquals(await f("依 JSON 資料，他出生於1970年。"), "依 資料，他出生於1970年。");
+  assertEquals(await f("中選會候選人查詢 API 載其2022年當選。"), null, "整句只有來源子句、去完沒東西 → 整句刪");
+  assertEquals(await f("依 JSON 資料，他出生於1970年。"), "他出生於1970年。", "去詞連同所在子句一起去，不留語病");
+  assertEquals(await f("中選會候選人查詢 API 載其 111 年當選，他於 2026 年登記參選里長。"), "他於 2026 年登記參選里長。");
+  // 切點不得落在括號內（f36a6764）：頓號在括號裡，不能把括號切成一半
+  assertEquals(await f("依登記冊第81頁，介壽里參選人（115/09/02、推薦政黨無）。"), "介壽里參選人（115/09/02、推薦政黨無）。");
+  assertEquals(await f("介壽里參選人（115/09/02、推薦政黨無），見第81頁。"), "介壽里參選人（115/09/02、推薦政黨無）。");
+  assertEquals(await f("介壽里參選人（115/09/02、推薦政黨無）、依第81頁載明、住在介壽里。"), "介壽里參選人（115/09/02、推薦政黨無）、住在介壽里。");
+  assertEquals(await f("介壽里參選人（見第81頁、推薦政黨無）。"), "介壽里參選人。", "括號內有頁碼：整段括號拿掉");
+  assertEquals(await f("依第3頁載明。"), null, "剩下少於 6 字 → 整句刪");
+  // f36a6764：整句只有一個子句（頓號都在括號裡），沒有合法切點 → 整句保留，括號不被切成一半
+  assertEquals(
+    await f("115年村里長登記名冊第41頁列她為新北市板橋區介壽里參選人（115/09/02、推薦政黨無）。"),
+    "115年村里長登記名冊第41頁列她為新北市板橋區介壽里參選人（115/09/02、推薦政黨無）。",
+  );
   assertEquals(await f("甲。中選會候選人查詢 API 查無其紀錄。"), "甲。");
   assertEquals(await f("甲。中選會 API 回傳空白。"), "甲。");
+  await db.close();
+});
+
+Deno.test("B13 預覽腳本與 migration 函式對子句規則的案例逐位一致", async () => {
+  const cases = [
+    "2026年村里長登記冊第273頁，115年8月31日再次以中國國民黨登記參選同里。",
+    "115年村里長登記名冊第41頁列她為新北市板橋區介壽里參選人（115/09/02、推薦政黨無）。",
+    "介壽里參選人（115/09/02、推薦政黨無）、依第81頁載明、住在介壽里。",
+    "中選會候選人查詢 API 載其2022年當選。",
+    "依 JSON 資料，他出生於1970年。第二句留著。",
+    "依第3頁載明。好的描述句在這裡。",
+    "甲某某候選人參選，見第3頁。\n換行後的描述句。",
+    "沒有任何標記的描述。",
+  ];
+  const { db } = await build();
+  await db.exec(`DELETE FROM politicians`);
+  for (const [i, c] of cases.entries()) await db.query(`INSERT INTO politicians (name, bio) VALUES ($1, $2)`, [`p${i}`, c]);
+  const body = PREVIEW.split("\n").slice(1).join("\n");
+  const head = body.slice(0, body.indexOf("-- ▼▼ 輸出"));
+  const { rows: pv } = await db.query<{ name: string; new_bio: string | null }>(`${head} SELECT p.name, c.new_bio FROM c JOIN politicians p ON p.id = c.id`);
+  await db.exec(MIG_SQL.replace(/^WITH cand AS[\s\S]*$/m, ""));
+  const { rows: fn } = await db.query<{ name: string; v: string | null }>(
+    `SELECT name, bio_strip_process_sentences(bio) AS v FROM politicians WHERE bio_strip_process_sentences(bio) IS DISTINCT FROM bio`);
+  assertEquals(pv.map((r) => `${r.name}|${r.new_bio}`).sort(), fn.map((r) => `${r.name}|${r.v}`).sort());
+  assertEquals(pv.length, 6, "介壽里那句整句保留、沒標記的那句不改");
   await db.close();
 });

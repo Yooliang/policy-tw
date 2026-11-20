@@ -8,11 +8,29 @@ WITH tok AS (
          regexp_matches(p.bio, '((?:(?:[^（(。；！？\n]|（[^）\n]*）?|\([^)\n]*\)?)+[。；！？]*\n*|[。；！？\n]+))', 'g') WITH ORDINALITY AS m(s, ord)
    WHERE p.bio IS NOT NULL
      AND p.bio ~ '我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)|(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])|第 ?[0-9]+ ?頁|出處|來源'
-), sent AS (
-  SELECT id, ord, s, s0,
-         (s0 ~ '我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)' OR (s0 ~ '出處|來源' AND s0 ~ '查證|查核|核對|核過|附') OR (s0 ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])' AND s0 ~ '查無|回 ?[0-9]+ ?筆|留空|空白|不填')) AS proc,
-         regexp_replace(regexp_replace(s0, '[^，、；。！？\n]*第 ?[0-9]+ ?頁[^，、；。！？\n]*[，、]?', '', 'g'), '(?:查詢 ?)?(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z]) ?', '', 'g') AS s2
+), sent0 AS (
+  SELECT id, ord, s, s0, (s0 ~ '我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)' OR (s0 ~ '出處|來源' AND s0 ~ '查證|查核|核對|核過|附') OR (s0 ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])' AND s0 ~ '查無|回 ?[0-9]+ ?筆|留空|空白|不填')) AS proc0,
+         regexp_replace(s0, '[。；！？
+]+$', '') AS b, COALESCE(substring(s0 from '[。；！？
+]+$'), '') AS term
     FROM tok
+), cl AS (
+  SELECT x.id, x.ord, c.cord, c.m[1] AS clause, (c.m[1] ~ '第 ?[0-9]+ ?頁' OR c.m[1] ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])') AS dr
+    FROM sent0 x, regexp_matches(x.b, '((?:[^（(，、]|（[^）\n]*）?|\([^)\n]*\)?)+[，、]?)', 'g') WITH ORDINALITY AS c(m, cord)
+), cagg AS (
+  SELECT id, ord, bool_or(dr) AS dropped, bool_or(clause ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])') AS api,
+         regexp_replace(COALESCE(string_agg(clause, '' ORDER BY cord) FILTER (WHERE NOT dr), ''), '[，、]+$', '') AS kept
+    FROM cl GROUP BY id, ord
+), sent1 AS (
+  SELECT x.id, x.ord, x.s, x.proc0, x.s0, x.term, x.b, COALESCE(g.dropped, false) AS dropped, COALESCE(g.api, false) AS api, g.kept
+    FROM sent0 x LEFT JOIN cagg g ON g.id = x.id AND g.ord = x.ord
+), sent AS (
+  SELECT id, ord, s,
+         (proc0 OR (dropped AND char_length(regexp_replace(kept, '[，、。；！？ \t　,.;:!?]', '', 'g')) < 6
+                    AND NOT (NOT api AND char_length(regexp_replace(b, '[，、。；！？ \t　,.;:!?]', '', 'g')) >= 15))) AS proc,
+         CASE WHEN NOT dropped OR (char_length(regexp_replace(kept, '[，、。；！？ \t　,.;:!?]', '', 'g')) < 6 AND NOT api AND char_length(regexp_replace(b, '[，、。；！？ \t　,.;:!?]', '', 'g')) >= 15) THEN s0
+              ELSE kept || term END AS s2
+    FROM sent1
 ), agg AS (
   SELECT id, bool_or(proc OR s2 <> s) AS hit, string_agg(CASE WHEN proc THEN NULL ELSE s2 END, '' ORDER BY ord) AS kept
     FROM sent GROUP BY id
