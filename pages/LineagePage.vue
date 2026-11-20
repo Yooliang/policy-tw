@@ -292,7 +292,7 @@ usePageHead({
                   <ul class="space-y-2">
                     <li v-for="p in item.policies" :key="p.id" class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                       <RouterLink :to="`/policy/${p.id}`" class="font-bold text-blue-700 hover:underline break-words">{{ p.title }}</RouterLink>
-                      <span class="ml-2 text-xs text-slate-500 whitespace-nowrap">{{ policyMeta(p, policyStatusLabel) }}</span>
+                      <span class="ml-2 text-xs text-slate-500 whitespace-nowrap">{{ policyMeta(p, policyStatusLabel, stageOfPolicy(p, personById.get(item.politicianId), (id) => electionDates.get(id), today)) }}</span>
                     </li>
                   </ul>
                 </template>
