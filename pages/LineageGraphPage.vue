@@ -96,7 +96,7 @@ usePageHead({
 </script>
 
 <template>
-  <div v-if="lineage && model" class="bg-slate-50 min-h-screen" data-testid="lineage-graph-page">
+  <div v-if="lineage && model && !error" class="bg-slate-50 min-h-screen" data-testid="lineage-graph-page">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <RouterLink :to="lineagePath(lineage.id)" class="inline-flex items-center gap-1 text-sm font-bold text-blue-700 hover:underline" data-testid="lineage-graph-back">
         <ChevronLeft :size="16" />{{ T.graphBack }}

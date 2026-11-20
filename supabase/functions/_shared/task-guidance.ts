@@ -291,8 +291,8 @@ export const TASK_GUIDANCE: Record<string, string> = {
 
   handover_missing:
     "記交接：脈絡裡前一任（target.from_politician_id）的那件事，後一任（target.to_politician_id）上任後怎麼處理。五選一：keep 照舊做（原樣延續）、pivot 改做法（目的不變、做法變了）、shrink 縮小（規模或預算縮水但沒停）、stop 停掉、resume 重新開始（曾經停掉後又重啟）。" +
-    "依據要是後任上任後的施政報告、預算書、議會議事錄或報導，寫出後任實際怎麼做；**後任的政見清單裡沒有這件事，不等於中止**——那叫查不到。" +
-    "中止要有來源明確寫出停止、喊卡、解約或終止，note 寫出誰、哪份文件、哪一天決定的；中止這一型要兩台不同機器的驗證票才會上線。" +
+    "依據要是後任上任後的施政報告、預算書、議會議事錄或報導，寫出後任實際怎麼做；**後任的政見清單裡沒有這件事，不等於停掉**——那叫查不到。" +
+    "停掉要有來源明確寫出停止、喊卡、解約或終止，note 寫出誰、哪份文件、哪一天決定的；停掉這一型要兩台不同機器的驗證票才會上線。" +
     "用 lineage_handover 交：lineage_id、from_politician_id、from_election_id、to_politician_id、to_election_id 照 target 帶，decided_on 填判定依據的日期（知道的話），source_locator 寫依據在出處的哪裡。" +
     "還查不到後任怎麼處理 → no_change，outcome=not_found，checked_urls 列你查過的施政報告、預算與議事錄。" +
     SOLE_SOURCE_TASK_NOTE.replace("交 policy／policy_progress 時", "交 policy／policy_progress／lineage_handover 時"),
@@ -467,7 +467,7 @@ export const PAYLOAD_SHAPE: Record<string, string> = {
   lineage_handover:
     "payload：lineage_id、from_politician_id、from_election_id、to_politician_id、to_election_id（照任務 target 帶；那一屆不在網站上就不填）、" +
     "handover_type（keep 照舊做／pivot 改做法／shrink 縮小／stop 停掉／resume 重新開始）、decided_on（判定依據的日期，選填）、note（20～500 字：依據哪份文件、文件怎麼說）、" +
-    "source_locator（依據在出處的哪裡）、source_url（出自 source_urls 的哪一個，不填＝第一個）。中止要兩台不同機器的驗證票。",
+    "source_locator（依據在出處的哪裡）、source_url（出自 source_urls 的哪一個，不填＝第一個）。停掉要兩台不同機器的驗證票。",
   lineage_status:
     "payload：lineage_id（照任務 target）、phase（proposed 提案階段／planning 規劃中／approved 已核定／in_progress 進行中／completed 已完成／paused 暫緩／cancelled 已終止）、" +
     "text（8～120 字的一句現況，只寫出處有的事實）、as_of（出處講到這個狀態的日期 YYYY-MM-DD，不是查詢日、不能是未來）、source_locator（這句話在出處的哪裡）、" +

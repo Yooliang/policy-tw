@@ -12,10 +12,14 @@ Deno.test('載入：onMounted 後才撈；脈絡與政見、任期、人物的�
   assert(/watch\(\[mounted, lineageId\], async \(\[ready, id\]\) => \{\s*if \(!ready \|\| !id \|\| lineage\.value\) return/.test(page), '脈絡要等 mounted')
   assert(/watch\(\[mounted, lineage\], async \(\[ready, l\]\) => \{\s*if \(!ready \|\| !l\) return/.test(page), '政見、任期、人物要等 mounted')
   assert(page.includes('<LoadError v-if="termsFailed" inline') && page.includes('<LoadError v-else-if="error" />'), '失敗用 LoadError')
+  // 任一段載入失敗（政見、人物等只寫全域 error）就不畫半張圖：圖的分支要排除 error，LoadError 才接得到
+  assert(page.includes('<div v-if="lineage && model && !error"'), '有 error 時不畫圖（沒有政見點、人名全是姓名待查的半張圖）')
+  assert(page.indexOf('<div v-if="lineage && model && !error"') < page.indexOf('<LoadError v-else-if="error" />'))
   // 讀取失敗（error）的分支要在「找不到」之前
   assert(page.indexOf('<LoadError v-else-if="error" />') < page.indexOf('T.notFound'))
   const terms = await read('../composables/useLineageTerms.ts')
   assert(terms.includes("from('lineage_terms')") && terms.includes('isMissingRelation(err)') && terms.includes('failed.value = true'))
+  assert(terms.includes(".order('start_date')"), '查詢要有 order（query-bounds）')
 })
 
 Deno.test('手機（≤ 640 px）不畫 SVG：直式時間軸是主體；桌機畫 SVG、圖下方放同內容的時序清單；兩邊吃同一個 model', async () => {

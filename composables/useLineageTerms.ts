@@ -20,7 +20,7 @@ export function useLineageTerms() {
     try {
       // query-bounds: ok — 一條脈絡涉及的人與單席職位歷任，最多幾百列
       const { data } = await withTimeoutAndRetry(`lineage terms ${lineageId}`, (signal) =>
-        supabase.from('lineage_terms').select('*').eq('lineage_id', lineageId).limit(2000).abortSignal(signal).throwOnError())
+        supabase.from('lineage_terms').select('*').eq('lineage_id', lineageId).order('start_date').limit(2000).abortSignal(signal).throwOnError())
       terms.value = mapTermRows((data ?? []) as RawTermRow[])
     } catch (err) {
       if (isMissingRelation(err)) { terms.value = []; return }

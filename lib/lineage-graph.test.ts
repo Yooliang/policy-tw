@@ -99,7 +99,6 @@ Deno.test('交接：每個單席職位的相鄰兩任各一條交接線；有紀
   const gap = hand.find((m) => m.kind === 'gap')!
   assertEquals(gap.label, T.handoverUnrecorded)
   assert(rec.laneKey !== gap.laneKey, '並排在各自的職位泳道')
-  assert(Math.abs(rec.y - gap.y) > 0 || rec.laneKey !== gap.laneKey)
 })
 
 Deno.test('交接紀錄對不到相鄰兩任（人不在任期表）也不消失：落在後任泳道或「其他」', () => {

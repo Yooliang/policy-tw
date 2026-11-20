@@ -625,7 +625,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       break;
     }
     case "lineage_handover": {
-      // 記交接（#349，協議 1.52.0）：脈絡裡從前一任到下一任，這件事怎麼被處理。中止（stop）要兩台不同機器的驗證票。
+      // 記交接（#349，協議 1.52.0）：脈絡裡從前一任到下一任，這件事怎麼被處理。停掉（stop）要兩台不同機器的驗證票。
       if (!isUuid(p.lineage_id)) push("payload.lineage_id", "lineage_id 必填（這條脈絡的 uuid，任務的 target.lineage_id）");
       if (!isUuid(p.from_politician_id)) push("payload.from_politician_id", "from_politician_id 必填（前一任的人物 uuid）");
       if (!isUuid(p.to_politician_id)) push("payload.to_politician_id", "to_politician_id 必填（下一任的人物 uuid）");
@@ -641,7 +641,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         const today = new Date().toISOString().slice(0, 10);
         if (!isRealDate(p.decided_on) || p.decided_on > today) push("payload.decided_on", "decided_on 要是 YYYY-MM-DD、不能是未來；判定依據的日期（預算刪除、議會決議、宣布停工的日子），不知道就不填");
       }
-      if (!isStr(p.note, LINK_NOTE_MIN, LINK_NOTE_MAX)) push("payload.note", `note 必填（${LINK_NOTE_MIN}～${LINK_NOTE_MAX} 字）：依據哪份文件、文件怎麼說（中止要寫出誰、哪份文件說停止或終止）`);
+      if (!isStr(p.note, LINK_NOTE_MIN, LINK_NOTE_MAX)) push("payload.note", `note 必填（${LINK_NOTE_MIN}～${LINK_NOTE_MAX} 字）：依據哪份文件、文件怎麼說（停掉要寫出誰、哪份文件說停止或終止）`);
       for (const k of ["source_locator", "source_url"]) {
         if (p[k] !== undefined && p[k] !== null && typeof p[k] !== "string") push(`payload.${k}`, "要是字串");
       }

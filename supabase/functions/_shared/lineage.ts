@@ -61,7 +61,7 @@ export const HANDOVER_TYPE_LABEL: Record<HandoverType, string> = {
   stop: "停掉",
   resume: "重新開始",
 };
-/** 要兩台不同機器投過才上線的交接型態（維護者 10-05：中止要較高票數，比照 merge_politician） */
+/** 要兩台不同機器投過才上線的交接型態（維護者 10-05：停掉要較高票數，比照 merge_politician） */
 export const HANDOVER_TWO_IP_TYPES: readonly HandoverType[] = ["stop"];
 
 export const LINK_TYPES = ["top_down", "bottom_up"] as const;
