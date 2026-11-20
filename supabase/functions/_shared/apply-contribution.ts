@@ -43,6 +43,7 @@ import {
   LINK_FIELDS, LINK_TYPE_LABEL, type LinkType, linkLevelProblem, linkValues, lineageIneligibleMessage, type LineageIneligibleReason, type LineageOwnedPolicy, lineagePolicyIneligibleReason,
   lineageSamePersonMessage, isSamePersonSameTerm, normalizeCountyName, parseCandidateTaskId, PARTICIPANT_FIELDS, participantPhrase, participantValues, taipeiToday,
   STATUS_FIELDS, statusPhrase, statusValues,
+  EVENT_FIELDS, eventPhrase, eventValues, STANCE_FIELDS, stancePhrase, stanceValues,
 } from "./lineage.ts";
 import { chunksOf } from "./in-chunks.ts";
 import { careerSourceNote } from "./politician-careers.ts";
@@ -1544,6 +1545,149 @@ async function applyLineageStatus(supabase: SupabaseLike, row: ContributionRow):
   return { status: "applied", message: `脈絡「${lineage.title}」截至 ${asOf} 的現況已更正：${phrase}${notes.length > 0 ? `（${notes.join("；")}）` : ""}` };
 }
 
+/** 軟刪除的時間戳（落庫與還原都記這一個值） */
+const nowIso = (): string => new Date().toISOString();
+
+/**
+ * 記立場（policy-tw#675 第二期）：一筆 1～10 項。同一人同一天同一句（原文去頭尾空白後一字不差）是同一筆：重交＝覆蓋（每欄記履歷）；
+ * 不同句各自一筆、不互蓋。`remove:true` 把標錯的那一筆**軟刪除**（填 removed_at、不刪列；履歷記 removed_at，還原＝清掉）。
+ * 軟刪除的列不佔唯一鍵：同一句下架之後重交＝**新開一列**（部分唯一索引只管沒下架的列，見計畫書 2.4）。
+ * 承諾防線：表態日要落在這個人的當選任期內，落庫前再判一次（交件守門之後任期資料可能變了；資料表觸發器是最後一道）。
+ */
+async function applyLineageStances(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const lineageId = str(p.lineage_id)?.toLowerCase();
+  const items = Array.isArray(p.stances) ? (p.stances as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
+  if (!lineageId || items.length === 0) return { status: "failed", message: "lineage_stance 要帶 lineage_id 與 stances" };
+  const { data: lineage, error: lineageError } = await supabase.from("lineages").select("id, title").eq("id", lineageId).maybeSingle();
+  throwIf(lineageError, "lineages read");
+  if (!lineage) return { status: "failed", message: `找不到脈絡 ${lineageId}` };
+
+  const wanted = items.map((e) => String(e.politician_id ?? "").toLowerCase());
+  const people = await livePoliticianIds(supabase, wanted);
+  const unknown = wanted.filter((id) => !people.has(id));
+  if (unknown.length > 0) return { status: "failed", message: `找不到人物 ${[...new Set(unknown)].join("、")}` };
+
+  const written: string[] = [];
+  const unchanged: string[] = [];
+  for (const raw of items) {
+    const person = people.get(String(raw.politician_id).toLowerCase())!;
+    const date = String(raw.stated_on);
+    const quote = String(raw.quote ?? "").trim();
+    // 同一人同一天的沒下架列（最多幾列），逐一比原文
+    // query-bounds: ok — 同一人同一天同一條脈絡的立場，最多幾列
+    const { data: sameDay, error: readError } = await supabase.from("lineage_stances").select("*")
+      .eq("lineage_id", lineageId).eq("politician_id", person.id).eq("stated_on", date).is("removed_at", null).limit(50);
+    throwIf(readError, "lineage_stances read");
+    const current = ((sameDay ?? []) as Obj[]).find((r) => String(r.quote ?? "").trim() === quote) ?? null;
+    if (raw.remove === true) {
+      if (!current) { unchanged.push(`${person.name}（${date} 這句本來就沒有）`); continue; }
+      const at = nowIso();
+      const { error } = await supabase.from("lineage_stances").update({ removed_at: at, contribution_id: row.id }).eq("id", current.id);
+      throwIf(error, "lineage_stances soft delete");
+      await recordUpdate(supabase, ctx, "lineage_stances", String(current.id), "removed_at", null, at);
+      written.push(`拿掉 ${stancePhrase({ name: person.name, stance: current.stance, stated_on: current.stated_on })}`);
+      continue;
+    }
+    const values = { ...stanceValues(raw, row.source_urls), politician_id: person.id };
+    const phrase = stancePhrase({ name: person.name, stance: values.stance, stated_on: values.stated_on });
+    if (!current) {
+      // 承諾防線：表態日不在任期內就不收（觸發器也會擋，這裡先給人看得懂的原因，而且不白白重試）
+      const { data: within, error: termError } = await supabase.rpc("lineage_stance_within_elected_term", { p_politician_id: person.id, p_date: date });
+      throwIf(termError, "lineage_stance_within_elected_term");
+      if (within === false) return { status: "failed", message: `date_outside_elected_term：${person.name}的表態日 ${date} 不在任何一個當選任期內（選前的主張是承諾、不是立場）` };
+      const { data: inserted, error } = await supabase.from("lineage_stances").insert({ lineage_id: lineageId, ...values, contribution_id: row.id }).select("*").maybeSingle();
+      throwIf(error, "lineage_stances insert");
+      if (!inserted) throw new Error("lineage_stances insert 沒有回傳 id");
+      await recordInsert(supabase, ctx, "lineage_stances", String(inserted.id), inserted);
+      written.push(phrase);
+      continue;
+    }
+    const fields = changedLineageFields(current, values, [...STANCE_FIELDS]);
+    if (fields.length === 0) { unchanged.push(phrase); continue; }
+    const patch: Obj = Object.fromEntries(fields.map((f) => [f, values[f]]));
+    const { error } = await supabase.from("lineage_stances").update({ ...patch, contribution_id: row.id }).eq("id", current.id);
+    throwIf(error, "lineage_stances update");
+    for (const f of fields) await recordUpdate(supabase, ctx, "lineage_stances", String(current.id), f, current[f] ?? null, values[f]);
+    written.push(`${phrase}（已更正）`);
+  }
+  if (written.length === 0) return { status: "superseded", message: `脈絡「${lineage.title}」的立場跟現有的一樣（${unchanged.join("、")}），不重複寫入` };
+  return {
+    status: "applied",
+    message: `脈絡「${lineage.title}」的立場已上線：${written.join("；")}${unchanged.length > 0 ? `（${unchanged.join("、")}跟現有的一樣，略過）` : ""}`,
+  };
+}
+
+/**
+ * 記事件（policy-tw#675 第二期）：一筆 1～10 項。同一條脈絡、同型態、同一天、同機關是同一筆：重交＝覆蓋（每欄記履歷）；
+ * 已知取捨：同日同機關同型態的兩項決定會互蓋（協議要求合併成一筆、description 分點寫；覆蓋時履歷記舊值）。
+ * `remove:true` 軟刪除；下架後重交＝新開一列。地方對行政區（對不到整筆失敗）；決定日要落在任期內（見立場）。
+ */
+async function applyLineageEvents(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
+  const p = row.payload;
+  const ctx = ctxOf(row);
+  const lineageId = str(p.lineage_id)?.toLowerCase();
+  const items = Array.isArray(p.events) ? (p.events as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
+  if (!lineageId || items.length === 0) return { status: "failed", message: "lineage_event 要帶 lineage_id 與 events" };
+  const { data: lineage, error: lineageError } = await supabase.from("lineages").select("id, title").eq("id", lineageId).maybeSingle();
+  throwIf(lineageError, "lineages read");
+  if (!lineage) return { status: "failed", message: `找不到脈絡 ${lineageId}` };
+
+  const wanted = items.map((e) => String(e.initiator_politician_id ?? "").toLowerCase()).filter((id) => id.length > 0);
+  const people = await livePoliticianIds(supabase, wanted);
+  const unknown = wanted.filter((id) => !people.has(id));
+  if (unknown.length > 0) return { status: "failed", message: `找不到人物 ${[...new Set(unknown)].join("、")}` };
+
+  const written: string[] = [];
+  const unchanged: string[] = [];
+  for (const raw of items) {
+    const base = eventValues(raw, row.source_urls);
+    const initiator = base.initiator_politician_id ? people.get(base.initiator_politician_id)!.id : null;
+    const phrase = eventPhrase(base);
+    // query-bounds: ok — 同一條脈絡同型態同一天同機關的沒下架事件，最多一列（部分唯一索引）
+    const { data: found, error: readError } = await supabase.from("lineage_events").select("*")
+      .eq("lineage_id", lineageId).eq("event_type", base.event_type).eq("occurred_on", base.occurred_on).eq("decided_by", base.decided_by).is("removed_at", null).limit(2);
+    throwIf(readError, "lineage_events read");
+    const current = ((found ?? []) as Obj[])[0] ?? null;
+    if (raw.remove === true) {
+      if (!current) { unchanged.push(`${phrase}（本來就沒有）`); continue; }
+      const at = nowIso();
+      const { error } = await supabase.from("lineage_events").update({ removed_at: at, contribution_id: row.id }).eq("id", current.id);
+      throwIf(error, "lineage_events soft delete");
+      await recordUpdate(supabase, ctx, "lineage_events", String(current.id), "removed_at", null, at);
+      written.push(`拿掉 ${phrase}`);
+      continue;
+    }
+    const place = await resolveLineagePlace(supabase, base.level, raw.region, raw.sub_region);
+    if ("error" in place) return { status: "failed", message: `${phrase}：${place.error}` };
+    const values = { ...base, initiator_politician_id: initiator, ...place };
+    const { data: within, error: termError } = await supabase.rpc("lineage_event_within_elected_term", { p_lineage_id: lineageId, p_initiator_politician_id: initiator, p_date: base.occurred_on });
+    throwIf(termError, "lineage_event_within_elected_term");
+    if (within === false) return { status: "failed", message: `date_outside_elected_term：${phrase}的決定日不在${initiator ? "推動者" : "這條脈絡涉及的人"}的任何一個當選任期內（選前的主張是承諾、不是事件）` };
+    if (!current) {
+      const { data: inserted, error } = await supabase.from("lineage_events").insert({ lineage_id: lineageId, ...values, contribution_id: row.id }).select("*").maybeSingle();
+      throwIf(error, "lineage_events insert");
+      if (!inserted) throw new Error("lineage_events insert 沒有回傳 id");
+      await recordInsert(supabase, ctx, "lineage_events", String(inserted.id), inserted);
+      written.push(phrase);
+      continue;
+    }
+    const fields = changedLineageFields(current, values, [...EVENT_FIELDS]);
+    if (fields.length === 0) { unchanged.push(phrase); continue; }
+    const patch: Obj = Object.fromEntries(fields.map((f) => [f, values[f]]));
+    const { error } = await supabase.from("lineage_events").update({ ...patch, contribution_id: row.id }).eq("id", current.id);
+    throwIf(error, "lineage_events update");
+    for (const f of fields) await recordUpdate(supabase, ctx, "lineage_events", String(current.id), f, current[f] ?? null, values[f]);
+    written.push(`${phrase}（已更正）`);
+  }
+  if (written.length === 0) return { status: "superseded", message: `脈絡「${lineage.title}」的事件跟現有的一樣（${unchanged.join("、")}），不重複寫入` };
+  return {
+    status: "applied",
+    message: `脈絡「${lineage.title}」的事件已上線：${written.join("；")}${unchanged.length > 0 ? `（${unchanged.join("、")}跟現有的一樣，略過）` : ""}`,
+  };
+}
+
 /** 記脈絡關聯：一對上下級只有一筆，重交＝覆蓋；上級要在下級的上一層 */
 async function applyLineageLink(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const p = row.payload;
@@ -2825,6 +2969,8 @@ async function applyByType(supabase: SupabaseLike, row: ContributionRow): Promis
     case "lineage_handover": return await applyLineageHandover(supabase, row);
     case "lineage_link": return await applyLineageLink(supabase, row);
     case "lineage_status": return await applyLineageStatus(supabase, row);
+    case "lineage_stance": return await applyLineageStances(supabase, row);
+    case "lineage_event": return await applyLineageEvents(supabase, row);
     case "regional_stat": return await applyRegionalStat(supabase, row);
     case "policy_subtopics": return await applyPolicySubtopics(supabase, row);
     default: return { status: "failed", message: `未知型別 ${row.contribution_type}` };

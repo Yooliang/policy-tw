@@ -176,6 +176,12 @@ Deno.test("每一種貢獻型別都要有人話摘要，不能掉進「（型別
     lineage_link: { upper_lineage_id: "00000000-0000-4000-8000-000000000008", lower_lineage_id: "00000000-0000-4000-8000-000000000009",
       link_type: "top_down", note: "中央前瞻軌道補助核定藍線第一階段，市府執行。", source_locator: "核定公文" },
     lineage_status: { lineage_id: "00000000-0000-4000-8000-000000000008", phase: "in_progress", text: "工程已於九月開工。", as_of: "2026-09-30", source_locator: "新聞稿" },
+    lineage_stance: { lineage_id: "00000000-0000-4000-8000-000000000008", stances: [
+      { politician_id: "00000000-0000-4000-8000-000000000001", stance: "support", stated_on: "2026-03-01", quote: "藍線一定要做", source_locator: "議事錄" },
+    ] },
+    lineage_event: { lineage_id: "00000000-0000-4000-8000-000000000008", events: [
+      { event_type: "approved", occurred_on: "2026-03-01", level: "county", region: "台中市", decided_by: "市議會", description: "市議會三讀通過藍線預算。", source_locator: "議事錄" },
+    ] },
     party_info: { parties: [{ party_id: 95, valid_from: "2019-05-01", predecessor_id: 10001 }, { party_id: 10001, valid_to: "2019-04-30" }],
       note: "內政部政黨資訊網記載台灣團結聯盟更名為台聯黨" },
     regional_stat: { admin_code: "65000", stat_key: "population", year: 2024, value: 2800000, unit: "人" },

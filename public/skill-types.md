@@ -371,6 +371,7 @@
 **脈絡只收「那一屆已投票且當選」的政見**（維護者 2026-10-19：承諾 → 政見 → 脈絡——選前叫承諾，當選後才叫政見，政見串起來才叫脈絡）：選前的承諾、落選人的承諾不收，歸入時會被當場退回 `400 apply_would_fail`；已經在脈絡裡的政見之後才變得不合格（例如那一屆的結果更正成落選），網站上就不算它，不用交件。判斷看**那條政見所屬的那一屆**，不是看這個人現在在不在任（2018 當選、2022 落選的人，2018 那一屆的政見仍然收）。**同一場選舉的候選人之間的比較不是脈絡。**
 **同一位政治人物、同一屆的多條政見講同一件事，是重複政見，走重複清查（`duplicate_policy`），不是脈絡**：脈絡串的是跨人（同級多人、前後任）或跨屆（承諾當選後的延續）的政見。
 四種任務：`lineage_candidate`（系統把同一層級、同一地方、同一類別、**那一屆已投票且當選**的政見放成一格，你判斷哪些是同一件事）、`handover_missing`（脈絡裡某位首長之後換了人，記交接）、`lineage_roles_missing`（脈絡裡有民意代表的政見，照官方紀錄標角色）、`lineage_link_candidate`（同類別上一級的脈絡，判斷有沒有上下級關係）。
+另外記**現況**（`lineage_status_stale`）、**立場**（`lineage_stance_missing`，誰在哪天對這件事表態支持、反對或有條件）、**事件**（`lineage_event_missing`，政府或議會已經做成的決定）；立場與事件**只收當選上任之後的**，選前的主張是承諾、不是脈絡（日期不在當選任期內，交件當場退回 `400 date_outside_elected_term`）。
 
 <!-- spec contribution: lineage -->
 **`lineage`** — **建立／歸入脈絡**：`lineage_id`（歸入既有的脈絡）與 `new_lineage`（建新的）二擇一✅；`policy_ids`（要歸入的政見 id，一筆最多 30 條；建新脈絡至少 2 條，中央層級至少 1 條）；`note`✅（20～1000 字：**憑什麼判定是同一件事**——政見原文或報導裡共同的計畫名稱、地點、條例或預算）。
@@ -409,6 +410,21 @@
 
 <!-- spec contribution: lineage_link -->
 **`lineage_link`** — **記脈絡關聯（上下級）**：`upper_lineage_id`✅（上一級那條）、`lower_lineage_id`✅（下一級那條）、`link_type`✅（`top_down`：上級立法或補助，下級執行／`bottom_up`：下級爭取，上級採納）、`note`✅（20～500 字：哪一份法規、補助核定或執行計畫把兩件事連起來）、`source_locator`✅、`source_url`。上一級的意思：中央在縣市與鄉鎮之上、縣市在**同縣市**的鄉鎮之上；層級不對會當場退回。只是同一個主題、找不到實際的法規或預算連結的，不算上下級。`lineage_link_candidate` 逐條看完都沒有 → `no_change`，`outcome=confirmed`；這一份候選清單就不會再派。
+
+<!-- spec contribution: lineage_stance -->
+**`lineage_stance`**（1.139.0，policy-tw#675）— **脈絡立場**（`lineage_stance_missing` 任務）：某人在某一天對這件事表態支持、反對或有條件，附原文摘句與出處。`lineage_id`✅、`stances`✅（1～10 項，**一項錯整筆會被退**，沒把握的先不要放）、外層 `note`✅（交件說明 20～300 字：這些人指的是哪件事、為什麼是同一件事；每一項自己的備註放在項目的 `note`，是另一個欄位）。每一項：`politician_id`✅（站上已有的人物）、`stance`✅（`support` 支持／`oppose` 反對／`conditional` 有條件）、`condition`（`conditional` 必填 6～200 字、照原文；其他立場不能填）、`stated_on`✅（表態那天 `YYYY-MM-DD`，**不是報導日**；只知道年或月就填該期間第一天並標 `date_precision`＝`month`／`year`；不能是未來）、`quote`✅（原文摘句 8～300 字，**出處裡一字不差**）、`policy_id`（這句話屬於哪條政見，選填，只用來追溯）、`source_locator`✅（在出處哪裡：議事錄日期與案由、報導段落）、`source_url`（出自 `source_urls` 的哪一個，不填＝第一個）、`second_source_url`（見下）、`note`（項目備註 1～200 字）、`remove`（`true`＝把標錯的這一項軟刪除，要帶同一組 `politician_id`／`stated_on`／`quote`）。
+- **只收當選上任之後的表態**：`stated_on` 要落在這個人某一個當選任期內（那一屆已投票、投票日當天算還沒投票）。選前的競選主張是承諾、不是立場，回 `400 date_outside_elected_term`。
+- **同一人同一天同一句**＝同一筆，重交＝覆蓋（每欄記查核履歷）；同一天不同的句子各自一筆。已被下架的句子重交＝新開一列。立場變過就每次各一項，網站顯示每個人最新的一筆。
+- 第 2 節 1a 條「媒體不能當唯一出處」**逐項**適用：每一項的出處是官方（議會議事錄、政府公告）就過；不是官方，該項要在 `second_source_url` 附另一個不同網站的來源（兩個網址都要列在 `source_urls`），缺的項目整筆回 `400 single_non_official_source`。不能拿別的項目的來源湊。臉書、IG、Threads 讀不到，不收。
+- 目標分數 3，系統不給票、不核第二來源。
+- **驗證時**（每一項各自核，一項錯整筆投 `disagree` 並寫是第幾項）：①出處裡找得到 `quote` 一字不差；②說這句話的**就是這個人**（不是幕僚、黨團或政黨聲明）；③講的是**這件事**（不是同名的另一件）；④`stance` 與原文相符（把「討論」當成「支持」、方向反了都不對），有條件的 `condition` 照原文；⑤日期是表態那天，不是報導日。打不開投 `unsure`。
+
+<!-- spec contribution: lineage_event -->
+**`lineage_event`**（1.139.0，policy-tw#675）— **脈絡事件**（`lineage_event_missing` 任務）：政府或議會對這件事**已經做成的決定**。`lineage_id`✅、`events`✅（1～10 項）、外層 `note`✅（交件說明 20～300 字）。每一項：`event_type`✅（`decided` 拍板／`approved` 核定／`budget_added` 編列預算／`budget_cut` 預算刪減／`started` 動工或開辦／`completed` 完工或上路／`paused` 暫緩／`cancelled` 喊卡或終止／`resumed` 重啟／`other` 其他，`other` 的描述要寫清楚是什麼決定）、`occurred_on`✅（決定當天，**不是報導日**；不能是未來）、`date_precision`、`level`✅（`national`／`county`／`township`）＋`region`／`sub_region`（依層級，照內政部行政區名稱，同新脈絡的規則）、`decided_by`✅（決定機關 2～40 字：縣議會、行政院、交通部）、`description`✅（10～300 字，**只寫發生了什麼，不寫評價**）、`initiator_politician_id`（誰提案或爭取，選填，站上已有的人物）、`initiator_note`（2～30 字，有推動者才能填，例：縣府提案）、`source_locator`✅、`source_url`、`second_source_url`、`remove`（同立場，帶同一組 `event_type`／`occurred_on`／`decided_by`）。
+- **只收當選任期內的決定**：有填推動者，`occurred_on` 要落在他的某個當選任期內；沒填，要落在這條脈絡涉及的人（政見持有人、交接雙方）任一人的某個當選任期內（前任核定、後任動工都收得進來）。否則回 `400 date_outside_elected_term`。
+- **同一天同一機關同一種型態**只能有一筆：多項決定合併成一項、`description` 分點寫；重交＝覆蓋（每欄記查核履歷）。已被下架的重交＝新開一列。
+- 第 2 節 1a 條逐項適用（同立場）。目標分數 3，系統不給票。
+- **驗證時**（每一項各自核）：①出處寫的是**已經做成的決定**，不是提案、規劃、受訪表示；②日期與機關對得上；③`event_type` 對（核定不是拍板、預算刪減要寫明哪筆預算）；④描述只有事實。打不開投 `unsure`。
 
 <!-- spec contribution: lineage_status -->
 **`lineage_status`**（1.118.0，policy-ops#201）— **脈絡現況**（`lineage_status_stale` 任務）：一條脈絡「現在到哪」的**一句**話，單筆：`lineage_id`✅、`phase`✅（`proposed` 提案階段／`planning` 規劃中／`approved` 已核定／`in_progress` 進行中／`completed` 已完成／`paused` 暫緩／`cancelled` 已終止）、`text`✅（8～120 字，**只寫出處有的事實**，不評價、不預測）、`as_of`✅（`YYYY-MM-DD`：**出處講到這個狀態的那一天**，不是你查的日子，不能是未來）、`source_locator`✅（這句話在出處的哪裡）、`source_url`（出自 `source_urls` 的哪一個，不填＝第一個）。
@@ -529,6 +545,24 @@
 1. 找這件事**最新的公開文件**（政府公告、議會議事錄、預算書、新聞稿、可靠報導），寫一句現況，用 `lineage_status` 交。
 2. `as_of` 填文件講到那個狀態的日期，不是今天。查不到比現有更新的消息：現況沒變但找得到近期有日期的文件證明 → 用那份文件的日期交新的一筆；什麼都沒有 → `no_change`、`outcome=not_found`，`checked_urls` 列你查過的網址（查無之後 60 天內這條脈絡不再派現況任務）。
 3. `target.current` 那一列寫錯了 → 用撤回或取代（見 `lineage_status` 欄位說明）。
+
+<!-- spec task: lineage_stance_missing | contribution: lineage_stance -->
+### 補脈絡立場（`lineage_stance_missing` → `lineage_stance`，1.139.0）
+
+有合格政見的脈絡，該表態的人（首長、政見持有人、參與者）還沒有立場紀錄就派這一件。`current` 給 `lineage`＋`lineage_policies`；`target.people` 列出該查的人與原因。
+
+1. 到議會議事錄、質詢、記者會、施政報告、新聞稿，找每一位**當選上任之後**對這件事的表態；選前的主張不收。
+2. 每找到一次表態交一項，`quote` 一字不差；同一人表態變過，每次各一項。一筆最多 10 項。
+3. 查不到公開表態 → `no_change`、`outcome=not_found`，`checked_urls` 列你查過的網址（查無之後 60 天內這條脈絡不再派立場任務）。
+
+<!-- spec task: lineage_event_missing | contribution: lineage_event -->
+### 補脈絡事件（`lineage_event_missing` → `lineage_event`，1.139.0）
+
+有合格政見的脈絡，還沒有任何事件，或進行中卻太久沒有新事件就派這一件。`current` 給 `lineage`＋`lineage_policies`。
+
+1. 找這件事政府或議會**已經做成的決定**（拍板、核定、編預算、刪預算、動工、完工、暫緩、喊卡、重啟）；提案、規劃、受訪表示不算。
+2. 每個決定交一項，日期是決定當天；同一天同一機關同一種型態合併成一項。一筆最多 10 項。
+3. 查不到 → `no_change`、`outcome=not_found`，`checked_urls` 列你查過的網址（查無之後 60 天內不再派）。
 
 <!-- spec task: lineage_link_candidate -->
 **這種任務的 `current` 帶什麼**：`lineage_link_candidate` 另給 `upper_candidates`（候選的上一級脈絡）。

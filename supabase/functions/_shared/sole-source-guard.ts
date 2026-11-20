@@ -24,7 +24,10 @@ import { sourceKind, type SourceKind } from "./source-priority.ts";
 
 // lineage_handover（交接，#349，協議 1.52.0）：講的是「後任把這件事怎麼了」，跟政見進度同一類事實，同一條規則
 // lineage_status（脈絡現況，policy-ops#201 第 2 期）：一句「這件事現在到哪」，是事實斷言，單筆，外層檢查就夠（撤回那一種沒有出處，不受限，見下）
-export const SOLE_SOURCE_GUARDED_TYPES = ["policy", "policy_progress", "lineage_handover", "lineage_status"] as const;
+// lineage_stance／lineage_event（脈絡立場、事件，policy-tw#675 第二期）：一筆最多 10 項，**每一項**各自要有出處，所以逐項檢查（SOLE_SOURCE_ITEM_TYPES），不看外層網站數
+export const SOLE_SOURCE_GUARDED_TYPES = ["policy", "policy_progress", "lineage_handover", "lineage_status", "lineage_stance", "lineage_event"] as const;
+/** 陣列型：payload 裡的清單欄位名（逐項檢查用） */
+export const SOLE_SOURCE_ITEM_TYPES: Readonly<Record<string, string>> = { lineage_stance: "stances", lineage_event: "events" };
 /** 沒有官方來源時，至少要幾個不同網站 */
 export const MIN_DISTINCT_SITES_WITHOUT_OFFICIAL = 2;
 
@@ -76,13 +79,15 @@ export interface SoleSourceProblem {
  */
 export function soleSourceProblem(index: number, contributionType: string, sourceUrls: readonly string[] | null | undefined): SoleSourceProblem | null {
   if (!(SOLE_SOURCE_GUARDED_TYPES as readonly string[]).includes(contributionType)) return null;
+  // 陣列型的外層網站數不算數：項目 A 只引媒體 1、項目 B 只引媒體 2，外層看起來有兩個網站，每一項其實都是單一媒體（逐項檢查見 soleSourceItemProblem）
+  if (contributionType in SOLE_SOURCE_ITEM_TYPES) return null;
   const urls = (sourceUrls ?? []).filter((u): u is string => typeof u === "string" && u.trim().length > 0);
   const sources = urls.map((url) => ({ url, kind: sourceKind(unwrapArchiveUrl(url)), site: siteOf(url) }));
   if (sources.every((s) => s.site === null)) return null;
   if (sources.some((s) => s.kind === "official")) return null;
   const sites = new Set(sources.map((s) => s.site).filter((s): s is string => s !== null)).size;
   if (sites >= MIN_DISTINCT_SITES_WITHOUT_OFFICIAL) return null;
-  const what = contributionType === "policy" ? "政見" : contributionType === "lineage_handover" ? "交接" : contributionType === "lineage_status" ? "現況" : "政見進度";
+  const what = contributionType === "policy" ? "政見" : contributionType === "lineage_handover" ? "交接" : contributionType === "lineage_status" ? "現況" : contributionType === "lineage_stance" ? "立場" : contributionType === "lineage_event" ? "事件" : "政見進度";
   return {
     index,
     contribution_type: contributionType,
@@ -91,6 +96,48 @@ export function soleSourceProblem(index: number, contributionType: string, sourc
     message: `第 ${index + 1} 筆（${what}）只有一個網站的來源，而且不是官方來源。媒體報導、社群貼文不能當唯一出處：` +
       `請再附一個不同網站、同樣寫到這件事的來源（另一家媒體、候選人官網或臉書、政黨候選人頁、READr），` +
       `或改附官方來源（選舉公報、中選會、政府或議會網站）。同一篇的 web.archive.org 存檔不算第二個來源。這不算被拒，補好重送即可。`,
+  };
+}
+
+/**
+ * 陣列型（立場、事件）逐項檢查：每一項的出處（項目自己的 source_url，沒給就是這筆 source_urls 第一個）是官方就過；
+ * 不是官方，就要有 second_source_url、而且與前者不同網站（同一篇的存檔不算），或第二個本身是官方。
+ * 要刪的項目（remove:true）不是新事實斷言，不檢查。回 null＝通過；否則回該筆的問題描述（列出哪幾項）。
+ */
+export function soleSourceItemProblem(
+  index: number, contributionType: string, payload: unknown, sourceUrls: readonly string[] | null | undefined,
+): SoleSourceProblem | null {
+  const field = SOLE_SOURCE_ITEM_TYPES[contributionType];
+  if (!field) return null;
+  const urls = (sourceUrls ?? []).filter((u): u is string => typeof u === "string" && u.trim().length > 0);
+  const list = (payload as Record<string, unknown> | null | undefined)?.[field];
+  if (!Array.isArray(list)) return null; // 形狀問題 schema 已擋
+  const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+  const bad: number[] = [];
+  list.forEach((raw, k) => {
+    if (!raw || typeof raw !== "object") return;
+    const it = raw as Record<string, unknown>;
+    if (it.remove === true) return;
+    const first = str(it.source_url) || (urls[0] ?? "");
+    if (!first || siteOf(first) === null) return; // 沒有可解析的網址：格式驗證會先擋
+    if (sourceKind(unwrapArchiveUrl(first)) === "official") return;
+    const second = str(it.second_source_url);
+    if (second && siteOf(second) !== null) {
+      if (sourceKind(unwrapArchiveUrl(second)) === "official") return;
+      if (siteOf(second) !== siteOf(first)) return;
+    }
+    bad.push(k + 1);
+  });
+  if (bad.length === 0) return null;
+  const what = contributionType === "lineage_stance" ? "立場" : "事件";
+  return {
+    index,
+    contribution_type: contributionType,
+    sources: urls.map((url) => ({ url, kind: sourceKind(unwrapArchiveUrl(url)), site: siteOf(url) })),
+    sites: new Set(urls.map((u) => siteOf(u)).filter((s): s is string => s !== null)).size,
+    message: `第 ${index + 1} 筆（${what}）的第 ${bad.join("、")} 項只有一個網站的來源，而且不是官方來源。媒體報導、社群貼文不能當唯一出處：` +
+      `該項要在 second_source_url 附一個不同網站、同樣寫到這件事的來源（它也要列在 source_urls 裡），或把 source_url 改成官方來源（議會議事錄、政府公告、選舉公報）。` +
+      `每一項各自判斷，不能拿別的項目的來源湊。這不算被拒，補好重送即可。`,
   };
 }
 
@@ -104,7 +151,9 @@ export function soleSourceProblems(items: ReadonlyArray<{ contribution_type: str
   items.forEach((it, i) => {
     // 現況的撤回（remove:true）是「那一列錯了」，不是新的事實斷言，不要求兩個網站（理由寫在 note）
     if (it.contribution_type === "lineage_status" && (it.payload as { remove?: unknown } | null | undefined)?.remove === true) return;
-    const p = soleSourceProblem(i, it.contribution_type, it.source_urls ?? []);
+    const p = it.contribution_type in SOLE_SOURCE_ITEM_TYPES
+      ? soleSourceItemProblem(i, it.contribution_type, it.payload, it.source_urls ?? [])
+      : soleSourceProblem(i, it.contribution_type, it.source_urls ?? []);
     if (p) out.push(p);
   });
   return out;

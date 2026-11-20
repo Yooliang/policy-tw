@@ -96,6 +96,8 @@ const TYPE_OPTIONS_RAW: Array<{ key: string; label: string }> = [
   { key: 'lineage_handover', label: '脈絡交接' },
   { key: 'lineage_link', label: '脈絡上下級' },
   { key: 'lineage_status', label: '脈絡現況' },
+  { key: 'lineage_stance', label: '脈絡立場' },
+  { key: 'lineage_event', label: '脈絡事件' },
   { key: 'party_info', label: '政黨資訊' },
   { key: 'adjudication', label: '強模型裁決' },
 ]

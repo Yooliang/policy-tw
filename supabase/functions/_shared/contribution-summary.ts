@@ -56,7 +56,7 @@ import { electionResultLabel } from "./candidacy-result.ts";
 import { resultItems, resultsUnitLabel } from "./election-results.ts";
 import { candNoItems, candNumbersUnitLabel } from "./cand-numbers.ts";
 import { elementPhrase } from "./policy-elements.ts";
-import { HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase } from "./lineage.ts";
+import { eventPhrase, HANDOVER_TYPE_LABEL, lineagePlaceLabel, LINK_TYPE_LABEL, PARTICIPANT_BASIS_LABEL, participantPhrase, stancePhrase } from "./lineage.ts";
 import { REGIONAL_STAT_LABEL, type RegionalStatKey } from "./contribution-schema.ts";
 
 type Obj = Record<string, unknown>;
@@ -297,6 +297,21 @@ export function summarizeContribution(input: SummaryInput): ContributionSummary 
       summary = p.remove === true
         ? `撤回政策脈絡「${lineageTitle(p.lineage_id)}」截至 ${str(p.as_of)} 的現況——${clip(p.note, 60)}`
         : `記政策脈絡「${lineageTitle(p.lineage_id)}」的現況（截至 ${str(p.as_of)}）：${clip(p.text, 80)}`;
+      targetName = null;
+      break;
+    }
+    case "lineage_stance": {
+      // 脈絡立場（#675 第二期）：幾位、各自什麼立場
+      const items = Array.isArray(p.stances) ? (p.stances as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
+      const shown = items.slice(0, 3).map((e) => e.remove === true ? "拿掉一項" : stancePhrase({ stance: e.stance, stated_on: e.stated_on }));
+      summary = `為政策脈絡「${lineageTitle(p.lineage_id)}」記立場 ${items.length} 項：${shown.join("、")}${items.length > 3 ? "…" : ""}`;
+      targetName = null;
+      break;
+    }
+    case "lineage_event": {
+      const items = Array.isArray(p.events) ? (p.events as unknown[]).filter((e): e is Obj => !!e && typeof e === "object") : [];
+      const shown = items.slice(0, 3).map((e) => e.remove === true ? "拿掉一項" : eventPhrase(e));
+      summary = `為政策脈絡「${lineageTitle(p.lineage_id)}」記事件 ${items.length} 項：${shown.join("、")}${items.length > 3 ? "…" : ""}`;
       targetName = null;
       break;
     }

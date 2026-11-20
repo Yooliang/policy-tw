@@ -14,7 +14,6 @@ import { assert, assertEquals, assertFalse, assertStringIncludes } from "jsr:@st
 import { PGlite } from "npm:@electric-sql/pglite@0.2.17";
 import { fnText, migrationNames, mutate, readMig } from "./arms-pglite.ts";
 import { isDateWithinElectedTerm } from "./elected-term.ts";
-import { CONTRIBUTION_TYPES, TASK_TYPES, validateContributionRequest } from "./contribution-schema.ts";
 import {
   DATE_PRECISIONS, EVENT_DECIDED_BY_MAX, EVENT_DECIDED_BY_MIN, EVENT_DESCRIPTION_MAX, EVENT_DESCRIPTION_MIN, EVENT_INITIATOR_NOTE_MAX,
   EVENT_INITIATOR_NOTE_MIN, EVENT_TYPES, SEARCH_TERM_MAX, SEARCH_TERM_MIN, SEARCH_TERMS_MAX, STANCE_CONDITION_MAX, STANCE_CONDITION_MIN,
@@ -96,33 +95,15 @@ Deno.test("A4 兩張新表的權限：RLS 開、公開讀、service_role 寫；a
   }
 });
 
-Deno.test("A5 選後才開任務：第一期沒有新貢獻型別、沒有新臂、沒有排程、沒有新任務型別；立場與事件現在派不出、收不進", async () => {
+Deno.test("A5 一期這支 migration 沒有新貢獻型別、沒有新臂、沒有排程、沒有新任務型別（二期才接，見 lineage-stance-event-contrib.test.ts A5b：改成『有且對得上』）", () => {
   const c = code(MIG);
   // migration 層：不碰型別 CHECK、臂名清單、總表、規則種子、排程、seed
   for (const bad of ["contributions_contribution_type_check", "FUNCTION activity_arm_names", "FUNCTION contribution_auto_tasks_arms", "INSERT INTO activity_rules", "cron.schedule", "FUNCTION seed_auto_task_queue", "console_arm_stage_map"]) {
     assertFalse(c.includes(bad), `第一期不應出現：${bad}`);
   }
   assertFalse(/FUNCTION\s+contribution_auto_tasks_lineage_(stance|event|expand)/i.test(c), "沒有新臂函式");
-  // 全部 migration 疊起來的現行型別 CHECK 與臂名清單：沒有立場、事件
-  let typeCheck = "", armNames = "";
-  for (const n of await migrationNames()) {
-    const sql = await readMig(n);
-    const a = sql.lastIndexOf("ADD CONSTRAINT contributions_contribution_type_check");
-    if (a >= 0) typeCheck = sql.slice(a, sql.indexOf(";", a));
-    if (sql.includes("CREATE OR REPLACE FUNCTION activity_arm_names()")) armNames = fnText(sql, "activity_arm_names");
-  }
-  assertFalse(/lineage_(stance|event)/.test(typeCheck), "DB 型別 CHECK 沒有立場／事件");
-  assertFalse(/stance|event|expand/.test(armNames), "臂名清單沒有立場／事件／往外擴");
-  // TS 層：/report 收件白名單（CONTRIBUTION_TYPES）與任務型別（TASK_TYPES）都沒有
-  assertFalse(CONTRIBUTION_TYPES.some((t) => /stance|event/.test(t)), "收件白名單沒有立場／事件");
-  assertFalse(TASK_TYPES.some((t) => /stance|event|expand/.test(t)), "任務型別沒有立場／事件／往外擴");
-  for (const t of ["lineage_stance", "lineage_stances", "lineage_event", "lineage_events"]) {
-    const r = validateContributionRequest({ kind: "contribute", agent_name: "tester", agent_tool: "claude-code/test", contribution_type: t, payload: {}, source_urls: ["https://www.gov.tw/a"] });
-    assertFalse(r.ok, `${t} 交件要被擋`);
-  }
-  // 落庫端：apply-contribution 沒有對應的分支
-  const apply = await Deno.readTextFile(new URL("./apply-contribution.ts", import.meta.url));
-  assertFalse(/case "lineage_(stance|stances|event|events)"/.test(apply), "落庫沒有立場／事件分支");
+  // 一期這支 migration 本身不碰任何型別 CHECK／臂／排程（上面那幾條）；疊起來的現行狀態（型別已開放、臂尚未接或起跑日前為空）
+  // 由二期的 lineage-stance-event-contrib.test.ts A5b 守住——一期原本鎖「沒有」，二期改成「有且對得上」
 });
 
 Deno.test("A6 SQL 的列舉值與字數＝TS 常數（立場、事件、日期精度、search_terms）", () => {

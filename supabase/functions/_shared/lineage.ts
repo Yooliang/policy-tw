@@ -243,8 +243,7 @@ export const STATUS_NOTE_MIN = 20;
 export const STATUS_NOTE_MAX = 300;
 
 // ── 立場、事件（policy-tw#675 第一期；SQL：migration 20261120120000_lineage_stances_events.sql 的 lineage_stances／lineage_events）──
-// **只有資料櫃的常數**：第一期沒有任何交件型別、驗證或派工臂會用到它們（第二期才接，預設關；lineage-stances-events.test.ts 守住「現在派不出、收不進」）。
-// 列舉值與字數跟 SQL CHECK 同一組，測試逐案比對。
+// 列舉值與字數跟 SQL CHECK 同一組，測試逐案比對。第二期（#675，協議 1.N）起交件型別 lineage_stance／lineage_event 用這些常數驗證與落庫。
 export const STANCE_KINDS = ["support", "oppose", "conditional"] as const;
 export type StanceKind = (typeof STANCE_KINDS)[number];
 export const STANCE_LABEL: Record<StanceKind, string> = { support: "支持", oppose: "反對", conditional: "有條件" };
@@ -280,6 +279,93 @@ export const EVENT_INITIATOR_NOTE_MAX = 30;
 export const SEARCH_TERMS_MAX = 5;
 export const SEARCH_TERM_MIN = 2;
 export const SEARCH_TERM_MAX = 12;
+
+/** 一筆交件最多幾項：每一項都要驗證者開原文逐項核、一項錯整筆被退，批次越大越容易被退，比參與者的 50 低 */
+export const MAX_STANCES = 10;
+export const MAX_EVENTS = 10;
+/** 立場、事件交件的外層 note＝交件說明（這個人／這個決定指的是哪件事、為什麼是同一件事），不是項目的 note */
+export const ITEMS_NOTE_MIN = 20;
+export const ITEMS_NOTE_MAX = 300;
+
+/** 立場一項的唯一鍵（脈絡內）：人＋表態日＋原文；跟 SQL 的 md5(btrim(quote)) 是同一個「同一句」概念，這裡只用來擋同一筆交件裡重複的項目 */
+export function stanceItemKey(politicianId: unknown, statedOn: unknown, quote: unknown): string {
+  return `${String(politicianId ?? "").toLowerCase()}|${String(statedOn ?? "")}|${String(quote ?? "").trim()}`;
+}
+/** 事件一項的唯一鍵（脈絡內）：型態＋日期＋機關 */
+export function eventItemKey(eventType: unknown, occurredOn: unknown, decidedBy: unknown): string {
+  return `${String(eventType ?? "")}|${String(occurredOn ?? "")}|${String(decidedBy ?? "").trim()}`;
+}
+
+/** 立場交件的一項 → 要寫進 lineage_stances 的值（schema 已驗過形狀；source_url 沒給就是這筆交件的第一個來源） */
+export interface StanceValues {
+  politician_id: string;
+  stance: StanceKind;
+  condition_text: string | null;
+  stated_on: string;
+  date_precision: DatePrecision;
+  quote: string;
+  policy_id: string | null;
+  source_url: string;
+  source_locator: string;
+  note: string | null;
+}
+export function stanceValues(item: Obj, sourceUrls: readonly string[]): StanceValues {
+  const stance = String(item.stance) as StanceKind;
+  return {
+    politician_id: String(item.politician_id ?? "").toLowerCase(),
+    stance,
+    condition_text: stance === "conditional" ? (trimOrNull(item.condition) ?? null) : null,
+    stated_on: String(item.stated_on),
+    date_precision: (trimOrNull(item.date_precision) ?? "day") as DatePrecision,
+    quote: String(item.quote ?? "").trim(),
+    policy_id: trimOrNull(item.policy_id)?.toLowerCase() ?? null,
+    source_url: trimOrNull(item.source_url) ?? (sourceUrls[0] ?? ""),
+    source_locator: String(item.source_locator ?? "").trim(),
+    note: trimOrNull(item.note) ?? null,
+  };
+}
+/** 重交同一句時會被覆蓋的欄位（唯一鍵欄位 politician_id／stated_on／quote 不在內） */
+export const STANCE_FIELDS = ["stance", "condition_text", "date_precision", "policy_id", "source_url", "source_locator", "note"] as const;
+
+/** 事件交件的一項 → 要寫進 lineage_events 的值（地方的 region／sub_region／admin_code 由落庫查行政區補上） */
+export interface EventValues {
+  event_type: EventType;
+  occurred_on: string;
+  date_precision: DatePrecision;
+  level: LineageLevel;
+  decided_by: string;
+  description: string;
+  initiator_politician_id: string | null;
+  initiator_note: string | null;
+  source_url: string;
+  source_locator: string;
+}
+export function eventValues(item: Obj, sourceUrls: readonly string[]): EventValues {
+  const initiator = trimOrNull(item.initiator_politician_id)?.toLowerCase() ?? null;
+  return {
+    event_type: String(item.event_type) as EventType,
+    occurred_on: String(item.occurred_on),
+    date_precision: (trimOrNull(item.date_precision) ?? "day") as DatePrecision,
+    level: String(item.level) as LineageLevel,
+    decided_by: String(item.decided_by ?? "").trim(),
+    description: String(item.description ?? "").trim(),
+    initiator_politician_id: initiator,
+    initiator_note: initiator ? (trimOrNull(item.initiator_note) ?? null) : null,
+    source_url: trimOrNull(item.source_url) ?? (sourceUrls[0] ?? ""),
+    source_locator: String(item.source_locator ?? "").trim(),
+  };
+}
+export const EVENT_FIELDS = ["date_precision", "level", "region", "sub_region", "admin_code", "description", "initiator_politician_id", "initiator_note", "source_url", "source_locator"] as const;
+
+/** 立場給人看的一句話：「王小明：有條件（日期 2026-01-01）」 */
+export function stancePhrase(s: { name?: unknown; stance?: unknown; stated_on?: unknown }): string {
+  const who = typeof s.name === "string" && s.name ? `${s.name}：` : "";
+  return `${who}${STANCE_LABEL[s.stance as StanceKind] ?? String(s.stance ?? "?")}（${String(s.stated_on ?? "?").slice(0, 10)}）`;
+}
+/** 事件給人看的一句話：「縣議會　核定（2026-01-01）」 */
+export function eventPhrase(e: { decided_by?: unknown; event_type?: unknown; occurred_on?: unknown }): string {
+  return `${String(e.decided_by ?? "?")}　${EVENT_TYPE_LABEL[e.event_type as EventType] ?? String(e.event_type ?? "?")}（${String(e.occurred_on ?? "?").slice(0, 10)}）`;
+}
 
 /** lineage_status 交件 → 要寫進 lineage_statuses 的值（schema 已驗過形狀；source_url 沒給就是這筆交件的第一個來源） */
 export interface StatusValues {

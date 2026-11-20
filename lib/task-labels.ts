@@ -44,6 +44,8 @@ export const TASK_TYPE_LABEL: Readonly<Record<string, string>> = {
   lineage_roles_missing: '標參與角色',
   lineage_link_candidate: '找上下級脈絡',
   lineage_status_stale: '補脈絡現況',
+  lineage_stance_missing: '補脈絡立場',
+  lineage_event_missing: '補脈絡事件',
   // 2026-10-06
   placeholder_politician: '疑似測試資料或空殼人物',
   party_info_missing: '補政黨資訊',

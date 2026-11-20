@@ -636,6 +636,8 @@ function shapeTaskCurrentInner(taskType: string, data: TaskContextData): Obj {
     case "handover_missing":
     case "lineage_roles_missing":
     case "lineage_status_stale":
+    case "lineage_stance_missing":
+    case "lineage_event_missing":
       return {
         lineage: shapeLineageBrief(data.lineage),
         lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
@@ -853,7 +855,7 @@ export async function fetchTaskContext(supabase: SupabaseLike, taskType: string,
     data.lineage_policies = pols.sort((a, b) => (order.get(String(a.id)) ?? 0) - (order.get(String(b.id)) ?? 0));
     data.related_lineages = lins;
   }
-  if ((taskType === "handover_missing" || taskType === "lineage_roles_missing" || taskType === "lineage_link_candidate" || taskType === "lineage_status_stale") && typeof target.lineage_id === "string") {
+  if ((taskType === "handover_missing" || taskType === "lineage_roles_missing" || taskType === "lineage_link_candidate" || taskType === "lineage_status_stale" || taskType === "lineage_stance_missing" || taskType === "lineage_event_missing") && typeof target.lineage_id === "string") {
     const uppers = taskType === "lineage_link_candidate" && Array.isArray(target.upper_candidates)
       ? (target.upper_candidates as Obj[]).map((x) => String(x.lineage_id ?? "")) : [];
     const [lins, pols] = await Promise.all([
@@ -1289,6 +1291,15 @@ export const LINEAGE_VERIFY_HINT: Record<string, string> = {
     "只知道報導日的，報導日就是上限，日期比出處晚的投 disagree ③phase 與句子一致（句子寫「已核定」階段卻填 planning 就不對）④沒有更晚的公開文件把它推翻（簡單搜一下這件事的最新消息）。" +
     "撤回（remove）：確認被指的那一列（as_of 那天）真的錯了（日期對不上出處、句子超出原文），note 有講清楚為什麼；取代（replace_as_of）：舊的那一列確實該換，新內容照上面四點驗。" +
     "對得上投 agree；句子超出原文、日期是查詢日、階段與句子矛盾投 disagree 並寫是哪一點；打不開投 unsure（確認網頁不存在或與 payload 矛盾才投 disagree 並附反證）。",
+  lineage_stance:
+    "核對立場（每一項各自核，一項錯整筆投 disagree 並寫是第幾項）：①打開該項的出處，quote **一字不差**找得到；②說這句話的**就是這個人**（不是幕僚、黨團或政黨聲明）；" +
+    "③講的是**這條脈絡的這件事**（同一個標的，不是同名的另一件，例：另一條「藍線」）；④stance 與原文相符（把「討論」當成「支持」、方向反了都不對），有條件的 condition 照原文；" +
+    "⑤stated_on 是表態那天、不是報導日（只知道報導日就要標 date_precision）。媒體當出處的項目要有第二個不同網站的來源（second_source_url）。" +
+    "選前的主張是承諾、不是立場：表態日在這個人上任之前的投 disagree。對得上投 agree；任一項原文沒有、發言人不對、標的不同、方向反了投 disagree 並寫是哪一項；打不開投 unsure。",
+  lineage_event:
+    "核對事件（每一項各自核）：①出處寫的是**已經做成的決定**（拍板、核定、編預算、動工…），不是提案、規劃、受訪表示；②occurred_on 與 decided_by（機關）對得上出處；" +
+    "③event_type 對（核定不是拍板、預算刪減要寫明哪筆預算）；④description 只有事實、沒有評價。媒體當出處的項目要有第二個不同網站的來源。" +
+    "對得上投 agree；只是提案、日期錯、機關錯、型態錯、描述帶評價投 disagree 並寫是哪一項；打不開投 unsure。",
   lineage_link:
     "核對上下級：upper 要在 lower 的上一級（中央之於縣市或鄉鎮、縣市之於同縣市的鄉鎮），兩件事之間要有實際的法規、補助核定或執行計畫連結，" +
     "方向對（top_down＝上級立法或補助、下級執行；bottom_up＝下級爭取、上級採納）。只是主題相近投 disagree；對得上投 agree；打不開投 unsure。",
@@ -1463,6 +1474,8 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
     case "lineage_participants":
     case "lineage_handover":
     case "lineage_status":
+    case "lineage_stance":
+    case "lineage_event":
       return {
         lineage: shapeLineageBrief((data.lineages ?? [])[0]),
         lineage_policies: (data.lineage_policies ?? []).map(shapeLineagePolicy),
@@ -1804,9 +1817,13 @@ export async function fetchVerifyContext(supabase: SupabaseLike, contributionTyp
     data.lineages = lins;
     data.lineage_policies = pols;
   }
-  if ((contributionType === "lineage_participants" || contributionType === "lineage_handover" || contributionType === "lineage_status") && typeof payload.lineage_id === "string") {
+  if ((contributionType === "lineage_participants" || contributionType === "lineage_handover" || contributionType === "lineage_status" || contributionType === "lineage_stance" || contributionType === "lineage_event") && typeof payload.lineage_id === "string") {
     const people = contributionType === "lineage_participants"
       ? (Array.isArray(payload.participants) ? payload.participants as Obj[] : []).map((x) => String(x?.politician_id ?? ""))
+      : contributionType === "lineage_stance"
+      ? (Array.isArray(payload.stances) ? payload.stances as Obj[] : []).map((x) => String(x?.politician_id ?? ""))
+      : contributionType === "lineage_event"
+      ? (Array.isArray(payload.events) ? payload.events as Obj[] : []).map((x) => String(x?.initiator_politician_id ?? ""))
       : contributionType === "lineage_status" ? []
       : [String(payload.from_politician_id ?? ""), String(payload.to_politician_id ?? "")];
     const list = [...new Set(people.filter((x) => /^[0-9a-f-]{36}$/i.test(x)))];
