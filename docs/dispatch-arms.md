@@ -258,7 +258,7 @@ SELECT task_id, task_type, queue_at, boost_seconds, priority_seconds, dispatch_c
  ORDER BY queue_at LIMIT 30;
 ```
 
-（驗證票的隊頭另看 `WHERE task_id LIKE 'verify:%' ORDER BY queue_at`；真正可領還要過 `contribution_verify_pool`。）
+（驗證票的隊頭另看 `WHERE task_id LIKE 'verify:%' ORDER BY verify_rank NULLS LAST, queue_at, task_id`，#988 起驗證先於任務；真正可領還要過 `contribution_verify_pool`。`/queue` 頁與 `console_queue_state()` 的隊頭 60 名自 `20261120180000`（#989）起照這個順序：驗證票在前、依 verify_rank → queue_at → task_id，任務其後依 queue_at，每列帶 verify_rank；兩處排序鍵由 `console-queue-verify-order.test.ts` 逐案比對。）
 
 要看即時的 `/next` 會派什麼，直接呼叫 `contribution_queue_tasks(p_limit => 20)`（`p_ip_hash`、`p_agent` 不帶就不套同機器過濾）。
 
