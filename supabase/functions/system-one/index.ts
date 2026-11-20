@@ -52,6 +52,7 @@ import { buildFollowupAsk, FOLLOWUP_MIN_PROBABILITY, followupTask, SUBMISSION_FO
 import { createTask, findOpenTaskForTarget } from "../_shared/task-admin.ts";
 import { createOrAttachTask } from "../_shared/create-or-attach-task.ts";
 import { CLARIFY_DEFAULT_LIMIT, CLARIFY_MAX_LIMIT, clarifyOne, closeDuplicates, type ClarifyDeps, type ClarifyOutcome, type FollowupTaskRow } from "../_shared/followup-clarify.ts";
+import { applyBioVerdict, BIO_HEURISTIC_MODEL, BIO_QUESTION, bioOf, bioQuestion, bioVerdict } from "../_shared/bio-quality.ts";
 import { BIO_GAP_MIN_PROBABILITY, bioGapTask, buildBioGapAsk, type BioPerson, worthScanning } from "../_shared/bio-gaps.ts";
 import { SECOND_SOURCE_TYPES } from "../_shared/task-context.ts";
 import { CEC_ROSTER_URL_RE, cecRosterText, checkBatch, groupRosterCandidates, parseRoster, ROSTER_BATCH_MODEL, RosterTooLargeError, type RosterRow } from "../_shared/cec-roster.ts";
@@ -645,6 +646,20 @@ Deno.serve(async (req) => {
         const subjects = await subjectNamesOf(supabase, payload);
         if (subjects[0]) payload.subject_name = subjects[0];
         const claim = claimOf(c.contribution_type, payload);
+        // 簡介是不是人物介紹（#975）：politician 的 bio、correction 改 bio 那一項。啟發式命中就直接投不支持，不抓來源、不花 Jev
+        const bio = bioOf(c.contribution_type, payload);
+        const bioHeur = bio ? bioVerdict(bio) : null;
+        if (bioHeur) {
+          await insertRecords(supabase, [{
+            subject_type: "contribution", subject_id: c.contribution_id, question: "source_support",
+            choice: bioHeur.choice, probability: bioHeur.probability, confidence: null, probabilities: null,
+            model: BIO_HEURISTIC_MODEL, state: { claim, bio_check: { source: bioHeur.source, problems: bioHeur.problems } }, cost_usd: 0,
+          }]);
+          const { error: bErr } = await supabase.rpc("contribution_apply_consensus", { p_contribution_id: c.contribution_id });
+          if (bErr) throw new Error(`apply_consensus: ${bErr.message}`);
+          tally["bio:not_supported（啟發式）"] = (tally["bio:not_supported（啟發式）"] ?? 0) + 1;
+          return;
+        }
         const names = [payload.name, payload.politician_name, payload.title, ...subjects].map((v) => typeof v === "string" ? v : null);
         // 參選紀錄先問中選會的結構化資料（2026-09-20：系統不解析 PDF／Excel）；查不到（2026 登記期）才看提交者附的網頁
         const cec = c.contribution_type === "candidacy" && typeof payload.name === "string" && typeof payload.election_id === "number"
@@ -690,18 +705,22 @@ Deno.serve(async (req) => {
           const budgetQs = dimensionQuestions(c.contribution_type);
           const withBudget = Object.keys(budgetQs).length > 0;
           const askState: Record<string, unknown> = withBudget ? { ...state, target: claim, contribution_type: c.contribution_type } : { ...state };
+          if (bio) askState.bio = bio;
           // 兩個以上獨立來源：每個來源各問一組欄位題（只看那一段），同一次呼叫；題數有上限（policy-ops#39）
           const asked = askedSources.slice(0, perSourceCount(Object.keys(questions).length, askedSources.length));
           const askedPages = asked.map((s) => ({ ...s, text: usable.find((p) => p.url === s.url)?.text ?? "" }));
           // 新人物相似度（2026-11-08）：這筆會建新人物、而且同場同單位有同名／近名的人或等票交件 → 同一次呼叫多問一題（一筆只問一次）
           idAsk = await newPersonAskFor(supabase, c);
-          const res = await askJev(apiKey, idAsk ? { ...askState, ...idAsk.ask.state } : askState, { ...questions, ...budgetQs, ...perSourceQuestions(questions, asked), ...(idAsk?.ask.questions ?? {}) });
+          const res = await askJev(apiKey, idAsk ? { ...askState, ...idAsk.ask.state } : askState, { ...questions, ...budgetQs, ...perSourceQuestions(questions, asked), ...(idAsk?.ask.questions ?? {}), ...(bio ? { [BIO_QUESTION]: bioQuestion() } : {}) });
           cost += res.usage.cost;
           if (idAsk) idRes = { answer: res.answers[NEW_PERSON_QUESTION], model: res.model };
           // 併起來那段收斂成一票（欄位細節放 probabilities 給 /next 與對帳看）；任一獨立來源明確矛盾 → not_supported；
           // supported 時記核得過的獨立來源數（那一頁要有主角名字），SQL 依它降 1～2 分。規則在 systemVoteFromAnswers
           const vote = systemVoteFromAnswers({ contributionType: c.contribution_type, claim, answers: res.answers, asked: askedPages, names: personNames });
-          const voteChoice = vote.choice, voteProbability = vote.probability;
+          // 簡介這一項（啟發式已在前面擋掉，走到這裡只剩 Jev 的判定）：說不是人物介紹 → 整票不支持
+          const voted = applyBioVerdict(vote, bioVerdict(bio, res.answers[BIO_QUESTION]));
+          const voteChoice = voted.choice, voteProbability = voted.probability;
+          if (bio && res.answers[BIO_QUESTION]) askState.bio_check = { source: "jev", choice: res.answers[BIO_QUESTION].choice, probabilities: res.answers[BIO_QUESTION].probabilities ?? null };
           askState.sources = {
             checked: fetched.map((p) => p.url),
             independent: pick.independent.map((s) => s.url),
