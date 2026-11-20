@@ -3,7 +3,7 @@
  * 政策脈絡主頁（#349、#675 第三期，/lineage/:lineageId）：一件事在某一層級、某一地方的來龍去脈。
  *   四區塊：現況（最新一筆，含截至日與出處）、這件事（摘要與出處）、各方立場（每人最新一筆）、大事記（事件與交接，新到舊）
  *   其後：筆數列、脈絡裡的政見（只有當選後的政見，承諾不在這裡）、參與者與角色、上下級脈絡
- * 版面上的字全部取自 lib/lineage-page-labels.ts 的白名單，模板裡不放任何靜態中文（lib/lineage-page.test.ts 守）；沒有資料寫標籤「未調查」「尚無」。
+ * 版面上的字全部取自 lib/lineage-page-labels.ts 的白名單，模板裡不放任何靜態中文（lib/lineage-page.test.ts 守）；沒有資料寫標籤「尚無現況紀錄」「尚無立場紀錄」「尚無」。
  * 資料全在 lineages_full 那一列，邊緣渲染（cloudflare/ssr-worker.js）與預渲染拿到同一份；連結都是真的 <a href>，canonical 指正見.tw。
  * 這一期不放指向關係圖的連結（路由第四期才有）。顯示規則在 lib/lineage.ts 與 lib/lineage-page.ts。
  */
@@ -175,7 +175,7 @@ usePageHead({
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 text-left">
         <div class="lg:col-span-2 space-y-6">
-          <!-- 現況：階段、一句、截至日、出處；還沒有就寫「未調查」 -->
+          <!-- 現況：階段、一句、截至日、出處；還沒有就寫「尚無現況紀錄」 -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-status">
             <h2 class="text-xl font-bold text-navy-900 mb-3 flex items-center gap-2"><Activity class="text-slate-400" :size="22" />{{ T.status }}</h2>
             <template v-if="lineage.status">

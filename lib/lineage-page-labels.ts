@@ -19,7 +19,7 @@ export const PAGE_LABELS = {
   back: '返回',
   // 現況
   status: '現況',
-  statusEmpty: '未調查',
+  statusEmpty: '尚無現況紀錄',
   asOf: '截至',
   source: '出處',
   archive: '存檔',
@@ -27,9 +27,9 @@ export const PAGE_LABELS = {
   summary: '這件事',
   // 各方立場
   stances: '各方立場',
-  stancesEmpty: '未調查',
-  derivedStance: '提出政見',
-  changedStance: '曾變',
+  stancesEmpty: '尚無立場紀錄',
+  derivedStance: '僅提出政見',
+  changedStance: '立場曾變',
   // 有爭議的立場／事件：公開仍顯示，加這個標示
   disputed: '有爭議',
   // 大事記
