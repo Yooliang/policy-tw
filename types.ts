@@ -76,6 +76,9 @@ export interface PoliticianElectionData {
   candidacyStatus?: CandidacyStatus;
   /** 退選之前有沒有登記過：true 登記後退選／false 表態不參選／空的＝判斷不了（顯示「不參選」）。只在退選時有值（#345 後續） */
   withdrawnAfterFiling?: boolean;
+  /** 選舉公報上這位的政見欄沒有任何政策條目（公報未填政見，2026-11-20）：確認時間與公報網址；沒標就沒有 */
+  noPoliciesAt?: string;
+  noPoliciesSourceUrl?: string;
 }
 
 /** 參選狀態合一欄的六值（#345，跟日本站同一套；不收傳聞） */
@@ -626,6 +629,8 @@ export interface RawPoliticianElectionData {
   sourceNote?: string;
   candidacyStatus?: CandidacyStatus | null;
   withdrawnAfterFiling?: boolean | null;
+  noPoliciesAt?: string | null;
+  noPoliciesSourceUrl?: string | null;
 }
 
 export interface RawPolitician {

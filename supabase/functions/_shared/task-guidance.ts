@@ -75,7 +75,7 @@ export const TASK_GUIDANCE: Record<string, string> = {
     "找這個人**那一屆（target.election_id）當選時的競選政見，最多 5 筆**：每筆一個 policy、各附自己的出處，election_id 填那一屆，status 填 Campaign Pledge。找到幾筆交幾筆——**不要為了湊數交標語、口號、願景或個人表態**，那些不是政見。先看 queued_policies 與 existing_policies（看 election_id，別屆的不算這一屆），別人交了還在等票的不要再交。" +
     "**首選中選會選舉公報**：每位候選人登記的政見原文都印在公報上，hint_sources 第一個就是那一屆的入口，依縣市、選舉別、選舉區點到 PDF；公報 PDF 的網址就是 source_urls。其次本人官網／臉書的競選政見頁、當年的新聞。" +
     // 從公報補政見（2026-10-06）：系統推得出公報就直接給，對象也擴到落選人、村里長、代表
-    "**target 有 bulletin_urls 的，系統已經找到那一份公報、cand_no 是他的號次**：直接打開，依姓名與號次找到他自己那一欄，把那一欄的政見逐條交（公報上列幾條交幾條、一次交完，不受上面 5 筆的限制；口號、標語、「為民服務」不交）；那一欄確實空白或只有口號才回查無，checked_urls 要有這份公報。" +
+    "**target 有 bulletin_urls 的，系統已經找到那一份公報、cand_no 是他的號次**：直接打開，依姓名與號次找到他自己那一欄，把那一欄的政見逐條交（公報上列幾條交幾條、一次交完，不受上面 5 筆的限制；口號、標語、「為民服務」不交）；那一欄只有口號、標語才回查無（not_found）；確實沒有任何政策條目（空白，或只寫「沒有政見」）回 no_change＋outcome=confirmed＋finding_kind=bulletin_no_policies，checked_urls 都要有這份公報。" +
     gazetteImageNote +
     "公報上一段話列了好幾項各自查得了的承諾就拆成幾筆（同一個公報網址重複用沒關係）。**任內才宣布的施政、其他屆別的政見不是這一屆的競選政見**，這個任務不要交。" +
     notPolicyMisjudgmentNote + SOLE_SOURCE_TASK_NOTE + soleSourceDeferNote +

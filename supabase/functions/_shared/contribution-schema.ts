@@ -98,6 +98,7 @@ export const ELECTION_TYPES = [
 
 export { POLICY_CATEGORIES } from "./category-map.ts";
 import { categoryErrorMessage, isCanonicalCategory, POLICY_CATEGORIES } from "./category-map.ts";
+import { BULLETIN_NO_POLICIES, firstBulletinUrl } from "./bulletin-no-policies.ts";
 import { parseSourceDetails, payloadSourceDetailsProblems } from "./source-write.ts";
 export const POLICY_STATUSES = ["Campaign Pledge", "Proposed", "In Progress", "Achieved", "Stalled", "Failed"] as const;
 export const CANDIDATE_STATUSES = ["confirmed", "registered", "qualified", "withdrawn", "not_running"] as const;
@@ -852,6 +853,14 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       }
       if (!(Array.isArray(p.checked_urls) && p.checked_urls.length > 0 && (p.checked_urls as unknown[]).every((u) => typeof u === "string" && /^https?:\/\/\S+$/.test(u)))) push("payload.checked_urls", "checked_urls 必填：你實際打開核對過的網址（http(s) 陣列）");
       if (!isStr(p.finding, 10, 2000)) push("payload.finding", "finding 必填（≥10 字：核對了什麼、為什麼判定沒有異動）");
+      // 公報未填政見（2026-11-20）：只有補政見卡會據此標記；這裡先擋形狀——要 confirmed、checked_urls 要有中選會公報網址
+      if (p.finding_kind !== undefined) {
+        if (p.finding_kind !== BULLETIN_NO_POLICIES) push("payload.finding_kind", `finding_kind 只收 ${BULLETIN_NO_POLICIES}（公報上該候選人的政見欄沒有任何政策條目）；一般的查完沒有異動不用帶這欄`);
+        else {
+          if (p.outcome !== "confirmed") push("payload.outcome", `finding_kind=${BULLETIN_NO_POLICIES} 要 outcome=confirmed（你看過公報、確定他沒填政見）`);
+          if (!firstBulletinUrl(p.checked_urls)) push("payload.checked_urls", "finding_kind=bulletin_no_policies 的 checked_urls 要含該候選人的中選會選舉公報網址（eebulletin.cec.gov.tw 或 bulletin.cec.gov.tw）");
+        }
+      }
       break;
     }
     case "task_suggestion": {

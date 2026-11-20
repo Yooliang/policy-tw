@@ -271,6 +271,8 @@ export function mapPolitician(row: RawPolitician): Politician {
     candidacyStatus: e.candidacyStatus || undefined,
     // false 是有意義的值（表態不參選），不能用 || 吃掉
     withdrawnAfterFiling: typeof e.withdrawnAfterFiling === 'boolean' ? e.withdrawnAfterFiling : undefined,
+    noPoliciesAt: e.noPoliciesAt || undefined,
+    noPoliciesSourceUrl: e.noPoliciesSourceUrl || undefined,
   }));
 
   // Get candidacyStatus from the first election (for display purposes)

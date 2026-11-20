@@ -40,6 +40,7 @@ import { isPostElectionStage, stageOfPolicy, taipeiToday } from '../lib/policy-s
 import { isPledge } from '../lib/pledge-origin'
 import { candidacyCrumbs } from '../lib/election-breadcrumbs'
 import { candidacyBadge, candidacyNote, officeTitles, pastTermItems } from '../lib/politician-office'
+import { NO_POLICIES_TEXT, noPoliciesNoteOf } from '../lib/bulletin-no-policies'
 // 側欄的「請 AI 幫忙查」區塊（四顆針對這個人的功能鈕都在那裡），錨點仍保留供深連結使用
 const AI_LOOKUP_SECTION_ID = 'ai-lookup'
 
@@ -679,6 +680,9 @@ usePageHead({
                 <div class="space-y-8">
                   <div v-for="g in campaignGroups" :key="g.key">
                     <h3 v-if="g.label" class="text-sm font-black text-slate-400 uppercase tracking-wider mb-4">{{ g.label }}</h3>
+                    <p v-if="noPoliciesNoteOf(politician.elections, g.electionId)" class="text-slate-500 mb-4" data-testid="no-policies-note">
+                      {{ NO_POLICIES_TEXT }}<template v-if="noPoliciesNoteOf(politician.elections, g.electionId)?.url">（<a :href="noPoliciesNoteOf(politician.elections, g.electionId)!.url!" target="_blank" rel="noopener noreferrer" class="underline underline-offset-2">看公報</a>）</template>
+                    </p>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                       <AiLookupCard :state="groupLookupState(g, 'pledge')" :label="groupLookupLabel(g, 'pledge')" hint="查有出處的資料" @click="requestGroupLookup(g, 'pledge')" />
                     </div>

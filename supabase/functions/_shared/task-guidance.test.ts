@@ -156,6 +156,7 @@ Deno.test("schema 的必填欄位，payload 形狀不可以漏講", async () => 
     task_suggestion: ["target_policy_id", "target_politician_id", "hint_sources"],
     roster_check: ["note"],
     policy_progress: ["note", "date"],
+    no_change: ["finding_kind"], // 公報未填政見才帶的選填標記（1.139.0）；schema 掃描把它的格式檢查當成必填
   };
   for (const [type, fields] of Object.entries(required)) {
     const shape = PAYLOAD_SHAPE[type];

@@ -10,6 +10,7 @@
  */
 
 import { CORRECTION_FIELDS, type ContributionType, isTaskIdShape, isRegionalStatAdminCode, REGIONAL_STAT_KEYS, REGIONAL_STAT_LABEL, REGIONAL_STAT_UNIT, type RegionalStatKey } from "./contribution-schema.ts";
+import { BULLETIN_NO_POLICIES, type BulletinCard, firstBulletinUrl, parseBulletinCard } from "./bulletin-no-policies.ts";
 import { ensurePolitician, upsertParticipation } from "./candidate-import.ts";
 import { identityFieldsOf } from "./identity-candidate.ts";
 import { changedFields, electionResultLabel } from "./candidacy-result.ts";
@@ -2400,6 +2401,43 @@ export const PROGRESS_REPEAT_COOLDOWN_DAYS = 30;
  */
 export const PROGRESS_COOLDOWN_TASK_TYPES = ["progress_stale", "deadline_due"] as const;
 
+/**
+ * 公報未填政見落庫：把這位候選人這一屆的參選紀錄標上 no_policies_at／no_policies_source_url（出處＝checked_urls 第一個公報網址）。
+ * 這一屆的參選紀錄找不到、或這一屆其實有政見（有人先補了）就不標，只回報原因——標了反而讓真的政見被報表當成「已抄」之外的雜訊。
+ */
+async function applyBulletinNoPolicies(supabase: SupabaseLike, row: ContributionRow, taskId: string, card: BulletinCard): Promise<ApplyOutcome> {
+  const sourceUrl = firstBulletinUrl(row.payload.checked_urls);
+  if (!sourceUrl) return { status: "failed", message: "公報未填政見要在 checked_urls 放中選會公報網址" };
+  let electionId = card.election_id;
+  if (electionId === null) {
+    const { data, error } = await supabase.rpc("campaign_election_id");
+    throwIf(error, "campaign_election_id");
+    electionId = typeof data === "number" ? data : Number(data);
+    if (!Number.isInteger(electionId)) throw new Error("campaign_election_id 回傳不是整數");
+  }
+  // query-bounds: ok — 一個人一屆的參選紀錄最多幾列
+  const { data: pes, error: peError } = await supabase.from("politician_elections")
+    .select("id, no_policies_at, candidacy_status")
+    .eq("politician_id", card.politician_id).eq("election_id", electionId);
+  throwIf(peError, "politician_elections select");
+  const targets = ((pes ?? []) as Array<{ id: number; no_policies_at: string | null; candidacy_status: string | null }>)
+    .filter((r) => r.candidacy_status !== "withdrawn");
+  if (targets.length === 0) return { status: "superseded", message: "找不到這位候選人這一屆的參選紀錄（可能已退選或被合併），沒有可標記的對象，不重試", task_id: taskId, politician_id: card.politician_id };
+  const { data: has, error: hasError } = await supabase.from("policies").select("id")
+    .eq("politician_id", card.politician_id).eq("election_id", electionId).is("removed_at", null).limit(1);
+  throwIf(hasError, "policies select");
+  if ((has ?? []).length > 0) return { status: "applied", message: "已記錄：這一屆已經有政見了，不需要標「公報未填政見」", task_id: taskId, politician_id: card.politician_id };
+  const at = new Date().toISOString();
+  for (const t of targets) {
+    if (t.no_policies_at) continue; // 已經標過：保留原本的時間與出處
+    const { error } = await supabase.from("politician_elections").update({ no_policies_at: at, no_policies_source_url: sourceUrl }).eq("id", t.id);
+    throwIf(error, "politician_elections no_policies");
+    await recordUpdate(supabase, ctxOf(row), "politician_elections", String(t.id), "no_policies_at", null, at);
+    await recordUpdate(supabase, ctxOf(row), "politician_elections", String(t.id), "no_policies_source_url", null, sourceUrl);
+  }
+  return { status: "applied", message: "已標記「公報未填政見」：這一屆不會再派補政見的任務，人物頁會寫「公報未填政見」；判錯的話這筆可以還原", task_id: taskId, politician_id: card.politician_id };
+}
+
 async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Promise<ApplyOutcome> {
   const taskId = str(row.payload.task_id);
   if (!taskId) return { status: "failed", message: "no_change 要帶 task_id" };
@@ -2424,6 +2462,13 @@ async function applyNoChange(supabase: SupabaseLike, row: ContributionRow): Prom
     // 用 task_id 當紀錄鍵：這張表的 id 是流水號，回不回來都不影響還原，
     // 而 task_id 才是人看得懂、也是冷卻判斷用的那把鑰匙。
     await recordInsert(supabase, ctxOf(row), "task_checks", taskId, check);
+    // 公報未填政見（2026-11-20）：補政見卡＋finding_kind=bulletin_no_policies＋confirmed（驗證通過才會走到這裡）
+    // ＝公報上這位候選人的政見欄沒有任何條目。標在他這一屆的參選紀錄上：派工不再重派、報表算已抄、人物頁一句說明。
+    // 不是補政見卡、或沒帶標記的 no_change 不進這一段，行為跟以前一樣（只記 task_checks）。
+    const bulletinCard = parseBulletinCard(taskId);
+    if (bulletinCard && str(row.payload.finding_kind) === BULLETIN_NO_POLICIES && outcome === "confirmed") {
+      return await applyBulletinNoPolicies(supabase, row, taskId, bulletinCard);
+    }
     // 早期匯入核對（2026-09-20）：no_change 通過＝這筆政見查核過了。寫一列 policies.audit，
     // 頁面的「尚未查核」變「已查核」、legacy_audit 任務隨之消失（它的條件是「沒有任何查核履歷」）
     const legacy = /^auto:legacy_audit:([0-9a-f-]{36})$/i.exec(taskId);

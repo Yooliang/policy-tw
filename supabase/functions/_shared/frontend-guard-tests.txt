@@ -1,4 +1,5 @@
 _shared/ai-reads.test.ts
+_shared/bulletin-no-policies.test.ts
 _shared/candidacy-read-side.test.ts
 _shared/cec-roster-hardening.test.ts
 _shared/dedupe-ops-values.test.ts

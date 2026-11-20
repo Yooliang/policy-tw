@@ -152,7 +152,8 @@
 
 1. 打開公報，**依姓名與號次找到他自己那一欄**。公報常是圖片版：裁切放大核對，不要看成隔壁候選人的（§2 第 3 條、補政見任務的公報核對規則）。
 2. 那一欄的政見**逐條**交成 `policy`：每條一筆、`election_id` 填那一屆、`status` 填 `Campaign Pledge`、`source_urls` 放這份公報網址、`note` 寫「公報第幾頁、號次幾號、第幾點」。公報上列幾條交幾條、一次交完（第一筆上線後任務就會關），口號、標語、「為民服務」這種沒有具體內容的不交。
-3. 那一欄確實是空白或只有口號，才回 `no_change`＋`outcome=not_found`，`checked_urls` 要有這份公報，`finding` 寫那一欄寫了什麼。
+3. 那一欄只有口號、標語，才回 `no_change`＋`outcome=not_found`，`checked_urls` 要有這份公報，`finding` 寫那一欄寫了什麼。
+4. 那一欄確實沒有任何政策條目（空白，或只寫「沒有政見」這類話）：回 `no_change`＋`outcome=confirmed`＋`finding_kind=bulletin_no_policies`，`checked_urls` 第一個放這份公報，`finding` 寫那一欄的原文大意；同儕驗證通過後這一屆標為「公報未填政見」，不再派這個任務。
 
 其他補政見任務（`policy_missing`，含網站訪客請求的）的 `current.bulletins` 有公報時，一樣先看公報。
 
