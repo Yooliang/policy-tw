@@ -5,9 +5,10 @@ import { usePaneActive } from './usePane'
 
 import { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel } from '../lib/site'
 import { defaultShareImage, shareImageMeta, type ShareImage } from '../lib/seo'
+import { canonicalPath, pageUrlOf } from '../lib/page-url'
 
 // 站名、網址、政見狀態標籤、授權與發布者放在 lib/site.ts（純常數，Markdown 檢視 lib/md 也要用；單一份）
-export { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel }
+export { DATA_LICENSE_URL, PUBLISHER_LD, SITE_NAME, SITE_URL, policyStatusLabel, canonicalPath }
 export const SITE_TAGLINE = '智能政見追蹤平台'
 export const DEFAULT_DESCRIPTION =
   '正見是超越黨派色彩的政策歷史追蹤平台，記錄全台政治人物政見的提出與執行進度，並以 AI 進行客觀分析。'
@@ -34,6 +35,10 @@ interface PageHeadOptions {
    * 人物頁、政見頁給 personShareImage(avatarUrl, name)：照片是公開網址用照片，否則仍是預設圖。
    */
   image?: MaybeRefOrGetter<ShareImage | undefined>
+  /**
+   * canonical 與 og:url 指向的站內路徑（#675 第四期）。不給就用本頁的路由 path；完整關係圖頁（不收錄）給主頁的路徑，免得 canonical 指自己。
+   */
+  canonical?: MaybeRefOrGetter<string | undefined>
 }
 
 /** 麵包屑 → schema.org BreadcrumbList（最後一層沒給 path 就用本頁網址） */
@@ -72,14 +77,6 @@ export function summarize(text: string | undefined | null, max = 150): string {
   return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine
 }
 
-/** 路由 path → canonical 用的路徑：去尾斜線、非 ASCII 字元 percent-encode（已編碼的不重複編碼） */
-export function canonicalPath(path: string): string {
-  if (path === '/' || path === '') return '/'
-  let decoded = path
-  try { decoded = decodeURI(path) } catch { /* 原樣 */ }
-  return encodeURI(decoded).replace(/\/$/, '')
-}
-
 export interface BreadcrumbItem {
   /** 顯示文字 */
   name: string
@@ -102,7 +99,7 @@ export function usePageHead(options: PageHeadOptions): void {
   // 在分頁容器的背景 pane 裡：不輸出任何文件標題／meta（只有目前頁的算數）
   const paneActive = usePaneActive()
   // 中文路徑（縣市頁 /election/2026/台北市）一律寫成 percent-encoded：預渲染時 route.path 是原字、瀏覽器裡是編碼過的，兩邊要一致
-  const pageUrl = computed(() => `${SITE_URL}${canonicalPath(route.path)}`)
+  const pageUrl = computed(() => pageUrlOf(SITE_URL, route.path, toValue(options.canonical)))
 
   useHead({
     title: computed(() => (paneActive.value ? title.value : undefined)),

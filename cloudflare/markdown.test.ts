@@ -308,7 +308,7 @@ Deno.test("資料庫壞了：503＋Retry-After、不寫進快取、不退回代�
 Deno.test("Worker 接線：Markdown 先於代理、purge 連 .md 一起清、robots.txt 不擋 .md、讀的是 data_md_cache", async () => {
   const worker = await Deno.readTextFile(new URL("./ssr-worker.js", import.meta.url));
   assert(worker.includes("handleMarkdown(request, ctx, markdownWorkerDeps())"));
-  assert(worker.indexOf("handleMarkdown(request") < worker.indexOf("const api = apiRedirect(request)") && worker.indexOf("handleMarkdown(request") < worker.indexOf("return cachedProxy(request"), "Markdown 要在 API 轉址與代理之前收掉");
+  assert(worker.indexOf("handleMarkdown(request") < worker.indexOf("const api = apiRedirect(request)") && worker.indexOf("handleMarkdown(request") < worker.indexOf("await cachedProxy(request"), "Markdown 要在 API 轉址與代理之前收掉");
   assert(worker.includes("`${clean}.md`"), "purge 要連 .md 一起清");
   assert(worker.includes("data_md_cache?path=eq."), "預產的頁只讀 data_md_cache");
   const robots = await Deno.readTextFile(new URL("../public/robots.txt", import.meta.url));

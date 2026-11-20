@@ -10,14 +10,15 @@ import { useRegionQuerySync, queryField } from '../composables/useRegionQuerySyn
 import { useGlobalState } from '../composables/useGlobalState'
 import { useDeskFilterPanel } from '../composables/useDeskFilterPanel'
 import { ALL_REGIONS } from '../lib/policy-region'
-import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineageCounts, lineagePath, lineagePlace, lineageTotal } from '../lib/lineage'
+import { filterLineages, isLineageListed, LEVEL_LABEL, LINEAGE_NAME, lineagePath, lineagePlace, lineageToListItem, lineageTotal } from '../lib/lineage'
+import { statusPhaseLabel } from '../lib/lineage-page'
 
 /**
  * /analysis：政策脈絡一覽（#349，2026-10-06；原本叫「市政接力」，網址不變）。
  * 上半是政策脈絡（一件事在某一層級、某一地方的來龍去脈，點進 /lineage/:id）；
  * 「進度過半的政見」是政見不是脈絡，已移到全部政見（/tracking?focus=progress，#201）；/analysis/:policyId 深度分析頁照舊。
  */
-const { categories, lineages, lineagesComplete, ensureLineages } = useSupabase()
+const { categories, lineages, lineagesComplete, lineageList: loadedList, lineageListComplete, ensureLineageList } = useSupabase()
 const { globalRegion, setGlobalRegion, globalCategory: selectedCategory } = useGlobalState()
 const { openPanel } = useDeskFilterPanel()
 const searchTerm = ref('')
@@ -27,22 +28,25 @@ useRegionQuerySync({ routeName: 'analysis', extra: { category: queryField(select
 
 /** 脈絡：中央層級的在每個縣市都列（全國的事每個縣市都受影響）；照層級（中央 → 縣市 → 鄉鎮）、地方、標題排 */
 const LEVEL_ORDER = { national: 0, county: 1, township: 2 } as const
+// 卡片：預渲染的快照帶整列脈絡（lineagesComplete），直接轉成卡片；沒有快照就讀視圖 lineages_list（缺它時退回 lineages_full）
+const allCards = computed(() => (lineagesComplete.value ? lineages.value.map(lineageToListItem) : loadedList.value))
+const listComplete = computed(() => lineagesComplete.value || lineageListComplete.value)
 const lineageList = computed(() =>
-  filterLineages(lineages.value.filter(isLineageListed), { region: globalRegion.value, category: selectedCategory.value, q: searchTerm.value })
+  filterLineages(allCards.value.filter(isLineageListed), { region: globalRegion.value, category: selectedCategory.value, q: searchTerm.value })
     .slice()
     .sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]
       || (a.region ?? '').localeCompare(b.region ?? '', 'zh-Hant-TW')
       || a.title.localeCompare(b.title, 'zh-Hant-TW')))
 
 /** 方塊格上的數字＝脈絡條數（跟下面的清單同一套規則，lib/lineage.ts lineageTotal）；脈絡還沒整份載入就不印 */
-const lineageCountFor = (region: string, category: string) => (!lineagesComplete.value ? null : lineageTotal(lineages.value, region, category))
+const lineageCountFor = (region: string, category: string) => (!listComplete.value ? null : lineageTotal(allCards.value, region, category))
 const pickerCounter = { region: lineageCountFor, category: lineageCountFor, unit: '脈絡', suffix: '條' }
 
 usePageHead({
   title: LINEAGE_NAME,
   description: '政策脈絡：一件事在某一層級、某一地方的來龍去脈。',
 })
-onMounted(() => { ensureLineages() })
+onMounted(() => { ensureLineageList() })
 </script>
 
 <template>
@@ -79,7 +83,7 @@ onMounted(() => { ensureLineages() })
           <button type="button" class="font-bold" @click="openPanel('category')">{{ selectedCategory }}</button>
           <button type="button" class="rounded-full p-1 hover:bg-white/20" aria-label="清除分類" @click="selectedCategory = 'All'"><X :size="14" /></button>
         </span>
-        <span v-if="lineagesComplete" class="text-sm font-bold text-slate-400 tabular-nums">{{ lineageList.length.toLocaleString('en-US') }} 條</span>
+        <span v-if="listComplete" class="text-sm font-bold text-slate-400 tabular-nums">{{ lineageList.length.toLocaleString('en-US') }} 條</span>
       </div>
       <RegionCategoryPicker v-model:category="selectedCategory" category-enabled :counter="pickerCounter" />
 
@@ -147,11 +151,12 @@ onMounted(() => { ensureLineages() })
             <span class="text-xs font-bold text-blue-700 mb-2">{{ LEVEL_LABEL[l.level] }}・{{ lineagePlace(l) }}<template v-if="l.category">・{{ l.category }}</template></span>
             <span class="text-xl font-black text-navy-900 group-hover:text-blue-700 leading-snug break-words">{{ l.title }}</span>
             <span v-if="l.summary" class="text-sm text-slate-600 mt-2 line-clamp-2">{{ l.summary }}</span>
-            <span class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
-              <span>政見 {{ lineageCounts(l).policies }} 條</span>
-              <span>參與者 {{ lineageCounts(l).people }} 位</span>
-              <span v-if="lineageCounts(l).handovers > 0">交接 {{ lineageCounts(l).handovers }} 筆</span>
-              <span>上下級 {{ lineageCounts(l).links }} 條</span>
+            <span v-if="statusPhaseLabel(l.statusPhase)" class="mt-3 inline-flex self-start px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200" data-testid="lineage-card-phase">{{ statusPhaseLabel(l.statusPhase) }}</span>
+            <span class="mt-4 pt-4 border-t border-slate-100 text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1" data-testid="lineage-card-counts">
+              <span>政見 {{ l.policyCount }} 條</span>
+              <span>事件 {{ l.eventCount }} 筆</span>
+              <span>立場 {{ l.stanceCount }} 筆</span>
+              <span v-if="l.handoverCount > 0">交接 {{ l.handoverCount }} 筆</span>
             </span>
           </router-link>
         </div>

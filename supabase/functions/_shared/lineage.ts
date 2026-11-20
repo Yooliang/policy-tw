@@ -2,7 +2,7 @@
  * 政策脈絡（#349，2026-10-06；比照日本站 keifu 的 lineages／handovers，多「同級多人」與「上下級」兩個方向）。
  *
  * 一條脈絡＝一件事在某一層級、某一地方的來龍去脈：
- *   前後任：handovers（接手 keep／轉向 pivot／縮小 shrink／中止 stop／重新開始 resume，與日本站同值）
+ *   前後任：handovers（照舊做 keep／改做法 pivot／縮小 shrink／停掉 stop／重新開始 resume，與日本站同值）
  *   同級多人：lineage_participants（提案／共同提案／連署／主張推動；官方紀錄 official_record 或本人宣稱 self_claim）
  *   上下級：lineage_links（上級立法或補助 → 下級執行 top_down；下級爭取 → 上級採納 bottom_up）
  * 政見以 policies.lineage_id 掛上來；policies.origin 記政見從哪裡來（照日本站 policy_origin）。
@@ -55,13 +55,13 @@ export const PARTICIPANT_NOTE_MAX = 200;
 export const HANDOVER_TYPES = ["keep", "pivot", "shrink", "stop", "resume"] as const;
 export type HandoverType = (typeof HANDOVER_TYPES)[number];
 export const HANDOVER_TYPE_LABEL: Record<HandoverType, string> = {
-  keep: "接手",
-  pivot: "轉向",
+  keep: "照舊做",
+  pivot: "改做法",
   shrink: "縮小",
-  stop: "中止",
+  stop: "停掉",
   resume: "重新開始",
 };
-/** 要兩台不同機器投過才上線的交接型態（維護者 10-05：中止要較高票數，比照 merge_politician） */
+/** 要兩台不同機器投過才上線的交接型態（維護者 10-05：停掉要較高票數，比照 merge_politician） */
 export const HANDOVER_TWO_IP_TYPES: readonly HandoverType[] = ["stop"];
 
 export const LINK_TYPES = ["top_down", "bottom_up"] as const;

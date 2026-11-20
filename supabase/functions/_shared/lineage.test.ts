@@ -576,7 +576,7 @@ Deno.test("驗證說明：四種都講得出核什麼、投什麼；中止明講
     assertEquals(hint, LINEAGE_VERIFY_HINT[t]);
     assert(/agree/.test(hint) && /disagree/.test(hint) && /unsure/.test(hint), `${t} 要講三種票`);
   }
-  assertStringIncludes(LINEAGE_VERIFY_HINT.lineage_handover, "後任政見裡沒提就判中止");
+  assertStringIncludes(LINEAGE_VERIFY_HINT.lineage_handover, "後任政見裡沒提就判停掉");
   assertStringIncludes(LINEAGE_VERIFY_HINT.lineage_participants, "新聞轉述不是官方紀錄");
 });
 
@@ -587,5 +587,5 @@ Deno.test("協議（skill.md）講了四種型別、中止不再要兩台機器�
   assert(!skill.includes("另外要求分數來自**至少 2 個不同來源 IP**"), "舊的「中止要兩個來源 IP」說法要移掉");
   assertStringIncludes(skill, "出處**一定要是官方網址**");
   assertStringIncludes(skill, "**臉書、IG、Threads 讀不到，不收**");
-  assertStringIncludes(skill, "**後任的政見清單裡沒有這件事，不等於中止**");
+  assertStringIncludes(skill, "**後任的政見清單裡沒有這件事，不等於停掉**");
 });

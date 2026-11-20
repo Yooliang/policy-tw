@@ -5,7 +5,7 @@
  *   其後：筆數列、脈絡裡的政見（只有當選後的政見，承諾不在這裡）、參與者與角色、上下級脈絡
  * 版面上的字全部取自 lib/lineage-page-labels.ts 的白名單，模板裡不放任何靜態中文（lib/lineage-page.test.ts 守）；沒有資料寫標籤「尚無現況紀錄」「尚無立場紀錄」「尚無」。
  * 資料全在 lineages_full 那一列，邊緣渲染（cloudflare/ssr-worker.js）與預渲染拿到同一份；連結都是真的 <a href>，canonical 指正見.tw。
- * 這一期不放指向關係圖的連結（路由第四期才有）。顯示規則在 lib/lineage.ts 與 lib/lineage-page.ts。
+ * 大事記底下有「看完整關係圖 →」（真連結、rel=nofollow；#675 第四期），立場變過的「曾變」也連到關係圖。顯示規則在 lib/lineage.ts 與 lib/lineage-page.ts。
  */
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -20,7 +20,7 @@ import { usePageHead, DATA_LICENSE_URL, PUBLISHER_LD, SITE_URL, type BreadcrumbI
 import { policyStatusLabel } from '../composables/usePageHead'
 import {
   BASIS_LABEL, buildTimeline, EVENT_TYPE_LABEL, HANDOVER_BADGE, HANDOVER_LABEL, hasBeenRepresentative, isLineageListed, LEVEL_LABEL, LINEAGE_NAME,
-  lineagePath, lineagePlace, LINK_LABEL, needsHandoverRecord, participantRows, policyMeta, ROLE_LABEL, STANCE_LABEL, termRoleLabel,
+  lineageGraphPath, lineagePath, lineagePlace, LINK_LABEL, needsHandoverRecord, participantRows, policyMeta, ROLE_LABEL, STANCE_LABEL, termRoleLabel,
 } from '../lib/lineage'
 import { PAGE_LABELS as T } from '../lib/lineage-page-labels'
 import {
@@ -87,6 +87,8 @@ const stanceRows = computed(() => (lineage.value
   ? buildStanceRows({ stances: lineage.value.stances ?? [], policies: lineagePolicies.value, personOf: (id) => personById.value.get(id), nameOf, electionDates: electionDates.value })
   : []))
 const chronicle = computed(() => (lineage.value ? buildChronicle(lineage.value.events ?? [], lineage.value.handovers, electionDates.value) : []))
+// 大事記（事件與交接）空了就不印這一區，只留「看完整關係圖」的按鈕
+const hasChronicle = computed(() => chronicle.value.length > 0 || showHandovers.value)
 const chronicleHead = computed(() => chronicle.value.slice(0, CHRONICLE_HEAD))
 const chronicleRest = computed(() => chronicle.value.slice(CHRONICLE_HEAD))
 const counts = computed(() => (lineage.value ? pageCounts(lineage.value) : { policies: 0, handovers: 0, events: 0, stances: 0 }))
@@ -96,8 +98,12 @@ const STANCE_BADGE = { support: 'bg-emerald-50 text-emerald-700 border border-em
 const people = computed(() => (lineage.value
   ? participantRows(lineage.value.participants, lineagePolicies.value, nameOf, (id) => hasBeenRepresentative(personById.value.get(id), electionDates.value, today))
   : []))
+// 「屬於」（標題列）算所有上級；側欄的上下級只放舊兩種關聯，「包含」另列在「大計畫與項目」
 const uppers = computed(() => lineage.value?.links.filter((k) => k.direction === 'upper') ?? [])
-const lowers = computed(() => lineage.value?.links.filter((k) => k.direction === 'lower') ?? [])
+const legacyUppers = computed(() => uppers.value.filter((k) => k.linkType !== 'contains'))
+const lowers = computed(() => lineage.value?.links.filter((k) => k.direction === 'lower' && k.linkType !== 'contains') ?? [])
+const containUppers = computed(() => uppers.value.filter((k) => k.linkType === 'contains'))
+const containLowers = computed(() => lineage.value?.links.filter((k) => k.direction === 'lower' && k.linkType === 'contains') ?? [])
 
 /** 那一任的職位：當選寫職位、沒當選或還沒投票寫「…參選人」（lib/lineage.ts 的 termRoleLabel） */
 function officeOf(politicianId: string, electionId: number | null): string {
@@ -210,7 +216,7 @@ usePageHead({
                   </RouterLink>
                   <span v-if="row.stance" :class="['px-2 py-0.5 rounded text-xs font-bold', STANCE_BADGE[row.stance]]">{{ STANCE_LABEL[row.stance] }}</span>
                   <span v-else class="px-2 py-0.5 rounded text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200">{{ T.derivedStance }}</span>
-                  <span v-if="row.changed" class="px-2 py-0.5 rounded text-xs font-bold bg-slate-50 text-slate-600 border border-slate-300">{{ T.changedStance }}</span>
+                  <RouterLink v-if="row.changed" :to="lineageGraphPath(lineage.id)" rel="nofollow" class="px-2 py-0.5 rounded text-xs font-bold bg-slate-50 text-slate-600 border border-slate-300 hover:bg-slate-100 hover:text-blue-700" data-testid="lineage-stance-changed">{{ T.changedStance }}</RouterLink>
                   <span v-if="row.disputed" class="px-2 py-0.5 rounded text-xs font-bold bg-red-50 text-red-700 border border-red-200" data-testid="lineage-disputed">{{ T.disputed }}</span>
                   <span v-if="row.date" class="text-xs text-slate-500 tabular-nums">{{ formatStatedDate(row.date, row.datePrecision) }}</span>
                 </div>
@@ -226,7 +232,7 @@ usePageHead({
 
           <!-- 大事記：事件與交接，新到舊；最近幾筆先印，其餘收在「更多」 -->
           <section class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-chronicle">
-            <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><CalendarClock class="text-slate-400" :size="22" />{{ T.chronicle }}</h2>
+            <h2 v-if="hasChronicle" class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><CalendarClock class="text-slate-400" :size="22" />{{ T.chronicle }}</h2>
             <template v-for="(group, gi) in [{ key: 'head', items: chronicleHead }, { key: 'rest', items: chronicleRest }]" :key="group.key">
               <component :is="gi === 0 ? 'div' : 'details'" v-if="group.items.length > 0" :class="gi === 0 ? '' : 'mt-4'">
                 <summary v-if="gi === 1" class="cursor-pointer text-sm font-bold text-blue-700">{{ T.chronicleMore }} {{ group.items.length }} {{ T.unitItem }}</summary>
@@ -266,7 +272,7 @@ usePageHead({
               </component>
             </template>
             <p v-if="showHandovers && lineage.handovers.length === 0" class="mt-4 text-sm text-slate-500" data-testid="lineage-handover-missing">{{ T.handoverMissing }}</p>
-            <p v-if="chronicle.length === 0 && !showHandovers" class="text-sm text-slate-500">{{ T.chronicleEmpty }}</p>
+            <RouterLink :to="lineageGraphPath(lineage.id)" rel="nofollow" :class="['inline-flex items-center gap-1 text-sm font-bold text-blue-700 hover:underline', hasChronicle ? 'mt-4' : '']" data-testid="lineage-graph-link">{{ T.viewGraph }}</RouterLink>
           </section>
 
           <!-- 筆數列：標籤，不是說明；0 也印 -->
@@ -329,13 +335,29 @@ usePageHead({
             </ul>
             <p v-if="people.length === 0" class="text-sm text-slate-500">{{ T.participantsEmpty }}</p>
           </section>
+
+          <section v-if="containUppers.length > 0 || containLowers.length > 0" class="bg-white p-6 sm:p-8 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-contains">
+            <h2 class="text-xl font-bold text-navy-900 mb-4 flex items-center gap-2"><GitFork class="text-slate-400" :size="22" />{{ T.containsHeading }}</h2>
+            <template v-for="group in [{ key: 'upper', label: T.belongsTo, list: containUppers }, { key: 'lower', label: T.contains, list: containLowers }]" :key="group.key">
+              <div v-if="group.list.length > 0" class="mb-4 last:mb-0">
+                <h3 class="text-sm font-bold text-slate-600 mb-2">{{ group.label }}</h3>
+                <ul class="space-y-3">
+                  <li v-for="k in group.list" :key="k.id" class="rounded-lg border border-slate-200 bg-slate-50 p-3" data-testid="lineage-contains-item">
+                    <RouterLink :to="lineagePath(k.lineageId)" class="font-bold text-blue-700 hover:underline break-words">{{ k.title }}</RouterLink>
+                    <p class="text-xs text-slate-500 mt-0.5">{{ LEVEL_LABEL[k.level] }}・{{ lineagePlace(k) }}</p>
+                    <p v-if="k.sourceUrl" class="text-xs text-slate-500 mt-1 break-words"><template v-if="k.sourceLocator">{{ k.sourceLocator }}｜</template><LineageSourceLink :source="k.source" :url="k.sourceUrl" /></p>
+                  </li>
+                </ul>
+              </div>
+            </template>
+          </section>
         </div>
 
         <aside class="lg:col-span-1 space-y-6">
           <!-- 上下級 -->
           <section class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm" data-testid="lineage-links">
             <h2 class="text-lg font-bold text-navy-900 mb-4 flex items-center gap-2"><GitFork class="text-slate-400" :size="20" />{{ T.links }}</h2>
-            <template v-for="group in [{ key: 'upper', label: T.upper, list: uppers }, { key: 'lower', label: T.lower, list: lowers }]" :key="group.key">
+            <template v-for="group in [{ key: 'upper', label: T.upper, list: legacyUppers }, { key: 'lower', label: T.lower, list: lowers }]" :key="group.key">
               <div v-if="group.list.length > 0" class="mb-4 last:mb-0">
                 <h3 class="text-sm font-bold text-slate-600 mb-2">{{ group.label }}</h3>
                 <ul class="space-y-3">
@@ -351,7 +373,7 @@ usePageHead({
                 </ul>
               </div>
             </template>
-            <p v-if="uppers.length === 0 && lowers.length === 0" class="text-sm text-slate-500">{{ T.linksEmpty }}</p>
+            <p v-if="legacyUppers.length === 0 && lowers.length === 0" class="text-sm text-slate-500">{{ T.linksEmpty }}</p>
           </section>
         </aside>
       </div>

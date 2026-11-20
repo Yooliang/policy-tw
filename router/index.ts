@@ -55,6 +55,12 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('../pages/LineagePage.vue'),
   },
   {
+    // 脈絡完整關係圖（#675 第四期）：只在瀏覽器端畫、noindex、不預渲染、不進網站地圖；canonical 指主頁。排在 lineage 後面
+    path: '/lineage/:lineageId/graph',
+    name: 'lineage-graph',
+    component: () => import('../pages/LineageGraphPage.vue'),
+  },
+  {
     // 選舉一覽（#344，2026-10-05）：今後與過去的選舉；各場的網址照舊是 /election/:electionId
     path: '/elections',
     name: 'elections',

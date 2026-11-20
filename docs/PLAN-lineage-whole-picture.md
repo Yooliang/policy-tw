@@ -572,8 +572,8 @@
 |---|---|---|---|
 | **一 定義與骨架** ✅ | 裁決檔（`docs/decisions/YYYY-MM-DD-<slug>.md`，**更正 10-06「政策脈絡第一階段」與「畫面」兩條**，再跑 `scripts/decisions-index.ts`）；一支 migration：三張新表＋`lineage_settings`＋`lineages.search_terms`＋`lineage_links` 加 `contains` 與新觸發器＋`source_refs` 清單＋`lineage_touch_parent`＋`lineages_full` 尾端加欄＋`lineages_list`＋`lineage_terms`＋新函式＋**改 `merge_politician()` 與空殼人物那一段（2.9，不放到後面期：新表一建好就可能有人物外鍵，合併路徑要同時到位；前一版整支存進 PR 說明供回滾）**；立場與事件的 `*_within_elected_term` 函式、`removed_at`／`disputed_at`、`policy_id`、`quote_hash`（2.4）；`lineage` 交件的 `search_terms` 與主辦更正、`term` 檢查；TS 型別與 `mapLineage`（缺欄當空）；`skill-types.md` 的定義段改寫；`CLAUDE.md` 的脈絡描述由主線改 | `<配號 A>`；協議 `1.(N+1).0` | 只加表、欄、視圖尾端欄，沒有任何交件型別開放，頁面與任務照舊；舊 `link_type` 值保留 |
 | **二 三種交件與缺口臂** 🔄（現況、事件、立場**一個 PR**，主線採 agy 建議：三者改的是同一批約 15 個共用檔案，拆三次要連升三次協議版、連過三次部署佇列，衝突風險比審查便利大；PR 內依現況→事件→立場分三個 commit，審查可以逐段看） | CHECK 加三個型別、`apply-contribution`／`apply-precheck`／`contribution-schema`／`consensus`／`system-one`／`vote-budget`／`task-*`／`verification-sources`／`summary`／`history`／`same-claims`／`task-labels`、`skill-types.md` 三個型別段與 `type_spec`、新臂三處（總表、臂名清單、規則；總表一次加三支）、**起跑日機制（2.7、4.1：加 `dispatch_start_on`、`lineage_status` 規則改 `enabled=true`、三支臂讀起跑日、改 `lineage-status.test.ts` A4／B1／B3 與 `activity-arms.test.ts` 清單、登記 `DEVIATED_LINEAGE`）**、三支臂的 `gap_not_found_days` 冷卻（**不動** `PROGRESS_COOLDOWN_TASK_TYPES`）、`needsTwoIps` 的 `cancelled`（陣列）、`SOLE_SOURCE_GUARDED_TYPES` 與逐項檢查 | `<配號 B>`；協議**只升一次**：`1.(N+2).0` | 三種型別各自完整（資料、守門、任務、協議）才開；資料先進庫，頁面還沒顯示也不影響 |
-| **三 主頁** ⏳ | 第 5.1、5.4 節：`LineagePage.vue` 重排、`lib/lineage.ts` 與 `types.ts` 補型別與純函式、`loadLineagePage`／`lineagePeople()`、一覽頁改讀 `lineages_list`、JSON-LD、空脈絡 `noindex`、`lineages_list` 缺時退回。**主頁在這一期完全不出現「看完整關係圖」按鈕、也不出現指向 `/graph` 的任何連結**（含立場表「曾變」那顆；這一期「曾變」只是文字標籤）——路由要到第四期才存在，先放連結讀者會點到不存在的頁（agy 審查，主線選「第四期才出現」，不併三四期，因為關係圖的排版純函式與元件是整份工作量最大的一塊，不該擋住主頁上線） | 無 migration；無協議 | 網址不變；新欄還沒資料時各區塊顯示標籤式空值；舊資料 10 條照樣顯示；沒有指向未上線頁面的連結 |
-| **四 關係圖** ⏳ | 第 5.2、5.3 節：路由、`lib/lineage-graph.ts`、元件與抽屜、`usePageHead` 的 `canonical` 選項、Worker 標頭、網站地圖的建置檢查、`HANDOVER_LABEL` 同步；**同一個 PR 才把主頁的「看完整關係圖 →」按鈕與「曾變」連結加上去**（路由與連結同時上線，不會有空窗） | 無 migration；若 `HANDOVER_LABEL` 的後端那份動到 `_shared/lineage.ts`，協議文字跟著小改（併在下一次版號） | 新路由，上線前沒有人連到它，不影響既有頁；不進網站地圖 |
+| **三 主頁** ✅ | 第 5.1、5.4 節：`LineagePage.vue` 重排、`lib/lineage.ts` 與 `types.ts` 補型別與純函式、`loadLineagePage`／`lineagePeople()`、一覽頁改讀 `lineages_list`、JSON-LD、空脈絡 `noindex`、`lineages_list` 缺時退回。**主頁在這一期完全不出現「看完整關係圖」按鈕、也不出現指向 `/graph` 的任何連結**（含立場表「曾變」那顆；這一期「曾變」只是文字標籤）——路由要到第四期才存在，先放連結讀者會點到不存在的頁（agy 審查，主線選「第四期才出現」，不併三四期，因為關係圖的排版純函式與元件是整份工作量最大的一塊，不該擋住主頁上線） | 無 migration；無協議 | 網址不變；新欄還沒資料時各區塊顯示標籤式空值；舊資料 10 條照樣顯示；沒有指向未上線頁面的連結 |
+| **四 關係圖** ✅ | 第 5.2、5.3 節：路由、`lib/lineage-graph.ts`、元件與抽屜、`usePageHead` 的 `canonical` 選項、Worker 標頭、網站地圖的建置檢查、`HANDOVER_LABEL` 同步；**同一個 PR 才把主頁的「看完整關係圖 →」按鈕與「曾變」連結加上去**（路由與連結同時上線，不會有空窗） | 無 migration；若 `HANDOVER_LABEL` 的後端那份動到 `_shared/lineage.ts`，協議文字跟著小改（併在下一次版號） | 新路由，上線前沒有人連到它，不影響既有頁；不進網站地圖 |
 | **五 派工臂改格與往外擴** ⏳ | 4.2、4.3、4.5：`lineage_cell_scope`／`lineage_cell_key`、改寫 `lineage_candidates`、新 `lineage_expand`、重寫並重新啟用 `lineage_links`、`handover_missing` 小改、協議任務說明；實測臂成本；登記 #670 PR 4 的換號家族 | `<配號 C>`；協議 `1.(N+3).0` | 臂內容換、新舊 `task_id` 不重疊，seed 照規則收回舊的；已落庫與在途交件不受影響；格與往外擴都只產生「請代理判斷」的任務，不直接寫資料 |
 | **六 日本站** ⏳ | 第 6 節 | `<配號 D>`（`_jp_`）；日本協議版號另算 | 日本站 0 條政見，輸出 0 件；結構先到位 |
 
@@ -586,8 +586,8 @@
 |---|---|---|---|
 | 一 定義與骨架 | ✅ | #872（現況櫃）、#1010（立場、事件櫃與其餘骨架） | 現況表、參數表、立場表、事件表、`search_terms`、`contains`、`lineages_list`、`lineage_terms`、人物合併連動 2.9 都已上線 |
 | 二 三種交件與缺口臂 | 🔄 | 2a：交件型別與落庫（#1011）；2b：三支臂與起跑日（疊在 2a 上，見 2b PR） | 包含：立場與事件的交件型別與落庫；`/next`、`/report` 接線；三支臂（現況、立場、事件）；起跑日設定；守門。現況的交件型別與臂本體 #872 已有，二期把規則改成啟用、並讓三支臂讀「起跑日」 |
-| 三 主頁 | 🔄 | #1014（主頁）；一覽頁（5.4）未做 | 主頁重排成現況／這件事／各方立場／大事記四區塊＋筆數列，白名單 `lib/lineage-page-labels.ts`；一覽頁加現況標籤與筆數、改讀 `lineages_list` 留後續 |
-| 四 關係圖 | ⏳ | 未開 | 路由、泳道圖、手機直式 |
+| 三 主頁 | ✅ | #1014（主頁）；一覽頁（5.4）與「包含」併在 #1017 | 主頁重排成現況／這件事／各方立場／大事記四區塊＋筆數列，白名單 `lib/lineage-page-labels.ts`；一覽頁加現況標籤與筆數、改讀 `lineages_list`（缺它退回 `lineages_full`），「包含」顯示在主頁「大計畫與項目」，兩件留給四期順手做，已於第四期 PR 補上 |
+| 四 關係圖 | ✅ | #1017 | 路由 `/lineage/:lineageId/graph`、泳道圖（`lib/lineage-graph.ts`）、手機直式時間軸、抽屜、noindex＋canonical、Worker 標頭、網站地圖建置檢查、主頁按鈕與「曾變」連結、交接詞彙與顏色同步 |
 | 五 派工臂改格與往外擴 | ⏳ | 未開 | 順序不變，在二期之後 |
 | 六 日本站 | ⏳ | 未開 | 順序不變，在五期之後 |
 
@@ -619,13 +619,22 @@
 - 爭議標示的字樣取計畫書 2.4 的「有爭議」；下架的列在視圖與 `mapLineage` 兩層都濾掉。
 - 「屬於」放在標題列（上級脈絡的真連結）；側欄的上下級脈絡照舊。「包含」（`contains`）本期不顯示，`mapLineage` 仍只認舊兩種關聯型態，留後續。
 - 立場表的層級與地區取「持有人最近一次當選的職位與其所在縣市」（看不出來的排最後），不另外存欄。
-- 一覽頁（5.4）不在本 PR，三期狀態因此維持 🔄。
+- 一覽頁（5.4）不在本 PR，留給四期順手做；「包含」（`contains`）也留給四期。四期 PR 已補上，三期狀態因此改 ✅。
 
 **四期 驗收條件**
 1. `/lineage/<id>/graph` 能開，桌機畫泳道圖，手機寬度（640 px 以下）顯示直式時間軸。**資料相同的比對方式**：同一份純函式輸出餵兩種版面，測試取兩邊渲染出的事件、立場、交接的 id 集合，要完全相等。
 2. 這頁 `noindex`、canonical 指主頁、不進網站地圖與預渲染；建置檢查在網站地圖出現 `/graph` 時會紅。
 3. 同一支 PR 才把主頁的「看完整關係圖」按鈕與「曾變」連結加上去，連結解析測試仍綠。
 4. 每個職位一條交接線並排；下一任（尚未開票）畫虛線框。
+
+**四期 實作與計畫的差異（本 PR 回改）**
+- **字的白名單只有一份**：關係圖頁與它的元件（`LineageGraphSvg.vue`、`LineageGraphList.vue`、`LineageGraphDrawer.vue`）也只用 `lib/lineage-page-labels.ts` 的字，主頁的白名單測試一併管（沒有另開第二份）。
+- **「下一任」虛線框由選舉日推導**：頁面取「今天或之後最近一場選舉的投票日」當 `upcomingElectionDate`，凡單席首長職位的現任預定卸任日晚於那天、且還沒有已開始的下一任，就在現任之後畫虛線框「MM/DD 開票後」；不去判斷那場選舉選不選這個職位（地方選舉選的就是這幾種單席首長，其他場次若選不到該職位，會多畫一格，這是已知的簡化）。
+- **折疊**：超過 16 條泳道時，優先保留有標籤的泳道，其餘折成「另 N 個職位」；被折起來的標籤不消失，落在那條折疊泳道上，展開後回到各自的職位；事件、立場超過 60 筆預設只留最新 60 筆（圖與清單同一份）。
+- **政見沒有日期的不畫在圖上**（提出日與屆別投票日都沒有），只留在時序清單的「日期未定」。
+- **交接標籤畫在兩任的交界**，清單用判定日（沒有就用後任那一屆投票日、再沒有用後任就任日）；對不到相鄰兩任的交接紀錄落在後任（沒有就前任）的泳道，再沒有落「其他（身分待查）」，不會消失。
+- **一覽頁**：預渲染的 `/analysis` 仍吃快照裡的整列脈絡（`lineagesComplete`，卡片由 `lineageToListItem` 轉出），沒有快照才讀 `lineages_list`；「涉及的人」在快照路徑只算得出參與者與表態者。卡片拿掉「參與者」與「上下級」兩個數字，換成「事件」「立場」筆數與現況階段標籤。
+- 主頁「大計畫與項目」只放 `contains`；側欄「上下級脈絡」只放舊兩種關聯（`top_down`、`bottom_up`）；標題列的「屬於」兩種都算。前端 `LineageLinkType` 多一個 `contains`，後端 `LINK_TYPES` 到第五期才動。
 
 **五期 驗收條件**（順序不變，細節沿用第 4.2、4.3、4.5 節與下方守門表）
 1. 縣長、議員、鄉鎮市長、區域立委落同一格；一條政見只回一列；超過格上限會拆。

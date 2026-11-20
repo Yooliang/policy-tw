@@ -2,7 +2,7 @@
  * 政策脈絡（#349，2026-10-06）的顯示規則。網站上叫「政策脈絡」，簡稱「脈絡」。
  *
  * 一條脈絡＝一件事在某一層級、某一地方的來龍去脈（比照日本站 keifu 的 lineages／handovers），三個方向：
- *   前後任：脈絡內的交接（接手／轉向／縮小／中止／重新開始）
+ *   前後任：脈絡內的交接（照舊做／改做法／縮小／停掉／重新開始）
  *   同級多人：脈絡內的參與者與角色（提案／共同提案／連署／主張推動）；**角色以官方紀錄為準，本人自述只標「本人宣稱」**
  *   上下級：不同的脈絡互相關聯（上級立法或補助 → 下級執行；下級爭取 → 上級採納）
  * 資料在視圖 lineages_full（脈絡頁、脈絡一覽）與 policies_with_logs.lineage（政見頁「所屬脈絡」）。
@@ -11,7 +11,7 @@
  * 零執行期依賴（只有型別），能被 deno 直接測。
  */
 import type {
-  DatePrecision, HandoverType, Lineage, LineageCoverage, LineageEvent, LineageEventType, LineageHandover, LineageLevel, LineageLink, LineageLinkType,
+  DatePrecision, HandoverType, Lineage, LineageListItem, RawLineageListRow, LineageCoverage, LineageEvent, LineageEventType, LineageHandover, LineageLevel, LineageLink, LineageLinkType,
   LineageParticipant, LineageSource, LineageStance, LineageStatus, StanceKind, LineageSummary, ParticipantBasis, ParticipantRole, Policy, PolicyOrigin, RawLineage, RawLineageSource, RawLineageSummary,
 } from '../types'
 import { isElectedTerm, isElectionVoted, stageWord, taipeiToday } from './policy-stage'
@@ -21,7 +21,7 @@ export const LINEAGE_NAME = '政策脈絡'
 export const LINEAGE_SHORT_NAME = '脈絡'
 
 export const LEVEL_LABEL: Readonly<Record<LineageLevel, string>> = { national: '中央', county: '縣市', township: '鄉鎮市區' }
-export const HANDOVER_LABEL: Readonly<Record<HandoverType, string>> = { keep: '接手', pivot: '轉向', shrink: '縮小', stop: '中止', resume: '重新開始' }
+export const HANDOVER_LABEL: Readonly<Record<HandoverType, string>> = { keep: '照舊做', pivot: '改做法', shrink: '縮小', stop: '停掉', resume: '重新開始' }
 export const HANDOVER_HINT: Readonly<Record<HandoverType, string>> = {
   keep: '後任原樣延續',
   pivot: '目的不變，做法變了',
@@ -31,20 +31,25 @@ export const HANDOVER_HINT: Readonly<Record<HandoverType, string>> = {
 }
 export const ROLE_LABEL: Readonly<Record<ParticipantRole, string>> = { proposer: '提案', co_proposer: '共同提案', cosigner: '連署', advocate: '主張推動' }
 export const BASIS_LABEL: Readonly<Record<ParticipantBasis, string>> = { official_record: '官方紀錄', self_claim: '本人宣稱' }
-export const LINK_LABEL: Readonly<Record<LineageLinkType, string>> = { top_down: '上級立法或補助，下級執行', bottom_up: '下級爭取，上級採納' }
+export const LINK_LABEL: Readonly<Record<LineageLinkType, string>> = { top_down: '上級立法或補助，下級執行', bottom_up: '下級爭取，上級採納', contains: '包含' }
 export const ORIGIN_LABEL: Readonly<Record<PolicyOrigin, string>> = { pledge: '競選承諾', policy_address: '施政報告', assembly: '議會提案', budget: '預算' }
 
-/** 交接型態的樣式：中止紅、縮小琥珀、轉向紫、接手與重新開始綠（深色模式由 styles/main.css 統一換色） */
+/** 交接型態的樣式（計畫書 5.2）：照舊做綠、改做法藍、縮小黃、停掉紅、重新開始紫（深色模式由 styles/main.css 統一換色） */
 export const HANDOVER_BADGE: Readonly<Record<HandoverType, string>> = {
   keep: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-  pivot: 'bg-violet-50 text-violet-700 border border-violet-200',
+  pivot: 'bg-blue-50 text-blue-700 border border-blue-200',
   shrink: 'bg-amber-50 text-amber-800 border border-amber-200',
   stop: 'bg-red-50 text-red-700 border border-red-200',
-  resume: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  resume: 'bg-violet-50 text-violet-700 border border-violet-200',
 }
 
 export function lineagePath(id: string): string {
   return `/lineage/${id}`
+}
+
+/** 完整關係圖（#675 第四期）；只在瀏覽器端畫、noindex，canonical 指主頁 */
+export function lineageGraphPath(id: string): string {
+  return `/lineage/${id}/graph`
 }
 
 /** 脈絡的地方怎麼念：全國／台中市／台中市大雅區 */
@@ -78,7 +83,7 @@ export function mapLineageSummary(row: RawLineageSummary | null | undefined): Li
 const ROLES = new Set(['proposer', 'co_proposer', 'cosigner', 'advocate'])
 const BASES = new Set(['official_record', 'self_claim'])
 const HANDOVERS = new Set(['keep', 'pivot', 'shrink', 'stop', 'resume'])
-const LINKS = new Set(['top_down', 'bottom_up'])
+const LINKS = new Set(['top_down', 'bottom_up', 'contains'])
 const STANCES = new Set(['support', 'oppose', 'conditional'])
 const EVENT_TYPES = new Set(['decided', 'approved', 'budget_added', 'budget_cut', 'started', 'completed', 'paused', 'cancelled', 'resumed', 'other'])
 const PRECISIONS = new Set(['day', 'month', 'year'])
@@ -404,6 +409,34 @@ export function participantRows(
     .sort((a, b) => rank(a) - rank(b) || a.name.length - b.name.length || a.name.localeCompare(b.name, 'zh-Hant-TW-u-co-stroke') || a.politicianId.localeCompare(b.politicianId))
 }
 
+/** lineages_list 一列 → 一覽的一張卡；格式不對丟掉；缺的筆數當 0（舊視圖沒有的欄當空） */
+export function mapLineageListRow(row: RawLineageListRow): LineageListItem | null {
+  const base = mapLineageSummary(row)
+  if (!base) return null
+  const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  return {
+    ...base,
+    policyCount: n(row.policy_count), peopleCount: n(row.people_count), handoverCount: n(row.handover_count), eventCount: n(row.event_count), stanceCount: n(row.stance_count),
+    coverage: (row.coverage ?? []).filter((c) => isLevel(c.level))
+      .map((c) => ({ level: c.level as LineageLevel, region: str(c.region), subRegion: str(c.sub_region), policyCount: n(c.policy_count) })),
+    statusPhase: str(row.status_phase),
+    statusAsOf: typeof row.status_as_of === 'string' && row.status_as_of ? row.status_as_of.slice(0, 10) : null,
+  }
+}
+
+/**
+ * 整列脈絡（lineages_full）→ 一覽的一張卡：預渲染的快照、舊視圖退路用。
+ * 筆數照 lineages_list 的口徑：政見＝合格政見、事件與立場是視圖已濾掉下架的、涉及的人這裡只算得出參與者、政見持有人與交接雙方以外的算不到（差一點可以接受）。
+ */
+export function lineageToListItem(l: Lineage): LineageListItem {
+  const people = new Set<string>([...l.participants.map((p) => p.politicianId), ...(l.stances ?? []).map((s) => s.politicianId)])
+  return {
+    id: l.id, title: l.title, level: l.level, region: l.region, subRegion: l.subRegion, category: l.category, summary: l.summary,
+    policyCount: l.policyIds.length, peopleCount: people.size, handoverCount: l.handovers.length, eventCount: (l.events ?? []).length, stanceCount: (l.stances ?? []).length,
+    coverage: l.coverage ?? [], statusPhase: l.status?.phase || null, statusAsOf: l.status?.asOf ?? null,
+  }
+}
+
 /** 一條脈絡的數字（清單卡片用）：幾條政見、幾個人、幾筆交接、幾條上下級 */
 export function lineageCounts(l: Lineage): { policies: number; people: number; handovers: number; links: number } {
   const people = new Set<string>(l.participants.map((p) => p.politicianId))
@@ -415,7 +448,8 @@ export function lineageCounts(l: Lineage): { policies: number; people: number; h
  * 起因（2026-10-19，協議 1.99.0）：脈絡只收那一屆已投票且當選的政見，已在脈絡裡才變得不合格的政見，讀取端不算（lineages_full.policy_ids
  * 只帶合格的、資料不動），有些脈絡會因此剩 0 條。**資料列不刪**（lineages_full 照常回那一列），舊網址 /lineage/:id 照常能開（不能 404），只是頁面標 noindex、不進網站地圖與一覽。
  */
-export function isLineageListed(l: { policyIds?: readonly string[] | null }): boolean {
+export function isLineageListed(l: { policyIds?: readonly string[] | null; policyCount?: number }): boolean {
+  if (typeof l.policyCount === 'number') return l.policyCount > 0
   return !Array.isArray(l.policyIds) || l.policyIds.length > 0
 }
 
@@ -423,16 +457,22 @@ export function isLineageListed(l: { policyIds?: readonly string[] | null }): bo
  * 方塊格上的脈絡條數：某縣市（'All'＝全台）在某分類（'All'＝全部）下，一覽會列出的脈絡有幾條。
  * 跟一覽同一套規則（空脈絡不算、中央層級在每個縣市都算），所以格子上的數字等於點進去清單的條數；不含關鍵字。
  */
-export function lineageTotal(list: readonly Lineage[], region: string, category: string = 'All'): number {
+export function lineageTotal<T extends Listable & { policyIds?: readonly string[] | null; policyCount?: number }>(list: readonly T[], region: string, category: string = 'All'): number {
   return filterLineages(list.filter(isLineageListed), { region, category }).length
 }
 
-/** 清單篩選：縣市（「All」不篩；中央層級在每個縣市都列）、分類、關鍵字（標題與摘要） */
-export function filterLineages(list: readonly Lineage[], opts: { region?: string; category?: string; q?: string }): Lineage[] {
+/** 脈絡一覽篩選用到的欄位（整列 Lineage 與一覽的 LineageListItem 都有） */
+export type Listable = Pick<Lineage, 'level' | 'region' | 'category' | 'title' | 'summary'> & { coverage?: readonly LineageCoverage[] }
+
+/**
+ * 清單篩選：縣市（「All」不篩）、分類、關鍵字（標題與摘要）。
+ * 縣市：主辦是中央、主辦就在這個縣市、或**涵蓋**這個縣市（合格政見落在這個縣市）的都列（#675 第四期，計畫書 5.4；以前是「中央層級在每個縣市都列」）。
+ */
+export function filterLineages<T extends Listable>(list: readonly T[], opts: { region?: string; category?: string; q?: string }): T[] {
   const q = (opts.q ?? '').trim().toLowerCase()
   const norm = (s: string | null | undefined) => (s ?? '').replace(/臺/g, '台')
   return list.filter((l) =>
-    (!opts.region || opts.region === 'All' || l.level === 'national' || norm(l.region) === norm(opts.region))
+    (!opts.region || opts.region === 'All' || l.level === 'national' || norm(l.region) === norm(opts.region) || (l.coverage ?? []).some((c) => norm(c.region) === norm(opts.region)))
     && (!opts.category || opts.category === 'All' || l.category === opts.category)
     && (!q || l.title.toLowerCase().includes(q) || (l.summary ?? '').toLowerCase().includes(q)))
 }

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { loadEnv } from 'vite'
 import { REGION_DIR, regionFilePath, regionPublicPathOfFile, townshipFilePath } from '../cloudflare/region-path.js'
 import { newestLastmod, sitemapIndexXml, urlsetXml } from '../cloudflare/sitemap-xml.js'
+import { graphUrlsIn, lineageSitemapMatch } from './sitemap-graph-guard.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DIST = path.join(ROOT, 'dist')
@@ -278,7 +279,7 @@ const SITEMAP_GROUPS = [
   ...(sitemapPriority.size > 0 ? [{ file: sitemapMeta.priorityFile, match: (r) => sitemapPriority.has(r) }] : []),
   { file: 'sitemap-politicians.xml', match: (r) => r.startsWith('/politician/') },
   // 政策脈絡頁（/lineage/，#349）跟政見同一份：上線初期是 0 條，自己一份會是空檔
-  { file: 'sitemap-policies.xml', match: (r) => r.startsWith('/policy/') || r.startsWith('/analysis/') || r.startsWith('/lineage/') },
+  { file: 'sitemap-policies.xml', match: (r) => r.startsWith('/policy/') || r.startsWith('/analysis/') || lineageSitemapMatch(r) },
   { file: 'sitemap-elections.xml', match: (r) => r.startsWith('/election/') },
   { file: 'sitemap-pages.xml', match: () => true },
 ]
@@ -299,6 +300,12 @@ for (const [file, list] of grouped) {
   const entries = list.map((r) => ({ loc: `${SITE_URL}${r}`, lastmod: sitemapMeta.lastmod[r] ?? null }))
   groupEntries.set(file, entries)
   fs.writeFileSync(path.join(DIST, file), urlsetXml(entries), 'utf8')
+}
+// 脈絡完整關係圖（/lineage/<id>/graph，#675 第四期）只在瀏覽器端畫、noindex：任何一份網站地圖出現以 /graph 結尾的網址就讓 build 紅
+// （群組比對已排除 /graph，網址會落進 sitemap-pages；這道檢查看的是寫出去的網址，不是群組）
+for (const [file, entries] of groupEntries) {
+  const bad = graphUrlsIn(entries.map((e) => e.loc))
+  if (bad.length > 0) fail(`${file} 收了 ${bad.length} 個關係圖網址（/graph 不收錄、不進網站地圖）：${bad.slice(0, 3).join(', ')}`)
 }
 const indexXml = sitemapIndexXml([...grouped.keys()].map((file) => ({ loc: `${SITE_URL}/${file}`, lastmod: newestLastmod(groupEntries.get(file)) })))
 fs.writeFileSync(path.join(DIST, 'sitemap.xml'), indexXml, 'utf8')
