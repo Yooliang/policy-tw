@@ -8,9 +8,9 @@ import type {
   RegionStats, ElectoralDistrictArea, VerificationSource,
   RawElection, RawPolitician, RawPoliticianElectionData,
   RawPolicy, RawTrackingLog, RawDiscussion, RawDiscussionComment, RawCommentReply,
-  RawElectionTypeRow, Lineage, RawLineage, PolicyOrigin, PoliticianTerm, SourceRef,
+  RawElectionTypeRow, Lineage, RawLineage, LineageListItem, RawLineageListRow, PolicyOrigin, PoliticianTerm, SourceRef,
 } from '../types'
-import { mapLineage, mapLineageSummary } from '../lib/lineage'
+import { mapLineage, mapLineageSummary, mapLineageListRow, lineageToListItem } from '../lib/lineage'
 import { ElectionType } from '../types'
 import { isClientError, isMissingFunction, isMissingRelation, withTimeoutAndRetry } from '../lib/retry'
 import { fetchAllPages, type PageResponse } from '../lib/fetch-all-pages'
@@ -56,6 +56,9 @@ const verificationSources = ref<VerificationSource[]>([])
 /** 政策脈絡（#349，視圖 lineages_full）。脈絡一覽要整份（lineagesComplete）；脈絡頁只放那一條 */
 const lineages = ref<Lineage[]>([])
 const lineagesComplete = ref(false)
+/** 脈絡一覽的卡片（視圖 lineages_list，#675 第四期）：不帶子表，一覽頁自己從這裡讀；預渲染的快照仍帶整列 lineages（lineagesComplete） */
+const lineageList = ref<LineageListItem[]>([])
+const lineageListComplete = ref(false)
 /**
  * 頁面資料快照的建置時間（epoch ms；沒有快照＝null）。預渲染端與客戶端 hydrate 時是同一個值，
  * 要依「今天」切畫面的頁面（選舉一覽的今後／過去）第一次渲染用它，掛載後才換成真的今天，不會 hydration mismatch。
@@ -602,6 +605,36 @@ export function ensureLineages(): Promise<void> {
     })().catch((err) => { lineagesPromise = null; recordFailure('政策脈絡', err, ensureLineages) })
   }
   return lineagesPromise
+}
+
+let lineageListPromise: Promise<void> | null = null
+
+/**
+ * 脈絡一覽的卡片（#675 第四期）：讀 lineages_list（筆數、涵蓋地方、現況階段，不帶子表 JSON）；視圖還不存在就退回舊的 lineages_full、不炸。
+ * 預渲染的 /analysis 已經帶了整列 lineages（lineagesComplete），那時不用呼叫這支。
+ */
+export function ensureLineageList(): Promise<void> {
+  if (lineageListComplete.value || lineagesComplete.value) return Promise.resolve()
+  if (!lineageListPromise) {
+    lineageListPromise = (async () => {
+      try {
+        const rows = await fetchAllRows<RawLineageListRow>('lineages_list', '*', 'id')
+        lineageList.value = rows.map(mapLineageListRow).filter((l): l is LineageListItem => !!l)
+      } catch (err) {
+        if (!isMissingRelation(err)) throw err
+        // 前端比 migration 早上線：lineages_list 還沒有，退回舊視圖；舊視圖也沒有就當還沒有任何脈絡
+        try {
+          const rows = await fetchAllRows<RawLineage>('lineages_full', '*', 'id')
+          lineageList.value = rows.map(mapLineage).filter((l): l is Lineage => !!l).map(lineageToListItem)
+        } catch (err2) {
+          if (!isMissingRelation(err2)) throw err2
+          lineageList.value = []
+        }
+      }
+      lineageListComplete.value = true
+    })().catch((err) => { lineageListPromise = null; recordFailure('政策脈絡', err, ensureLineageList) })
+  }
+  return lineageListPromise
 }
 
 /** 討論：只有討論頁用 */
@@ -1481,6 +1514,9 @@ export function useSupabase() {
     lineages,
     lineagesComplete,
     ensureLineages,
+    lineageList,
+    lineageListComplete,
+    ensureLineageList,
     loadLineageById,
     loadPoliciesByLineage,
     loadPoliciesByPolitician,

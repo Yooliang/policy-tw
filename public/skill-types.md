@@ -12,7 +12,7 @@
 | 型別 | official | media | social | other |
 |---|---|---|---|---|
 | `policy`／`policy_progress`／`policy_elements`／`politician`／`correction`（一般欄位）／`question_answer`／`district_seats`／`lineage`／`lineage_participants`／`lineage_link`／`lineage_handover`（中止以外）／`party_info` | 3 | 3 | 3 | 3 |
-| `lineage_handover` 的 `stop`（中止） | 3 | 3 | 3 | 3 |
+| `lineage_handover` 的 `stop`（停掉） | 3 | 3 | 3 | 3 |
 | `candidacy`／`correction` 改 `candidate_status`（加減參選人） | 3 | 3 | 3 | 3 |
 | `correction` 把「傳聞參選／可能參選」改成登記或不參選（`current_value` 是 `rumored`／`likely`） | 3 | 3 | 3 | 3 |
 | `candidacy` 補**已投票選舉的結果**（帶 `politician_id` 與 `election_result`，不看來源） | 3 | 3 | 3 | 3 |
@@ -403,7 +403,7 @@
 - 一個人在一條脈絡裡，官方紀錄一個角色、本人宣稱一個角色；重交同一人同一種依據＝覆蓋。標錯人：那一項加 `"remove": true` 拿掉。只標網站上已有的人物（`politician_id`）。
 
 <!-- spec contribution: lineage_handover -->
-**`lineage_handover`** — **記交接**：`lineage_id`✅、`from_politician_id`✅、`to_politician_id`✅（前一任、後一任）、`from_election_id`／`to_election_id`（那一任是哪一屆選出的；那一屆不在網站上就不填）、`handover_type`✅（`keep` 接手：原樣延續／`pivot` 轉向：目的不變、做法變了／`shrink` 縮小：規模或預算縮水但沒停／`stop` 中止：停掉／`resume` 重新開始：曾經停掉後又重啟）、`decided_on`（判定依據的日期：預算刪除、議會決議、宣布停工的那天）、`note`✅（20～500 字：依據哪份文件、文件怎麼說）、`source_locator`✅、`source_url`。
+**`lineage_handover`** — **記交接**：`lineage_id`✅、`from_politician_id`✅、`to_politician_id`✅（前一任、後一任）、`from_election_id`／`to_election_id`（那一任是哪一屆選出的；那一屆不在網站上就不填）、`handover_type`✅（`keep` 照舊做：原樣延續／`pivot` 改做法：目的不變、做法變了／`shrink` 縮小：規模或預算縮水但沒停／`stop` 停掉：停掉了／`resume` 重新開始：曾經停掉後又重啟）、`decided_on`（判定依據的日期：預算刪除、議會決議、宣布停工的那天）、`note`✅（20～500 字：依據哪份文件、文件怎麼說）、`source_locator`✅、`source_url`。
 - 依據要是**後任上任後**的施政報告、預算書、議會議事錄或報導，寫出後任實際怎麼處理。**後任的政見清單裡沒有這件事，不等於中止**——那是查不到，用 `no_change`、`outcome=not_found`。
 - **中止要較高票數**：`handover_type=stop` 要有來源明確寫出停止、喊卡、解約或終止，（2026-11-04 起不再要求分數來自不同來源 IP）；其他四種走一般門檻。
 - 同一條脈絡、同一對前後任只有一筆，重交＝覆蓋（每欄記查核履歷）。第 2 節 1a 條「媒體不能當唯一出處」也適用。

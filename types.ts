@@ -252,7 +252,7 @@ export type LineageLevel = 'national' | 'county' | 'township';
 export type HandoverType = 'keep' | 'pivot' | 'shrink' | 'stop' | 'resume';
 export type ParticipantRole = 'proposer' | 'co_proposer' | 'cosigner' | 'advocate';
 export type ParticipantBasis = 'official_record' | 'self_claim';
-export type LineageLinkType = 'top_down' | 'bottom_up';
+export type LineageLinkType = 'top_down' | 'bottom_up' | 'contains';
 
 /** 政策脈絡的摘要（政見頁、清單用） */
 export interface LineageSummary {
@@ -376,6 +376,19 @@ export interface LineageCoverage {
   region: string | null;
   subRegion: string | null;
   policyCount: number;
+}
+
+/** 脈絡一覽的一張卡（視圖 lineages_list 一列；#675 第四期）：摘要＋各種筆數＋涵蓋地方＋現況階段，不帶子表 */
+export interface LineageListItem extends LineageSummary {
+  policyCount: number;
+  peopleCount: number;
+  handoverCount: number;
+  eventCount: number;
+  stanceCount: number;
+  coverage: LineageCoverage[];
+  /** 現況的階段（lib/lineage-page-labels.ts 的 STATUS_PHASE_LABEL 轉成標籤）；還沒有現況是 null */
+  statusPhase: string | null;
+  statusAsOf: string | null;
 }
 
 /** 一條政策脈絡（視圖 lineages_full 一列，#349）：一件事在某一層級、某一地方的來龍去脈 */
@@ -722,6 +735,21 @@ export interface RawLineageSummary {
   sub_region?: string | null;
   category?: string | null;
   summary?: string | null;
+}
+
+/** 視圖 lineages_list 一列（#675 第一期、第四期一覽頁用）：不帶子表 JSON，只有各種筆數、涵蓋地方、現況的階段與截至日 */
+export interface RawLineageListRow extends RawLineageSummary {
+  admin_code?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  policy_count?: number | null;
+  people_count?: number | null;
+  handover_count?: number | null;
+  event_count?: number | null;
+  stance_count?: number | null;
+  coverage?: Array<{ level: string; region?: string | null; sub_region?: string | null; policy_count?: number | null }> | null;
+  status_phase?: string | null;
+  status_as_of?: string | null;
 }
 
 export interface RawLineageSource { url?: string | null; title?: string | null; publisher?: string | null; kind?: string | null; archive_url?: string | null }

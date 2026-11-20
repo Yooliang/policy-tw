@@ -636,7 +636,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         && (p.from_election_id ?? null) === (p.to_election_id ?? null)) {
         push("payload.to_politician_id", "前後兩任是同一人同一屆：交接要是不同人，或同一人連任的不同屆");
       }
-      if (!oneOf(HANDOVER_TYPES, p.handover_type)) push("payload.handover_type", "handover_type 要是 keep（接手）／pivot（轉向）／shrink（縮小）／stop（中止）／resume（重新開始）之一");
+      if (!oneOf(HANDOVER_TYPES, p.handover_type)) push("payload.handover_type", "handover_type 要是 keep（照舊做）／pivot（改做法）／shrink（縮小）／stop（停掉）／resume（重新開始）之一");
       if (p.decided_on !== undefined && p.decided_on !== null && p.decided_on !== "") {
         const today = new Date().toISOString().slice(0, 10);
         if (!isRealDate(p.decided_on) || p.decided_on > today) push("payload.decided_on", "decided_on 要是 YYYY-MM-DD、不能是未來；判定依據的日期（預算刪除、議會決議、宣布停工的日子），不知道就不填");

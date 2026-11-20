@@ -29,6 +29,7 @@ import { MAP_STATS_PATH, handleMapStats } from './map-stats.js'
 import { nonPageResponse } from './render-status.js'
 import { cachedProxy, prerenderCacheEnabled } from './prerender-cache.js'
 import { stripShellHead } from './shell-head.js'
+import { withGraphHeaders } from './graph-headers.js'
 import { createShellLoader, shellVersion, shouldRerender } from './shell-version.js'
 import { legacyElectionKeyRedirect, legacyRegionRedirect, regionUpstreamPath } from './region-path.js'
 
@@ -310,6 +311,8 @@ export default {
       }
     }
     // 其餘（預渲染頁、工具頁、靜態資源）：GET 的 HTML 頁在邊緣快取 15 分鐘（prerender-cache.js，#982），其他原樣代理
-    return cachedProxy(request, ctx, { cache: caches.default, proxy, currentShell: () => shellLoader.peek(), enabled: prerenderCacheEnabled(env) })
+    const proxied = await cachedProxy(request, ctx, { cache: caches.default, proxy, currentShell: () => shellLoader.peek(), enabled: prerenderCacheEnabled(env) })
+    // 脈絡完整關係圖（/lineage/<id>/graph）：不收錄，補 X-Robots-Tag 與指向主頁的 canonical 標頭（graph-headers.js，#675 第四期）
+    return withGraphHeaders(proxied, url.pathname, url.origin)
   },
 }

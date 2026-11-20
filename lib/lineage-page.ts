@@ -48,8 +48,8 @@ export function coveragePlaces(coverage: readonly LineageCoverage[] | undefined)
 // ── 各方立場 ──────────────────────────────────────────────────────────────
 
 const LEVEL_RANK: Readonly<Record<LineageLevel, number>> = { national: 0, county: 1, township: 2 }
-const NATIONAL_TYPES = ['總統副總統', '立法委員']
-const TOWNSHIP_TYPES = ['鄉鎮市長', '鄉鎮市民代表', '直轄市山地原住民區長', '直轄市山地原住民區民代表']
+export const NATIONAL_TYPES = ['總統副總統', '立法委員']
+export const TOWNSHIP_TYPES = ['鄉鎮市長', '鄉鎮市民代表', '直轄市山地原住民區長', '直轄市山地原住民區民代表']
 
 type PersonLike = PersonElections & { region?: string }
 

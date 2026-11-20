@@ -17,6 +17,7 @@ import {
 } from '../../composables/useSupabase'
 import type { Lineage, Politician, RawLineage, RawPolitician } from '../../types'
 import { mapLineage } from '../lineage'
+import { lineageEdgePaths } from './lineage-routes'
 import { isMissingRelation } from '../retry'
 import { withRetry } from './retry'
 import { analysisListedPolicyIds } from './page-data'
@@ -318,7 +319,7 @@ export function collectRoutePaths(full: DataSnapshot): string[] {
     ...politicians.map((pl) => `/politician/${pl.id}`),
     ...full.policies.map((p) => `/policy/${p.id}`),
     // 政策脈絡頁（#349）：跟政見頁一樣由 Worker 邊緣渲染，這裡只進網站地圖
-    ...(full.lineages ?? []).map((l) => `/lineage/${l.id}`),
+    ...lineageEdgePaths(full.lineages ?? []),
   ]
   const prerenderEdge = process.env.SSG_EDGE_PAGES === 'prerender'
   const analysisIds = analysisListedPolicyIds(full.policies)

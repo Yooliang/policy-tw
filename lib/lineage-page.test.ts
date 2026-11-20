@@ -3,7 +3,8 @@
  *   1. 白名單：lib/lineage-page-labels.ts 每個字串都是短標籤；LineagePage.vue 模板沒有任何靜態中文，用字都從白名單取
  *   2. 立場表：每人最新一筆、曾變、「提出政見」推導列不計入筆數且被正式表態取代、排序
  *   3. 下架不顯示、有爭議帶標示；舊視圖缺欄不炸；空脈絡不報錯
- *   4. 承諾不進政見清單；主頁沒有指向 /graph 的連結、每個站內連結都解析得到已註冊的路由
+ *   4. 承諾不進政見清單；主頁有指向 /graph 的真連結（第四期起，rel=nofollow）、每個站內連結都解析得到已註冊的路由
+ *   6. 完整關係圖頁（#675 第四期）與它的元件模板也只用白名單裡的字（不另開第二份白名單）
  *   5. 邊緣渲染與預渲染吃同一份資料（同一支 mapLineage、同一支 lineagePeople）
  */
 import { assert, assertEquals } from 'jsr:@std/assert@1'
@@ -33,37 +34,54 @@ Deno.test('白名單：現況階段標籤跟後端同一份', () => {
   assertEquals({ ...STATUS_PHASE_LABEL }, { ...shared.STATUS_PHASE_LABEL })
 })
 
-async function templateOf(): Promise<string> {
-  const page = await read('../pages/LineagePage.vue')
+async function templateOf(file = '../pages/LineagePage.vue'): Promise<string> {
+  const page = await read(file)
   const start = page.indexOf('<template>')
   assert(start > 0, '找不到模板')
   return page.slice(start)
 }
 
-Deno.test('模板：沒有任何靜態中文或英文字（多放一句說明就紅），用字全從白名單取', async () => {
-  const tpl = await templateOf()
-  const stripped = tpl.replace(/<!--[\s\S]*?-->/g, '').replace(/\{\{[\s\S]*?\}\}/g, '')
-  // 標籤之間的文字節點
-  const texts = [...stripped.matchAll(/>([^<>]+)</g)].map((m) => m[1].trim()).filter(Boolean)
-  for (const t of texts) assert(!/[一-鿿A-Za-z]/.test(t), `模板有靜態文字：「${t}」，請放進 lib/lineage-page-labels.ts 再用 T.xxx`)
-  // 屬性裡的靜態文字（aria-label、title、alt、placeholder）
-  const attrs = [...stripped.matchAll(/\s(?:aria-label|title|alt|placeholder)="([^"]*)"/g)].map((m) => m[1])
-  for (const a of attrs) assert(!/[一-鿿A-Za-z]/.test(a), `模板屬性有靜態文字：「${a}」`)
+/** 白名單管的所有模板：主頁、關係圖頁與它的元件、出處連結（同一份 lib/lineage-page-labels.ts，不另開第二份） */
+const TEMPLATE_FILES = [
+  '../pages/LineagePage.vue', '../pages/LineageGraphPage.vue', '../components/LineageGraphSvg.vue', '../components/LineageGraphList.vue',
+  '../components/LineageGraphDrawer.vue', '../components/LineageSourceLink.vue',
+]
+
+Deno.test('模板：沒有任何靜態中文或英文字（多放一句說明就紅），用字全從白名單取（主頁與關係圖頁一起管）', async () => {
+  for (const file of TEMPLATE_FILES) {
+    const tpl = await templateOf(file)
+    const stripped = tpl.replace(/<!--[\s\S]*?-->/g, '').replace(/\{\{[\s\S]*?\}\}/g, '')
+    // 標籤之間的文字節點
+    const texts = [...stripped.matchAll(/>([^<>]+)</g)].map((m) => m[1].trim()).filter(Boolean)
+    for (const t of texts) assert(!/[一-鿿A-Za-z]/.test(t), `${file} 模板有靜態文字：「${t}」，請放進 lib/lineage-page-labels.ts 再用 T.xxx`)
+    // 屬性裡的靜態文字（aria-label、title、alt、placeholder）
+    const attrs = [...stripped.matchAll(/\s(?:aria-label|title|alt|placeholder)="([^"]*)"/g)].map((m) => m[1])
+    for (const a of attrs) assert(!/[一-鿿A-Za-z]/.test(a), `${file} 模板屬性有靜態文字：「${a}」`)
+  }
 })
 
-Deno.test('白名單裡的每個標籤都有被模板用到（不留沒人用的字）', async () => {
-  const page = await read('../pages/LineagePage.vue')
-  const source = await read('../components/LineageSourceLink.vue')
+Deno.test('白名單裡的每個標籤都有被用到（模板，或關係圖排版純函式 lib/lineage-graph*.ts；不留沒人用的字）', async () => {
+  const sources = await Promise.all([...TEMPLATE_FILES, '../lib/lineage-graph.ts', '../lib/lineage-graph-list.ts'].map(read))
   for (const key of Object.keys(PAGE_LABELS)) {
-    assert(new RegExp(`\\bT\\.${key}\\b`).test(page) || new RegExp(`\\bT\\.${key}\\b`).test(source), `標籤 ${key} 沒有任何地方用到`)
+    const re = new RegExp(`\\bT\\.${key}\\b`)
+    assert(sources.some((s) => re.test(s)), `標籤 ${key} 沒有任何地方用到`)
   }
 })
 
 // ── 4. 連結 ───────────────────────────────────────────────────────────────
 
-Deno.test('主頁沒有任何指向 /graph 的連結（關係圖路由第四期才有）', async () => {
-  const page = await read('../pages/LineagePage.vue')
-  assert(!/graph/i.test(page.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '')), '第三期主頁不得有 graph 連結')
+Deno.test('主頁有「看完整關係圖 →」與立場「曾變」兩處指向 /graph 的真連結（RouterLink、rel=nofollow）；路由已註冊（第四期同一個 PR）', async () => {
+  const tpl = await templateOf()
+  const links = [...tpl.matchAll(/<RouterLink[^>]*lineageGraphPath\(lineage\.id\)[^>]*>/g)].map((m) => m[0])
+  assertEquals(links.length, 2, '主頁指向關係圖的連結：大事記底下的按鈕、立場表的「曾變」')
+  for (const l of links) assert(/rel="nofollow"/.test(l), `連結要帶 rel=nofollow：${l}`)
+  assert(tpl.includes('T.viewGraph') && tpl.includes('T.changedStance'))
+  assertEquals(PAGE_LABELS.viewGraph, '看完整關係圖 →')
+  const router = await read('../router/index.ts')
+  assert(router.includes("path: '/lineage/:lineageId/graph'") && router.includes("name: 'lineage-graph'"), '路由要與連結同一個 PR 上線')
+  // 大事記是空的：只留按鈕，不印標題與「尚無」
+  assert(/<h2 v-if="hasChronicle"/.test(tpl), '大事記為空時不印標題')
+  assert(!tpl.includes('T.chronicleEmpty'), '大事記為空時不印「尚無」，只留按鈕')
 })
 
 Deno.test('主頁的站內連結逐一解析：每一個都對到已註冊的路由，而且不是找不到頁', async () => {
@@ -74,7 +92,7 @@ Deno.test('主頁的站內連結逐一解析：每一個都對到已註冊的路
   const targets = [...tpl.matchAll(/:?to="([^"]+)"/g)].map((m) => m[1])
   assert(targets.length >= 5, '應該抓得到站內連結')
   for (const raw of targets) {
-    const path = raw.replace(/lineagePath\([^)]*\)/g, '`/lineage/x`').replace(/\$\{[^}]*\}/g, 'x').replace(/^[`'"]|[`'"]$/g, '')
+    const path = raw.replace(/lineageGraphPath\([^)]*\)/g, '`/lineage/x/graph`').replace(/lineagePath\([^)]*\)/g, '`/lineage/x`').replace(/\$\{[^}]*\}/g, 'x').replace(/^[`'"]|[`'"]$/g, '')
     assert(path.startsWith('/'), `連結不是站內路徑：${raw}`)
     assert(patterns.some((re) => re.test(path)), `連結 ${raw}（${path}）對不到任何已註冊的路由`)
   }

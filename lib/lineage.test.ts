@@ -19,7 +19,10 @@ Deno.test('脈絡標籤：層級、角色、依據、交接型態、關聯型態
   assertEquals({ ...ROLE_LABEL }, { ...shared.PARTICIPANT_ROLE_LABEL })
   assertEquals({ ...BASIS_LABEL }, { ...shared.PARTICIPANT_BASIS_LABEL })
   assertEquals({ ...HANDOVER_LABEL }, { ...shared.HANDOVER_TYPE_LABEL })
-  assertEquals({ ...LINK_LABEL }, { ...shared.LINK_TYPE_LABEL })
+  // 前端多一個 contains（大計畫包含項目，#675 第二期起；後端的型別清單到第五期才改），其餘兩個逐字相同
+  const { contains, ...legacyLinks } = LINK_LABEL
+  assertEquals(contains, '包含')
+  assertEquals({ ...legacyLinks }, { ...shared.LINK_TYPE_LABEL })
   assertEquals({ ...ORIGIN_LABEL }, { ...shared.POLICY_ORIGIN_LABEL })
   assertEquals(BASIS_LABEL.self_claim, '本人宣稱')
 })
@@ -135,13 +138,17 @@ Deno.test('收錄：脈絡頁由正見.tw 的 Worker 邊緣渲染、進網站地
   const firebase = JSON.parse(await Deno.readTextFile(new URL('../firebase.json', import.meta.url)))
   assert(firebase.hosting.rewrites.some((r: { source?: string; destination: string }) => r.source === '/lineage/**' && r.destination === '/app.html'), 'web.app 的 /lineage/** 要回殼檔（200＋noindex），不能 404')
   const server = await Deno.readTextFile(new URL('./ssg/server-data.ts', import.meta.url))
-  assert(server.includes('`/lineage/${l.id}`'), '脈絡頁要進網站地圖（邊緣渲染清單）')
+  assert(server.includes('lineageEdgePaths(full.lineages'), '脈絡頁要進網站地圖（邊緣渲染清單）')
+  const lineageRoutes = await Deno.readTextFile(new URL('./ssg/lineage-routes.ts', import.meta.url))
+  assert(lineageRoutes.includes('`/lineage/${l.id}`'), '脈絡主頁的網址')
   const loaders = await Deno.readTextFile(new URL('./ssr/loaders.ts', import.meta.url))
   assert(/case 'lineage': return await loadLineagePage/.test(loaders), 'Worker 的載入器要認得脈絡頁')
   const router = await Deno.readTextFile(new URL('../router/index.ts', import.meta.url))
   assert(router.includes("path: '/lineage/:lineageId'") && router.includes("name: 'lineage'"))
   const postbuild = await Deno.readTextFile(new URL('../scripts/postbuild-ssg.mjs', import.meta.url))
-  assert(postbuild.includes("r.startsWith('/lineage/')"), '網站地圖要把 /lineage/ 分進一份（不然掉進 sitemap-pages）')
+  assert(postbuild.includes('lineageSitemapMatch(r)'), '網站地圖要把 /lineage/ 分進一份（不然掉進 sitemap-pages）')
+  const guard = await Deno.readTextFile(new URL('../scripts/sitemap-graph-guard.mjs', import.meta.url))
+  assert(guard.includes("startsWith('/lineage/')"), '脈絡主頁分進 sitemap-policies（關係圖除外，見 lineage-graph-routes.test.ts）')
 })
 
 // ── 交接區與「還沒有角色」什麼時候出現（#670）──────────────────────────────
@@ -233,7 +240,7 @@ Deno.test('別處不預設脈絡有交接：政見頁的脈絡卡不寫交接說
   const card = await read('../components/PolicyLineageCard.vue')
   assert(!card.includes('前後任怎麼交接') && !card.includes('都在脈絡頁'), '脈絡卡不放解釋文字（也不能預設有前後任交接）')
   const list = await read('../pages/PolicyAnalysis.vue')
-  assert(/<span v-if="lineageCounts\(l\)\.handovers > 0">交接 \{\{ lineageCounts\(l\)\.handovers \}\} 筆<\/span>/.test(list), '脈絡一覽的「交接 N 筆」0 筆時不顯示')
+  assert(/<span v-if="l\.handoverCount > 0">交接 \{\{ l\.handoverCount \}\} 筆<\/span>/.test(list), '脈絡一覽的「交接 N 筆」0 筆時不顯示')
 })
 
 Deno.test('方塊格的脈絡條數：中央層級每個縣市都算、空脈絡不算、台／臺同縣市；分類在地區範圍內算', () => {
