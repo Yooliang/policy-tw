@@ -135,7 +135,7 @@ Deno.test("B7 切句：括號裡的標點不切；半形括號同；沒命中的
   assertEquals(await f("甲(乙。丙)。我用 curl 查。"), "甲(乙。丙)。");
   assertEquals(await f("甲（我用 curl 查。核過）。乙。"), "甲。乙。", "括號內有查證句號：整段括號拿掉、不切");
   assertEquals(await f("甲。\n我用 curl 查\n乙。"), "甲。\n乙。", "換行切句");
-  assertEquals(await f("甲；任務完成；乙！"), "甲；乙！");
+  assertEquals(await f("甲；本任務完成；乙！"), "甲；乙！");
   assertEquals(await f("甲。留空；"), "甲。", "結尾不留；");
   assertEquals(await f("沒有任何標記。  前後有空白  "), "沒有任何標記。  前後有空白  ", "沒命中不動（連空白都不動）");
   assertEquals(await f("依來源核對。"), null, "來源＋核 → 查證句");
@@ -198,7 +198,32 @@ Deno.test("B11 AI／代理／系統字眼：提到就整句刪；職稱「代理
     ]
   ) assertEquals(await f(keep), keep, keep);
   // 英文要整字：獨立的 API／AI 要刪
-  assertEquals(await f("甲。查詢API回傳空值。"), "甲。");
+  assertEquals(await f("甲。查詢API查無紀錄。"), "甲。");
   assertEquals(await f("甲。使用 AI 協助。"), "甲。");
+  await db.close();
+});
+
+Deno.test("B12 負向案例：任務小組／核心主張＋來源不砍；第 N 頁只拿掉子句；API 當來源只拿掉詞，帶失敗結果詞才整句刪", async () => {
+  const db = new PGlite();
+  await db.exec(MIG_SQL.replace(/^WITH cand AS[\s\S]*$/m, ""));
+  const f = async (s: string) => (await db.query<{ v: string | null }>(`SELECT bio_strip_process_sentences($1) AS v`, [s])).rows[0].v;
+  for (
+    const keep of [
+      "曾任特定公園任務小組召集人。", "曾任任務型國民大會代表。",
+      "參選核心主張：擴大托育，財政收入來源單一化需改善。", "核心政見包含社福預算，資金來源多元。",
+    ]
+  ) assertEquals(await f(keep), keep, keep);
+  assertEquals(await f("甲。本任務由代理領取。"), "甲。");
+  assertEquals(await f("甲。這是任務單內容。"), "甲。");
+  assertEquals(await f("甲。出處待查證。"), "甲。");
+  // 第 N 頁：只去掉子句，保留後面的描述
+  assertEquals(await f("2026年村里長登記冊第273頁，115年8月31日再次以中國國民黨登記參選同里。"), "115年8月31日再次以中國國民黨登記參選同里。");
+  assertEquals(await f("依彙總表第83頁載明，他於115/09/03登記參選。"), "他於115/09/03登記參選。");
+  assertEquals(await f("甲候選人，見第3頁。"), "甲候選人。");
+  // API／JSON／PDF 當來源引用：沒有失敗結果詞就只去掉那個詞
+  assertEquals(await f("中選會候選人查詢 API 載其2022年當選。"), "中選會候選人載其2022年當選。");
+  assertEquals(await f("依 JSON 資料，他出生於1970年。"), "依 資料，他出生於1970年。");
+  assertEquals(await f("甲。中選會候選人查詢 API 查無其紀錄。"), "甲。");
+  assertEquals(await f("甲。中選會 API 回傳空白。"), "甲。");
   await db.close();
 });

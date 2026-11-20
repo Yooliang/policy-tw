@@ -5,6 +5,7 @@
 -- 以後不再進（交件守門另案處理）；這支 migration 處理既有的約 242 筆：
 --   * 以 。；！？與換行切句（全形／半形括號內的標點不切，括號段落算所在那一句的一部分）；
 --   * 括號段落裡有查證標記的，只拿掉那一段括號、句子留著（「…完成候選人登記（…第 81 頁，我用 pdftotext 核過）。」→「…完成候選人登記。」）；
+--   * 「第 N 頁」只拿掉那個子句（到最近的逗號／頓號）、API／JSON／PDF 只拿掉那個詞，除非同句有失敗結果詞（查無／回 N 筆／留空／空白／不填）才整句刪；
 --   * 拿掉括號後的句子仍符合 bio_is_process_sentence() 就整句刪：①標記字（我用／pdftotext／bbox／API／核對／查無／留空／任務／交件…，以及提到 AI／代理／本系統／本站／自動整理／語言模型／Claude／GPT／Jev 的句子；API、JSON、PDF、AI 要整字，「代理人」「代理鄉長」等職稱不算，「系統」「自動」「模型」單獨出現不算）
 --     ②「出處」「來源」只在同句還有「查」「核」「附」才算（避免誤砍「依中選會公告…」這類描述）；
 --   * 刪完去頭尾空白、連續標點壓成一個；整段切到只剩空白或標點 → 寫 NULL（讓 profile_gap 臂之後派代理重寫）；
@@ -16,12 +17,13 @@
 -- 引用到的既有物件（2026-11-20 唯讀查正式庫確認存在）：politicians（id、bio）、edit_history（table_name、record_id、field、old_value、new_value、contribution_id、agent_name、applied_at、reverted_at、reverted_by）。
 -- 預覽：scripts/bio-cleanup-preview.sql（唯讀，同一套切句邏輯，改前先看會改哪些）。守門：_shared/bio-cleanup.test.ts（PGlite 跑本檔；含預覽與本檔邏輯一致的比對）。
 
--- 一句話是不是查證過程
+-- 一句話是不是查證過程（整句刪的標記；第 N 頁與 API／JSON／PDF 的來源引用不在這裡，另由 bio_strip_process_clauses 只拿掉子句或詞）
 CREATE OR REPLACE FUNCTION bio_is_process_sentence(s TEXT) RETURNS BOOLEAN
 LANGUAGE sql IMMUTABLE AS $$
   SELECT COALESCE(
-    s ~ '我用|pdftotext|bbox|PyMuPDF|curl|(?<![A-Za-z])API(?![A-Za-z])|(?<![A-Za-z])JSON(?![A-Za-z])|(?<![A-Za-z])PDF(?![A-Za-z])|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|第 ?[0-9]+ ?頁|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|任務|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)'
-    OR (s ~ '出處|來源' AND s ~ '[查核附]'),
+    s ~ '我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)'
+    OR (s ~ '出處|來源' AND s ~ '查證|查核|核對|核過|附')
+    OR (s ~ '(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])' AND s ~ '查無|回 ?[0-9]+ ?筆|留空|空白|不填'),
     false)
 $$;
 
@@ -29,7 +31,14 @@ $$;
 -- 「…完成候選人登記（中選會《彙總表》第 81 頁，我用 pdftotext 核過）。」→「…完成候選人登記。」
 CREATE OR REPLACE FUNCTION bio_strip_process_parens(s TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT regexp_replace(s, '（(?=[^）\n]*(?:我用|pdftotext|bbox|PyMuPDF|curl|(?<![A-Za-z])API(?![A-Za-z])|(?<![A-Za-z])JSON(?![A-Za-z])|(?<![A-Za-z])PDF(?![A-Za-z])|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|第 ?[0-9]+ ?頁|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|任務|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)))[^）\n]*）|\((?=[^)\n]*(?:我用|pdftotext|bbox|PyMuPDF|curl|(?<![A-Za-z])API(?![A-Za-z])|(?<![A-Za-z])JSON(?![A-Za-z])|(?<![A-Za-z])PDF(?![A-Za-z])|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|第 ?[0-9]+ ?頁|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|任務|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)))[^)\n]*\)|（(?=[^）\n]*(?:出處|來源))(?=[^）\n]*[查核附])[^）\n]*）|\((?=[^)\n]*(?:出處|來源))(?=[^)\n]*[查核附])[^)\n]*\)', '', 'g')
+  SELECT regexp_replace(s, '（(?=[^）\n]*(?:我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)|(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])|第 ?[0-9]+ ?頁))[^）\n]*）|\((?=[^)\n]*(?:我用|pdftotext|bbox|PyMuPDF|curl|核過|核對|查詢結果|回 ?0 ?筆|回 ?[0-9]+ ?筆|搜尋了|搜了|查無|未載|留空|不填|尚未發布|尚未上架|故.{0,6}(?:不填|留空)|本任務|任務單|任務卡|任務型別|任務 ?[Ii][Dd]|交件|驗證者|politician_id|(?<![A-Za-z])[Aa]gent|本系統|本站|系統自動|自動產生|自動抓取|自動整理|語言模型|大模型|LLM|Claude|GPT|Gemini|Jev|(?<![A-Za-z])AI ?(?:代理|整理|產生|生成|撰寫|彙整|抓取|查證|查核|判定|摘要|協助)|(?:由|經|交由|透過|使用|利用|藉由) ?(?<![A-Za-z])AI(?![A-Za-z])|人工智慧(?:整理|產生|生成|撰寫|彙整)|(?:外部|貢獻|協議|自動)代理|代理(?:整理|查證|查核|抓取|彙整|產生|撰寫|搜尋|判定|填寫|回報|驗證|編輯|蒐集|檢索|提交|處理|交件)|(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z])|第 ?[0-9]+ ?頁))[^)\n]*\)|（(?=[^）\n]*(?:出處|來源))(?=[^）\n]*(?:查證|查核|核對|核過|附))[^）\n]*）|\((?=[^)\n]*(?:出處|來源))(?=[^)\n]*(?:查證|查核|核對|核過|附))[^)\n]*\)', '', 'g')
+$$;
+
+-- 來源引用只拿掉那一小段、保留描述：含「第 N 頁」的子句（到最近的逗號／頓號為止）、「查詢 API」「JSON」「PDF」這個詞
+-- 「2026年村里長登記冊第273頁，115年8月31日再次…登記參選同里。」→「115年8月31日再次…登記參選同里。」
+CREATE OR REPLACE FUNCTION bio_strip_process_clauses(s TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT regexp_replace(regexp_replace(s, '[^，、；。！？\n]*第 ?[0-9]+ ?頁[^，、；。！？\n]*[，、]?', '', 'g'), '(?:查詢 ?)?(?<![A-Za-z])(?:API|JSON|PDF)(?![A-Za-z]) ?', '', 'g')
 $$;
 
 -- 切掉查證句；沒有任何句子或括號命中就原樣回傳；切到沒內容回 NULL
@@ -44,18 +53,28 @@ BEGIN
          string_agg(CASE WHEN u.proc THEN NULL ELSE u.s2 END, '' ORDER BY u.ord)
     INTO v_hit, v_kept
     FROM (
-      SELECT t.ord, t.m[1] AS s, bio_strip_process_parens(t.m[1]) AS s2, bio_is_process_sentence(bio_strip_process_parens(t.m[1])) AS proc
-        FROM regexp_matches(p_bio,
-          '((?:(?:[^（(。；！？\n]|（[^）\n]*）?|\([^)\n]*\)?)+[。；！？]*\n*|[。；！？\n]+))', 'g') WITH ORDINALITY AS t(m, ord)
+      SELECT w.ord, w.s, bio_is_process_sentence(w.s0) AS proc, bio_strip_process_clauses(w.s0) AS s2
+        FROM (
+          SELECT t.ord, t.m[1] AS s, bio_strip_process_parens(t.m[1]) AS s0
+            FROM regexp_matches(p_bio,
+              '((?:(?:[^（(。；！？\n]|（[^）\n]*）?|\([^)\n]*\)?)+[。；！？]*\n*|[。；！？\n]+))', 'g') WITH ORDINALITY AS t(m, ord)
+        ) w
     ) u;
   IF NOT v_hit THEN RETURN p_bio; END IF;
   v_kept := regexp_replace(COALESCE(v_kept, ''), '([。；！？])[。；！？]+', '\1', 'g');
-  v_kept := btrim(v_kept, E' \t\r\n　');
+  v_kept := regexp_replace(v_kept, '[，、]+([。；！？])', '\1', 'g');
+  v_kept := btrim(v_kept, E' 	
+　');
   v_kept := regexp_replace(v_kept, '；$', '。');
   IF v_kept ~ '^[。；！？，、]*$' THEN RETURN NULL; END IF;
   RETURN v_kept;
 END
 $$;
+
+REVOKE EXECUTE ON FUNCTION bio_is_process_sentence(TEXT), bio_strip_process_parens(TEXT), bio_strip_process_clauses(TEXT), bio_strip_process_sentences(TEXT)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION bio_is_process_sentence(TEXT), bio_strip_process_parens(TEXT), bio_strip_process_clauses(TEXT), bio_strip_process_sentences(TEXT)
+  TO service_role;
 
 -- 還原：只還原「現值仍等於 new_value」的列，並在 edit_history 標已還原；回傳還原筆數
 CREATE OR REPLACE FUNCTION bio_cleanup_revert() RETURNS INTEGER
