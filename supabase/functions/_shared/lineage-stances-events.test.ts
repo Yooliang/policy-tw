@@ -35,7 +35,7 @@ const code = (sql: string) => sql.split("\n").filter((l) => !l.trim().startsWith
 // ============================================================
 // A. 文字層
 // ============================================================
-Deno.test("A1 migration 時間戳排在 main 最後一支之後；只加不刪：沒有 DROP TABLE／DROP COLUMN／DELETE／TRUNCATE，UPDATE 只有停用規則那一句", async () => {
+Deno.test("A1 migration 時間戳排在 main 最後一支之後；只加不刪：沒有 DROP TABLE／DROP COLUMN／DELETE／TRUNCATE，沒有任何 UPDATE", async () => {
   const names = await migrationNames();
   assertEquals(names[names.length - 1] >= MIG_NAME, true);
   assert(MIG_NAME > "20261120100000_contributions_payload_target_idx.sql");
@@ -45,10 +45,12 @@ Deno.test("A1 migration 時間戳排在 main 最後一支之後；只加不刪�
   assertFalse(/\bTRUNCATE\b/i.test(c), "不清表");
   assertFalse(/^DELETE\s+FROM\s/im.test(c), "不刪既有資料（頂層沒有 DELETE；函式本體搬人時的刪除不算）");
   const updates = [...c.matchAll(/^\s*UPDATE\s+([a-z_]+)\b/gim)].map((m) => m[1]);
-  // 函式本體裡的 UPDATE（merge_politician 搬人、觸發器蓋時間）不算 migration 對既有資料的改動；頂層只准 activity_rules 那一句
+  // 函式本體裡的 UPDATE（merge_politician 搬人、觸發器蓋時間）不算 migration 對既有資料的改動；頂層不准有 UPDATE
   const topLevel = c.split("\n").filter((l) => /^UPDATE\s/i.test(l)).map((l) => l.replace(/^UPDATE\s+(\S+).*/i, "$1"));
-  assertEquals(topLevel, ["activity_rules"]);
-  assert(updates.length >= 1);
+  assertEquals(topLevel, [], "頂層不准任何 UPDATE（包括 activity_rules）");
+  assertFalse(/activity_rules/i.test(c), "不碰派工規則表（決定 3：既有三支臂開著不動）");
+  assertFalse(/enabled\s*=\s*false/i.test(c), "不把任何規則設成停用");
+  void updates;
   assertFalse(/INSERT\s+INTO\s+lineage_(stances|events)\b/i.test(c), "不灌任何立場或事件資料");
 });
 
@@ -167,13 +169,13 @@ Deno.test("A8 空殼人物＝20261007020000 的現行定義只多 #675 的兩條
   assertEquals(now, prev);
 });
 
-Deno.test("A9 lineage_links 舊檢查函式沒動（回滾用）；停用的是 lineage_links 規則、而且只有這一條", () => {
+Deno.test("A9 lineage_links 舊檢查函式沒動（回滾用）；三支既有派工臂規則跑完 migration 仍 enabled=true", async () => {
   assertFalse(MIG.includes("CREATE OR REPLACE FUNCTION lineage_links_check_levels()"), "舊函式一字不動");
   assertStringIncludes(PREV_LINEAGE, "CREATE OR REPLACE FUNCTION lineage_links_check_levels()");
-  const ups = code(MIG).match(/^UPDATE activity_rules[\s\S]*?;/gm) ?? [];
-  assertEquals(ups.length, 1);
-  assertStringIncludes(ups[0]!, "WHERE activity = 'lineage_links'");
-  assertStringIncludes(ups[0]!, "enabled = false");
+  const db = await buildDb();
+  const r = await rows<{ activity: string; enabled: boolean }>(db, `SELECT activity, enabled FROM activity_rules WHERE activity LIKE 'lineage\_%' ORDER BY 1`);
+  assertEquals(r.map((x) => x.activity), ["lineage_candidates", "lineage_links", "lineage_roles", "lineage_status"]);
+  assert(r.every((x) => x.enabled), "既有規則一條都不能被停用");
 });
 
 // ============================================================
@@ -220,7 +222,7 @@ async function buildDb(mig: string = MIG): Promise<PGlite> {
     CREATE FUNCTION politician_pair_key(a uuid, b uuid) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT LEAST(a, b)::text || ':' || GREATEST(a, b)::text $$;
     CREATE FUNCTION politician_name_is_placeholder(n text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT n LIKE '測試%' $$;
     CREATE TABLE activity_rules (activity text PRIMARY KEY, window_kind text DEFAULT 'always', enabled boolean DEFAULT true, note text);
-    INSERT INTO activity_rules (activity) VALUES ('lineage_links'), ('lineage_status');
+    INSERT INTO activity_rules (activity) VALUES ('lineage_candidates'), ('lineage_links'), ('lineage_roles'), ('lineage_status');
     ${fnText(PREV_ELECTED, "policy_is_elected_term")}
     ${fnText(PREV_OFFICES, "office_term_start")}
     ${fnText(PREV_OFFICES, "office_term_end")}

@@ -16,7 +16,6 @@
 --   6. 其餘子表（參與者、交接、關聯、立場、事件）掛 lineage_touch_parents_on_content：只有內容真的變了才蓋父脈絡的 updated_at（網站地圖 lastmod 讀它）。
 --   7. 函式 lineage_norm、lineage_policy_place、lineage_coverage、lineage_term_df；視圖 lineages_full 尾端加欄、lineages_list、lineage_terms。
 --   8. merge_politician() 與空殼人物那一段：同名人物合併與空殼清理要把立場與事件推動者也算進去（計畫 2.9）。
---   9. 停用派工規則 lineage_links（舊說明句「上級立法或補助」與新意思「大計畫包含項目」衝突；計畫 2.3）。
 --
 -- 回滾（本檔沒有改動既有資料列；全是加法，倒回就是反著 DROP）：
 --   DROP VIEW lineage_terms, lineages_list;  CREATE OR REPLACE lineages_full 用 20261105200000 的那一版（DROP 新尾欄需重建視圖）；
@@ -25,7 +24,7 @@
 --   DROP TRIGGER trg_lineage_participants_touch_parent ON lineage_participants（handovers、lineage_links 同名規則 trg_*_touch_parent）；DROP FUNCTION lineage_touch_parents_on_content()；
 --   ALTER TABLE lineage_settings DROP COLUMN 各新欄；link_type CHECK 與 source_refs CHECK 改回前一版；
 --   DROP TRIGGER trg_lineage_links_contains ON lineage_links 並把 trg_lineage_links_levels 建回來（函式 lineage_links_check_levels 沒刪）；
---   merge_politician／placeholder_politicians 用 20261007020000 的定義蓋回去；UPDATE activity_rules SET enabled = true WHERE activity = 'lineage_links'。
+--   merge_politician／placeholder_politicians 用 20261007020000 的定義蓋回去。
 --   （只要還沒有任何立場或事件資料，這些都是無損的。）
 
 -- ------------------------------------------------------------
@@ -932,14 +931,5 @@ $$;
 COMMENT ON FUNCTION contribution_auto_tasks_placeholder_politicians IS
   '姓名看起來是測試資料的人物（politician_name_is_placeholder），新任務型別 placeholder_politician，查無此人就交 removal（2026-10-06）｜'
   '同日加「空殼」那一種（target.kind＝orphan）：參選紀錄被 reassign_candidacy 改掛走、現在名下什麼都沒有的人，走同一條移除流程，不直接刪｜2026-11-20：空殼的判斷把立場與事件推動者也算進「名下還有東西」（#675）';
-
--- ------------------------------------------------------------
--- 9. 停用派工規則 lineage_links：舊說明句「上級立法或補助」與 #675 的新意思（大計畫包含項目）衝突；第五期重寫臂後再開。
---    在隊的舊任務由 seed 收回；已落庫與在途交件不受影響。副作用：activity_health 的 activity_all_rules_disabled 會多一列 lineage_links（預期）。
--- ------------------------------------------------------------
-UPDATE activity_rules
-   SET enabled = false,
-       note = COALESCE(note || '｜', '') || '2026-11-20（#675 第一期）停用：舊說明句與「大計畫包含項目」新意思衝突，第五期重寫後再開'
- WHERE activity = 'lineage_links' AND enabled;
 
 NOTIFY pgrst, 'reload schema';
