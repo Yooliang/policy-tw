@@ -1,11 +1,14 @@
 /**
  * 政策脈絡「現況」（policy-ops#201 第 2 期，協議 1.118.0；migration 20261105200000_lineage_status.sql）。
  *
- * 維護者 2026-11-05：程式可以先寫，但派工開關維持關閉，選前不佔用代理額度。所以這支測試最重要的是 B：
- * 規則 activity_rules.lineage_status 上線時 enabled = false，停用中總表不回這支臂的任何列、seed 不寫 task_dispatches。
+ * 維護者 2026-11-05：程式可以先寫，但派工開關維持關閉，選前不佔用代理額度（#872 上線時 enabled=false）。
+ * **2026-11-20 更正（policy-tw#675 第二期 2b，migration 20261120170000_lineage_arms_start_date.sql）**：規則改成啟用，
+ * 輸出由 lineage_settings.dispatch_start_on（起跑日，預設 2026-11-29）決定——起跑日前臂函式回空。所以 B 改守「起跑日前輸出必須為空」：
+ * 規則 activity_rules.lineage_status 是啟用的，但起跑日前總表不回這支臂的任何列、seed 不寫 task_dispatches、gap_events 沒有紀錄；跨過起跑日同一批資料立刻出現。
+ * （三支臂共用起跑日的遍歷守門與反向守門在 lineage-arms-start-date.test.ts。）
  *
- *   A. 文字層：總表／臂名清單／lineages_full／票數預算候選／兩個 CHECK 都是「前一版加一處」；規則停用；SQL 的階段與字數 = TS 常數
- *   B. 關閉開關（PGlite，總表＋規則＋seed 跑真的）：停用 → 沒有列、沒有派工列、沒有 gap_events；啟用 → 有；再停用 → 收回；還原驗證
+ *   A. 文字層：總表／臂名清單／lineages_full／票數預算候選／兩個 CHECK 都是「前一版加一處」；#872 上線當時規則停用、現行規則啟用且臂函式讀起跑日；SQL 的階段與字數 = TS 常數
+ *   B. 起跑日（PGlite，總表＋規則＋seed 跑真的，臂本體用 2b 的真函式）：起跑日前 → 沒有列、沒有派工列、沒有 gap_events；跨過 → 有；還原驗證
  *   C. 臂本體（PGlite，真的 SQL 灌小資料表）：沒有現況、過期天數（階段分兩組）、結案階段不過期、合格政見、在途交件、not_found 冷卻
  *   D. 交件驗證（含撤回／取代）、落庫（新增／覆蓋／較舊的進歷史／撤回／取代／履歷）、前置檢查、唯一出處守門
  *   E. 清點：型別／任務型別／做法／協議文件／標籤，以及 /next 既有任務的輸出不變
@@ -29,6 +32,10 @@ const MIG_NAME = "20261105200000_lineage_status.sql";
 const MIG = await readMig(MIG_NAME);
 // 現行的貢獻型別 CHECK 由最後一支改它的 migration 決定（二期 20261120160000 加了 lineage_stance／lineage_event）
 const TYPES_MIG = await readMig("20261120160000_lineage_stance_event_types.sql");
+// 二期 2b：現行的現況臂函式與規則（起跑日機制）
+const ARMS_MIG = await readMig("20261120170000_lineage_arms_start_date.sql");
+const ONE_MIG = await readMig("20261120120000_lineage_stances_events.sql");
+const SETTINGS_ALTERS = [...ONE_MIG.matchAll(/^ALTER TABLE lineage_settings ADD COLUMN IF NOT EXISTS [^\n]*;$/gm)].map((m) => m[0]).join("\n");
 const u = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 const LID = u(1);
 
@@ -69,12 +76,18 @@ Deno.test("A3 兩個 CHECK：型別清單＝TS 的 CONTRIBUTION_TYPES；source_r
   assertEquals(refs, ["policies", "tracking_logs", "policy_elements", "lineage_participants", "handovers", "lineage_links", "politician_careers", "parties", "politician_elections", "regional_stats", "lineage_statuses"]);
 });
 
-Deno.test("A4 規則：剛好一條、window_kind=always、enabled=false；self-check 擋啟用", () => {
+Deno.test("A4 規則：#872 上線時剛好一條、always、enabled=false；現行（2b）改成 enabled=true，臂函式文字讀起跑日（activity_today() >= dispatch_start_on）", () => {
+  // 歷史：#872 上線當時的樣子
   const ins = ruleInsertSql();
   assertStringIncludes(ins, "'lineage_status', 'always', false,");
   assertEquals(MIG.split("INSERT INTO activity_rules").length - 1, 1, "只種這一條規則");
-  assertStringIncludes(MIG, "IF EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = 'lineage_status' AND r.enabled) THEN");
   assertStringIncludes(MIG, "('lineage_status', 6, '政策脈絡')");
+  // 現行：二期那支 migration 把它改成啟用，輸出由起跑日決定
+  assertStringIncludes(ARMS_MIG, "UPDATE activity_rules SET enabled = true,");
+  assertStringIncludes(ARMS_MIG, " WHERE activity = 'lineage_status';");
+  const fn = fnText(ARMS_MIG, "contribution_auto_tasks_lineage_status");
+  assertStringIncludes(fn, "activity_today() >= st.dispatch_start_on");
+  assertStringIncludes(fn, "st.enabled");
 });
 
 Deno.test("A5 SQL 的階段、字數＝TS 常數", () => {
@@ -94,12 +107,13 @@ Deno.test("A6 這支 migration 不改既有資料：沒有 UPDATE／DELETE 既�
 });
 
 // ============================================================
-// B. 關閉開關
+// B. 起跑日
 // ============================================================
 function ruleInsertSql(): string {
   const a = MIG.indexOf("INSERT INTO activity_rules");
   return MIG.slice(a, MIG.indexOf("WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = 'lineage_status');", a) + "WHERE NOT EXISTS (SELECT 1 FROM activity_rules r WHERE r.activity = 'lineage_status');".length);
 }
+const startRuleSql = (): string => ARMS_MIG.slice(ARMS_MIG.indexOf("UPDATE activity_rules SET enabled = true,"), ARMS_MIG.indexOf("INSERT INTO activity_rules (activity, window_kind, enabled, params, note)\nSELECT 'lineage_stances'"));
 const P1 = await readMig(P1_MIG);
 const OWNER_LINE = "  UNION ALL SELECT 'owner_mismatch' AS arm, t.* FROM contribution_auto_tasks_owner_mismatch() t\n";
 const ARM_LINE = "  UNION ALL SELECT 'lineage_status' AS arm, t.* FROM contribution_auto_tasks_lineage_status() t\n";
@@ -109,48 +123,71 @@ const stubRow: GapRow = {
 };
 const dupRow: GapRow = { task_id: "auto:dup:control", task_type: "duplicate_politician", target: { name: "對照" }, what_we_need: "對照組", hint_sources: [], reward: 1, region: "台北市" };
 
-/** P1 的環境（總表、規則、seed、gap_events 跑真的），總表換成「P1 總表＋這支 migration 加的那一行」，規則用 migration 裡真的那句 INSERT */
-async function offSwitchDb(ruleSql: string): Promise<PGlite> {
-  const db = await buildArmsDb({ extraBranches: ["lineage_status"], branches: { lineage_status: [stubRow], dup: [dupRow] } });
+const lineageSchema = (): string => `
+  CREATE TABLE lineages (id uuid PRIMARY KEY, title text, summary text, level text, region text, sub_region text, category text, created_at timestamptz DEFAULT now());
+  CREATE TABLE policies (id uuid PRIMARY KEY, lineage_id uuid, removed_at timestamptz);
+  CREATE TABLE _ineligible (id uuid PRIMARY KEY);
+  CREATE TABLE task_checks (id bigserial PRIMARY KEY, task_id text, checked_at timestamptz DEFAULT now(), outcome text);
+  CREATE FUNCTION policy_is_elected_term(p uuid, d date DEFAULT NULL) RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT NOT EXISTS (SELECT 1 FROM _ineligible WHERE id = p) $$;
+  ${tableSql("lineage_settings")}
+  INSERT INTO lineage_settings (id) VALUES (1);
+  ${SETTINGS_ALTERS}
+  ${tableSql("lineage_statuses")}
+`;
+
+/** P1 的環境（總表、規則、seed、gap_events 跑真的），總表換成「P1 總表＋這支 migration 加的那一行」，臂本體用 2b 的真函式，規則＝#872 上線的那句 INSERT 再套 2b 的啟用 UPDATE */
+async function startDateDb(ruleSql: string, armSql: string = fnText(ARMS_MIG, "contribution_auto_tasks_lineage_status"), startRule = startRuleSql()): Promise<PGlite> {
+  const db = await buildArmsDb({ extraBranches: ["lineage_status"], branches: { dup: [dupRow] } });
   await db.exec(mutate(fnText(P1, "contribution_auto_tasks_arms"), OWNER_LINE, OWNER_LINE + ARM_LINE));
+  await db.exec(`ALTER TABLE contributions ADD COLUMN payload jsonb`);
+  await db.exec(lineageSchema());
   await db.exec(ruleSql);
+  await db.exec(startRule);
+  await db.exec(armSql);
+  // 一條合格、沒有現況的脈絡：起跑日之後這支臂就該派它
+  await db.exec(`INSERT INTO lineages (id, title, summary, level, region, sub_region, category) VALUES ('${LID}', '脈絡一', '摘要', 'county', '高雄市', NULL, '交通建設')`);
+  await db.exec(`INSERT INTO policies VALUES ('${u(1001)}', '${LID}', NULL)`);
   return db;
 }
 const rows = async <T = Record<string, unknown>>(db: PGlite, sql: string): Promise<T[]> => (await db.query<T>(sql)).rows;
 const armTaskIds = async (db: PGlite) => (await rows<{ task_id: string }>(db, `SELECT task_id FROM contribution_auto_tasks_arms() WHERE arm = 'lineage_status' ORDER BY 1`)).map((r) => r.task_id);
 
-/** 停用中的全部斷言；回傳是否全過（還原驗證用） */
-async function offSwitchHolds(ruleSql: string): Promise<boolean> {
-  const db = await offSwitchDb(ruleSql);
+/** 起跑日前的全部斷言；回傳是否全過（還原驗證用） */
+async function beforeStartHolds(armSql?: string, startRule?: string): Promise<boolean> {
+  const db = await startDateDb(ruleInsertSql(), armSql, startRule);
   const rule = (await rows<{ enabled: boolean; window_kind: string }>(db, `SELECT enabled, window_kind FROM activity_rules WHERE activity = 'lineage_status'`));
-  if (rule.length !== 1 || rule[0].enabled !== false || rule[0].window_kind !== "always") return false;
+  if (rule.length !== 1 || rule[0].enabled !== true || rule[0].window_kind !== "always") return false; // 規則是啟用的
+  await db.exec(`SET app.activity_today = '2026-11-28'`); // 起跑日（2026-11-29）前一天
   if ((await armTaskIds(db)).length !== 0) return false; // 總表不回這支臂
   await db.exec(`SELECT seed_auto_task_queue()`);
-  const dispatched = await rows(db, `SELECT task_id FROM task_dispatches WHERE task_type = 'lineage_status_stale' OR task_id = '${STATUS_ID}'`);
-  const events = await rows(db, `SELECT 1 FROM gap_events WHERE task_id = '${STATUS_ID}'`);
+  const dispatched = await rows(db, `SELECT task_id FROM task_dispatches WHERE task_type = 'lineage_status_stale'`);
+  const events = await rows(db, `SELECT 1 FROM gap_events WHERE task_type = 'lineage_status_stale'`);
   const control = await rows(db, `SELECT 1 FROM task_dispatches WHERE task_id = 'auto:dup:control'`);
   return dispatched.length === 0 && events.length === 0 && control.length === 1; // 對照組照常派，證明不是整個 seed 壞了
 }
 
-Deno.test("B1 規則停用：總表不回、seed 不寫 task_dispatches、gap_events 沒有紀錄，其他臂照常", async () => {
-  assert(await offSwitchHolds(ruleInsertSql()));
+Deno.test("B1 起跑日前（用 SET app.activity_today 注入假時鐘）：總表不回、seed 不寫 task_dispatches、gap_events 沒有紀錄，其他臂照常", async () => {
+  assert(await beforeStartHolds());
 });
 
-Deno.test("B2 對照：同一份資料把規則改成 enabled=true → 總表回、seed 寫派工列（帶規則）；再停用 → seed 收回", async () => {
-  const db = await offSwitchDb(ruleInsertSql());
-  await db.exec(`UPDATE activity_rules SET enabled = true WHERE activity = 'lineage_status'`);
-  assertEquals(await armTaskIds(db), [STATUS_ID], "啟用後臂會派（證明 B1 的空不是因為臂本身壞了）");
+Deno.test("B2 對照：同一批資料跨過起跑日（2026-11-29）→ 總表回、seed 寫派工列（帶規則）；起跑日改晚 → seed 下一輪收回", async () => {
+  const db = await startDateDb(ruleInsertSql());
+  await db.exec(`SET app.activity_today = '2026-11-28'`);
+  assertEquals(await armTaskIds(db), []);
+  await db.exec(`SET app.activity_today = '2026-11-29'`);
+  assertEquals(await armTaskIds(db), [STATUS_ID], "起跑日當天就開（證明 B1 的空不是因為臂本身壞了）");
   await db.exec(`SELECT seed_auto_task_queue()`);
   const d = await rows<{ task_type: string; basis: string; arm: string }>(db, `SELECT task_type, opened_by->>'basis' AS basis, opened_by->>'arm' AS arm FROM task_dispatches WHERE task_id = '${STATUS_ID}'`);
   assertEquals(d, [{ task_type: "lineage_status_stale", basis: "rule", arm: "lineage_status" }]);
-  await db.exec(`UPDATE activity_rules SET enabled = false WHERE activity = 'lineage_status'`);
+  await db.exec(`UPDATE lineage_settings SET dispatch_start_on = '2027-01-01' WHERE id = 1`);
   await db.exec(`SELECT seed_auto_task_queue()`);
-  assertEquals((await rows(db, `SELECT 1 FROM task_dispatches WHERE task_id = '${STATUS_ID}'`)).length, 0, "關掉之後下一輪 seed 收回");
+  assertEquals((await rows(db, `SELECT 1 FROM task_dispatches WHERE task_id = '${STATUS_ID}'`)).length, 0, "起跑日改晚之後下一輪 seed 收回");
 });
 
-Deno.test("B3 還原驗證：規則種成 enabled=true 的壞版本 → B1 的守門會紅", async () => {
-  const bad = mutate(ruleInsertSql(), "'lineage_status', 'always', false,", "'lineage_status', 'always', true,");
-  assertFalse(await offSwitchHolds(bad), "壞版本（上線即啟用）必須被 offSwitchHolds 抓到");
+Deno.test("B3 還原驗證：把臂函式裡的起跑日條件拿掉 → B1 的守門會紅；規則回到停用的舊版 → 『規則是啟用的』那條也會紅", async () => {
+  const bad = mutate(fnText(ARMS_MIG, "contribution_auto_tasks_lineage_status"), " AND activity_today() >= st.dispatch_start_on", "");
+  assertFalse(await beforeStartHolds(bad), "壞版本（沒有起跑日條件）必須被守門抓到");
+  assertFalse(await beforeStartHolds(undefined, "SELECT 1;"), "規則沒被改成啟用也要被抓到");
 });
 
 Deno.test("B4 還原驗證：規則漏種 → 總表 RAISE（新臂漏登記不是無聲消失）", async () => {
@@ -175,7 +212,8 @@ const tableSql = (name: string) => {
 async function armDb(): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`
-    CREATE TABLE lineages (id uuid PRIMARY KEY, title text, summary text, level text, region text, sub_region text, category text);
+    CREATE TABLE lineages (id uuid PRIMARY KEY, title text, summary text, level text, region text, sub_region text, category text, created_at timestamptz DEFAULT now());
+    CREATE TABLE task_dispatches (task_id text PRIMARY KEY, task_type text);
     CREATE TABLE contributions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contribution_type text, status text, payload jsonb);
     CREATE TABLE policies (id uuid PRIMARY KEY, lineage_id uuid, removed_at timestamptz);
     CREATE TABLE _ineligible (id uuid PRIMARY KEY);
@@ -184,9 +222,12 @@ async function armDb(): Promise<PGlite> {
     CREATE FUNCTION policy_is_elected_term(p uuid, d date DEFAULT NULL) RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT NOT EXISTS (SELECT 1 FROM _ineligible WHERE id = p) $$;
     ${tableSql("lineage_settings")}
     INSERT INTO lineage_settings (id) VALUES (1);
+    ${SETTINGS_ALTERS}
+    UPDATE lineage_settings SET dispatch_start_on = '2026-01-01', open_cap_per_arm = NULL;
     ${tableSql("lineage_statuses")}
   `);
-  await db.exec(fnText(MIG, "contribution_auto_tasks_lineage_status"));
+  // 臂本體＝二期（起跑日）的現行定義；C 守的條件（過期天數、階段、在途交件、冷卻）與 #872 一字不差，起跑日在這裡設成過去
+  await db.exec(fnText(ARMS_MIG, "contribution_auto_tasks_lineage_status"));
   return db;
 }
 const day = (back: number) => new Date(Date.UTC(2026, 10, 5) - back * 86400000).toISOString().slice(0, 10);

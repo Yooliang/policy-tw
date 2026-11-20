@@ -96,6 +96,9 @@ const SAMPLES: Array<[string, string, string]> = [
   ["handover_missing", `auto:handover_missing:${LIN}:1a2b3c4d`, `auto:handover_missing:${LIN}`],
   ["lineage_roles", `auto:lineage_roles_missing:${LIN}`, `auto:lineage_roles_missing:${LIN}`],
   ["lineage_status", `auto:lineage_status_stale:${LIN}:2026-11-01`, `auto:lineage_status_stale:${LIN}`],
+  // 脈絡二期 2b：兩支缺口臂的末段是 8 碼指紋（task_rekey_arms 登記），工作卡鍵去掉指紋
+  ["lineage_stances", `auto:lineage_stance_missing:${LIN}:0123abcd`, `auto:lineage_stance_missing:${LIN}`],
+  ["lineage_events", `auto:lineage_event_missing:${LIN}:89abcdef`, `auto:lineage_event_missing:${LIN}`],
   ["dup", `auto:duplicate_politician:${P1}|${P2}`, `auto:duplicate_politician:${P1}|${P2}`],
   ["placeholder_politicians", `auto:placeholder_politician:${P1}`, `auto:placeholder_politician:${P1}`],
   ["raw:candidacy_source_missing", "auto:candidacy_source_missing:9164", "auto:candidacy_source_missing:9164"],
