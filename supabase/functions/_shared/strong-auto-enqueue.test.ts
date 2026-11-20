@@ -77,8 +77,15 @@ Deno.test("B2 busy／returned／retry_cap 跳過；舊的失敗可再排一次�
   const olderRet = await task(db, 7); await job(db, olderRet, "returned", 200, 400); await job(db, olderRet, "failed", null, 10); // 最舊是 returned、最新是 failed：未被 returned 擋，但累計 2 筆被 retry_cap 擋
   await db.query(`INSERT INTO contribution_tasks (task_type, target) VALUES ('adjudicate', '{"contribution_id":"x"}')`); // 沒標 strong
   await db.query(`INSERT INTO contribution_tasks (task_type, target, status) VALUES ('adjudicate', '{"contribution_id":"y","requires_tier":"strong"}', 'closed')`);
+  // 原貢獻已結案（applied／verified）不排；disputed 照排
+  const closedT = await task(db, 8);
+  const verifiedT = await task(db, 9);
+  await db.query(`INSERT INTO contributions (id, status) VALUES ($1, 'applied'), ($2, 'disputed'), ($3, 'verified')`, [CID(8), CID(3), CID(9)]);
   assertEquals(await run(db), 2);
-  assertEquals((await queuedIds(db)).sort(), [oldP, retry1].sort());
+  const got = await queuedIds(db);
+  assert(!got.includes(closedT) && !got.includes(verifiedT), "原貢獻 applied／verified 的任務不排");
+  assert(got.includes(oldP), "原貢獻 disputed 照排");
+  assertEquals(got.sort(), [oldP, retry1].sort());
   assert(!(await queuedIds(db)).includes(olderRet));
   assertEquals(await run(db), 0);
 });
@@ -117,7 +124,7 @@ Deno.test("B4 設定：auto_enqueue_limit 生效；auto_enqueue_enabled=false �
 
 Deno.test("C migration 結構：排程每 10 分鐘、帶逾時、只給 service_role、SECURITY DEFINER", async () => {
   const sql = await readMig(MIG);
-  assertStringIncludes(sql, "cron.schedule('strong-adjudications-auto-enqueue-10min', '6-59/10 * * * *'");
+  assertStringIncludes(sql, "cron.schedule('strong-adjudications-auto-enqueue-10min', '5-59/10 * * * *'");
   assertStringIncludes(sql, "SET statement_timeout TO ''60s''; SELECT strong_adjudications_auto_enqueue();");
   assertStringIncludes(sql, "SECURITY DEFINER SET search_path = public, pg_temp");
   assertStringIncludes(sql, "REVOKE ALL ON FUNCTION strong_adjudications_auto_enqueue(INTEGER) FROM PUBLIC, anon, authenticated");

@@ -23,13 +23,17 @@
 --   不同處    ⓪多一條「已結案」（見上）；①沒有 requeueStale：running 超過 30 分鐘退回 queued、finalizing 超過 10 分鐘收回 previewed，仍由執行者每次 claim 與
 --               主控台 list／enqueue 時處理；退回之前這些列算 busy，只會少排、不會多排。
 --             ②沒有 strong_lane_list 的 LIMIT 200 上限（直接查表）；每輪上限改由 p_limit 控制。
+--   重跑：previewed／finalize_failed 等未定案的舊作業，滿 30 分鐘後（不再算 busy）會被自動再排一筆，每件最多累計 2 筆——舊的未定案資料會被重跑一次。
 --   與手動排入的後續流程不變：執行者 claim → complete 後同一支函式立刻帶鑰匙 POST /report 定案（#978）。
 --
 -- 開關與上限（沿用單列設定表 strong_lane_settings，id=1）：
 --   enabled（既有，總開關）＆ auto_enqueue_enabled（新，預設 true）都為 true 才會排；auto_enqueue_limit（新，預設 20，1～200）＝每輪上限。
 --   存量 117 件在每 10 分鐘 20 件下約 1 小時排完；執行者並行上限不變。
--- 排程：'6-59/10 * * * *'（每小時 :06、:16…，同分鐘目前只有 2 支；:08 是 strong-lane-sweep，剛開出的任務下一輪就被排入）。
---   指令帶 SET statement_timeout TO '60s'。
+-- 排程：'5-59/10 * * * *'（每小時 :05、:15…）。2026-11-20 唯讀查 cron.job：沒有任何一個分鐘在每個 10 分鐘循環都 ≤2 支，
+--   :05 是最空的（同分鐘現有 3 支：policy-jp-apply-verified、system-one-followups-10min、web-request-gap-sync-10min），加上這支＝4，
+--   剛好是 20261119160000 訂的每分鐘上限（UTC 18–21 點另有 cec-roster-mirror-5min 的 */5 也會落在 :05，那 4 小時是 5 支，但它很輕）。
+--   不選 :06（已有 results-batch-10min、policy-jp-system-one-precheck-10min、system-one-backfill-15min 等 4 支）、:00（seed-auto-task-queue-10min 很重）。
+--   :08 是 strong-lane-sweep：剛開出的任務最晚下一個 :05 被排入。指令帶 SET statement_timeout TO '60s'。
 -- 回滾：SELECT cron.unschedule('strong-adjudications-auto-enqueue-10min');
 --       或 UPDATE strong_lane_settings SET auto_enqueue_enabled = false WHERE id = 1;（排程照跑、函式回 0）。
 --       已排入的 queued 作業不會被收回（要收回請在主控台對該筆 return_to_human，或把 status 改 failed）。
@@ -84,6 +88,6 @@ DO $$
 BEGIN
   IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
     EXECUTE $q$SELECT cron.unschedule('strong-adjudications-auto-enqueue-10min') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'strong-adjudications-auto-enqueue-10min')$q$;
-    EXECUTE $q$SELECT cron.schedule('strong-adjudications-auto-enqueue-10min', '6-59/10 * * * *', 'SET statement_timeout TO ''60s''; SELECT strong_adjudications_auto_enqueue();')$q$;
+    EXECUTE $q$SELECT cron.schedule('strong-adjudications-auto-enqueue-10min', '5-59/10 * * * *', 'SET statement_timeout TO ''60s''; SELECT strong_adjudications_auto_enqueue();')$q$;
   END IF;
 END $$;
