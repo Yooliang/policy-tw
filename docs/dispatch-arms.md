@@ -1,5 +1,6 @@
 # 派工臂總覽（單一佇列怎麼排、每條臂從哪來、怎麼查）
 
+> 2026-11-21：第 2.2 節（優先秒數）已改寫為「層級 × 種類帶狀優先」現值，插隊四值為 200 天；其餘章節與第 3 節數字仍是 11-07 快照，文中 30／50／100 天、前段 +3 天等舊值以第 2.2 節為準。
 > 快照日期：2026-11-07（台北約 08:20）。程式與 migration 是真相（見 `CLAUDE.md`「文件地圖」的優先序）；
 > 本文的規則段落以 2026-11-07 的 `main`（PR #877 之後）與正式庫函式定義（`pg_get_functiondef`）對過；第 3 節的數字是當下快照，會過期。
 > 數值（秒數、天數、開關）以 migration 與 `queue_settings` 現值為準，文中舊快照可能過期。
@@ -57,7 +58,7 @@
 - **排序**（`20261104120000`，維護者 2026-11-04 裁定）：
 
   ```
-  queue_at = 基準 B − verify_priority_seconds(14 天) − boost_seconds + 步長 × 這張票被領走的次數
+  queue_at = 基準 B − verify_priority_seconds(2026-11-21 起 0；原 14 天，改由「母任務層級＋19 天」折進基準 B，見 2.2) − boost_seconds + 步長 × 這張票被領走的次數
   ```
 
   - 步長：一般 7 天（`verify_redispatch_seconds`）；`no_change` 的票 14 天。
@@ -68,21 +69,43 @@
 - **插隊**：`/boost`、`cand_no_front_pull`（第 2.4 節）會加 `boost_seconds`；驗證列的插隊不因派出歸零（`20261104120000` 註解；與任務列相反）。
 - 2026-11-07 起：`no_change` 的 `not_found` 不再進驗證（第 2.5 節），所以票只剩其他型別（`confirmed` 的 `no_change` 2026-11-09 起也不進驗證）。
 
-### 2.2 優先秒數（自動缺口的 `priority_seconds`）
+### 2.2 優先秒數（自動缺口與手動任務的 `priority_seconds`）
 
-seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`：取 `activity_rules` 裡 `priority:<臂>` 與 `priority:*` 規則中**秒數最小**的一條；規則沒填 `priority_seconds` 就用 `task_priority_tiers`。沒有任何規則相符＝預設層（中段 0）。現行（2026-11-07）：
+**2026-11-21 起（`20261121193000_priority_bands.sql`，維護者「這樣改吧」）改成「層級 × 種類帶狀優先」**，取代前面的規則秒數（前段 +3 天、後段 −30 天、公報前壓 0）與 11-14 的選舉類別提前天數。排序鍵 `task_queue_key` 一字不動，改的只有 `priority_seconds` 怎麼算：
 
-| 層／規則 | 秒數 | 適用 |
+```
+priority_days = 屆基準 ＋ 層級 ＋ 種類 ＋ 流量提層（＋ 需求疊加，旗標開著時）
+```
+
+- **屆基準**＝年份後兩碼 × 100 天（`election_year_priority_seconds`）：2022＝2200、2024＝2400、2026＝2600、2028＝2800。沒有選舉 id 的件當 2026。
+- **層級**（每級 20 天，`task_level_days`）：縣市長／直轄市長／總統副總統 170、直轄市山地原住民區長 150、縣市議員／直轄市議員／立法委員 130、鄉鎮市長 110、區民代表 90、鄉鎮市民代表 70、村里長 50、無層級 30。
+- **種類**（層內 0～19，`task_kind_days`）：
+
+| 種類 | 天 | 任務型別 |
 |---|---|---|
-| 前段（tier）規則 37 | +259200（+3 天） | `priority:*`，投票日前 180 天到投票日（2026 選舉前的任務先做） |
-| 中段（預設） | 0 | 沒有規則相符 |
-| 後段（tier）規則 38 | −2592000（−30 天） | `priority:*`，投票日後 181 天起（2022、2024 歷史補資料） |
-| 規則 39 | 0 | `priority:raw:policy_missing`，非縣市長的職位、公報上架日之前；因取最小值，**把 policy_missing 壓在 0、不吃前段 +3 天** |
-| 規則 40 | +259200 | `priority:placeholder_politicians`（移除測試人物） |
-| 規則 44 | +259200 | `priority:manual_visitor`（網站請求／公民提問的手動任務） |
-| 規則 50 | −2592000 | `priority:regional_stats_missing`（地方統計，2026-10-26 維護者降後段） |
+| 查證票 | 19 | `verify:*`、`adjudicate` |
+| 抄公報／當屆政見 | 15 | `policy_missing`、`policy_election_missing` |
+| 任內政見 | 13 | `term_policy_missing` |
+| 脈絡 | 12 | `lineage_*` |
+| 照片 | 10 | `avatar_choice`、缺官方照片（`target.missing` 含 `avatar_url`）的 `profile_gap` |
+| 人物基本資料 | 8 | 其餘 `profile_gap`、`profile_detail_gap`、`party_info_missing`、`candidacy_source_missing`、`candidate_status_stale` |
+| 整理類 | 5 | `duplicate_policy`、`duplicate_politician`、`policy_election_mismatch`、`source_mismatch`、`policy_source_missing`、`policy_validity`、`issue_too_broad`、`legacy_audit` |
+| 進度 | 3 | `progress_stale`、`deadline_due` |
+| 其他 | 0 | `news_sweep`、`regional_stat_missing`、`roster_check`、`other`、沒列到的 |
 
-另有「流量提層」：人物頁／政見頁近 7 天訪客 ≥ 5 的缺口，優先秒數至少 `traffic_boost_settings.boost_seconds`（+3 天），細節見 `CLAUDE.md`「頁面流量提層」。
+例：2026 縣市長抄公報 ＝ 2600＋170＋15 ＝ 2785 天；2026 村里長照片 ＝ 2660；2024 縣市長抄公報 ＝ 2585（輸給 2026 村里長照片，屆與屆之間差 200 天、層級＋種類最多 189 天，不會混排）。
+
+**層級怎麼對上**（`task_level_text`）：`lineage_*` 用 `target.level`（county／national→縣市長層、township→鄉鎮市長層、village→村里長層）；其他有層級的型別用 `target.election_type`，沒有就用 `target.politician_id`＋`election_id` 查 `politician_elections`，再沒有取這個人最近一屆的職位；「其他」那組（`news_sweep`、`regional_stat_missing`、`other`、沒列到的）無層級 30（`roster_check` 照職位）。驗證票用母任務的層級（`verify_ticket_band_seconds`）。
+
+**插隊**（網站請求、`/boost`、維護者建的任務、請求併入既有缺口）一律 +200 天（`queue_settings` 的 `boost_seconds`、`manual_front_seconds`、`visitor_front_seconds`、`visitor_front_pre_election_seconds` 都是 17,280,000），**且屆基準改用最新一屆**（`latest_election_base_seconds()`＝`elections` 裡 `election_date` 最大的例行選舉，`election_reason='regular'`），不看人物所屬屆：2022 縣市長被按 ＝ 2600＋170＋15 ＋ 200 ＝ 2985 天。「插隊中」＝列上 `boost_seconds > 0`（新缺口＝手動臂且 `manual_front_seconds > 0`）；插隊派出就歸零，屆基準下一輪 seed 換回人物自己那一屆。網站只有政見／人物／進度／驗證／稽核按鈕，沒有獨立照片按鈕，網站請求的 `profile_gap` 算人物基本資料（8 天）。
+
+**流量提層改比例制**：加成 ＝ 近 7 天不重複訪客數 × `traffic_boost_settings.per_user_seconds`（86400），無門檻、無上限（`min_users` 改 1，`boost_seconds` 欄位 deprecated）；缺口對到人物頁與他名下政見頁時取人數最大的那頁；`no_yield_days`／`pause_days`／`stale_after_hours` 機制保留，細節見 `CLAUDE.md`「頁面流量提層」。
+
+**驗證票**：`queue_at ＝ 基準 − verify_priority_seconds − boost_seconds ＋ 步長 × 領走次數` 的公式不動，但 `verify_priority_seconds` 設 0，「母任務層級 ＋ 19 天」折進入列時凍結的基準（`verify_ticket_base`）；夾限（`verify_ticket_base_floor_seconds`）先做、再減層級帶狀。
+
+**規則表**：`activity_rules` #37（前段 +3 天）、#38（後段 −30 天）、#39（公報前降級）已停用（`enabled=false`，不刪）；#40、#44、#50 的 `priority_seconds` 不再被讀（seed 與手動入列都不呼叫 `activity_priority_seconds`）。`election_type_priority_days` 欄位與 `election_type_priority_seconds()` 留著不讀。程式見 `task_band_seconds`、`task_year_priority_seconds`、`seed_auto_task_queue()`、`contribution_tasks_insert_dispatch()`；守門 `priority-bands.test.ts`。
+
+> 前述 2026-11-07 的規則表（前段 37、後段 38、規則 39、40、44、50 的秒數）與 11-14 的職位提前天數是歷史，保留在 `docs/decisions/2026-11-14-派工優先依選舉類別提前天數.md`。
 
 ### 2.3 自動缺口 `auto:<臂>:...`
 
@@ -115,11 +138,11 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 | source | 是什麼 | open／closed | 出生時的插隊 | 備註 |
 |---|---|---|---|---|
-| `web_request` | 網站請求：訪客在網頁按「請 AI 幫忙查」等；visitor 臂 | 1,076／4,571 | `visitor_front_pre_election_seconds`（選前 100 天）／`visitor_front_seconds`（選後 50 天），由 `visitor_front_seconds_for(target)` 判斷 | 村里長／鄉鎮市民代表 × 缺政見，在選舉公報上架前**停放**（`web_request_parked`，`20261028130000`）：不出現在臂輸出、不被拉回；`elections.bulletin_published_on` 一填自動放出；**同一人已有開著的 `policy_missing`／`term_policy_missing` 缺口的缺政見請求併入缺口**（`web_request_coverage`，`20261111010000`）：請求不單獨派（臂不輸出、仍 open），缺口拿一次 `visitor_front_seconds` 插隊（標記 `opened_by.web_request_boost_ids`，冷卻中的缺口不插），請求只在「缺口已不覆蓋它、而且人物現在有承諾」時由 10 分鐘對帳關閉（`closed_reason='gap_filled:…'`，不單憑 gap_events 的 filled），`window` 關閉則請求回到可派並接回派出歷史（`web_request_dispatch_memory`） |
+| `web_request` | 網站請求：訪客在網頁按「請 AI 幫忙查」等；visitor 臂 | 1,076／4,571 | `visitor_front_pre_election_seconds`／`visitor_front_seconds`（2026-11-21 起都是 200 天），由 `visitor_front_seconds_for(target)` 判斷 | 村里長／鄉鎮市民代表 × 缺政見，在選舉公報上架前**停放**（`web_request_parked`，`20261028130000`）：不出現在臂輸出、不被拉回；`elections.bulletin_published_on` 一填自動放出；**同一人已有開著的 `policy_missing`／`term_policy_missing` 缺口的缺政見請求併入缺口**（`web_request_coverage`，`20261111010000`）：請求不單獨派（臂不輸出、仍 open），缺口拿一次 `visitor_front_seconds` 插隊（標記 `opened_by.web_request_boost_ids`，冷卻中的缺口不插），請求只在「缺口已不覆蓋它、而且人物現在有承諾」時由 10 分鐘對帳關閉（`closed_reason='gap_filled:…'`，不單憑 gap_events 的 filled），`window` 關閉則請求回到可派並接回派出歷史（`web_request_dispatch_memory`） |
 | `question`（`task_type='question'`） | 公民提問：訪客的提問；`manual_task_is_visitor` 視同 visitor | 現無列 | 同 visitor | 一題最多收 3 份答案（`question_answer_cap()`）；同鍵時支持度高的先 |
 | `suggested` | AI 提議：代理交 `task_suggestion` 或系統（`system-one?action=followups`，每小時）從投票備註產生的跟進；多數 `task_type='other'` | 2,273／533 | 0 | 佇列中最大的手動來源；出生來源屬推測（見下） |
-| `manual` | 維護者建的 | 168／462 | `manual_front_seconds`（30 天） | 例：`news_sweep`、`candidate_status_stale` |
-| `auto_dispute` | 裁決：貢獻被爭議後自動開（`adjudicate`、`avatar_choice` 二選一） | 7／233 | `manual_front_seconds`（30 天） | `created_by='auto-overvoted'` 的不插隊（0） | **`target.requires_tier='strong'`（強模型待辦，`20261109230000`）的不進一般派工**：`contribution_queue_tasks` 排除，只能持 `STRONG_LANE_KEY` 用 `/next?lane=strong` 認領，見 `docs/decisions/2026-11-09-難題只給持鑰匙的強模型認領單一裁決即定案.md` |
+| `manual` | 維護者建的 | 168／462 | `manual_front_seconds`（200 天，2026-11-21 起） | 例：`news_sweep`、`candidate_status_stale` |
+| `auto_dispute` | 裁決：貢獻被爭議後自動開（`adjudicate`、`avatar_choice` 二選一） | 7／233 | `manual_front_seconds`（200 天，2026-11-21 起） | `created_by='auto-overvoted'` 的不插隊（0） | **`target.requires_tier='strong'`（強模型待辦，`20261109230000`）的不進一般派工**：`contribution_queue_tasks` 排除，只能持 `STRONG_LANE_KEY` 用 `/next?lane=strong` 認領，見 `docs/decisions/2026-11-09-難題只給持鑰匙的強模型認領單一裁決即定案.md` |
 
 （`manual_front_seconds(task_id)` 定義：`auto-overvoted` 0；visitor 選前 100 天／選後 50 天（`visitor_front_seconds_for`）；`manual`／`auto_dispute` 30 天；其餘 0。）
 
@@ -129,7 +152,7 @@ seed 對每組「臂 × 選舉 × 職位」問一次 `activity_priority_seconds`
 
 | 機制 | 做什麼 | 注意 |
 |---|---|---|
-| 維護者 `/boost`（Edge Function `boost`，RPC `task_boost`） | 對命中的列加一份 `queue_settings.boost_seconds`（30 天），`cooling=false`；**同一張工作卡（同 work_key）底下已在隊的驗證票一起加同一份插隊秒數**（`20261112060000`；帶動的票吃同一份而不累加：`GREATEST(票現值, 同卡命中任務列加完後的 boost_seconds)`；filter `card_tickets:false` 可關、回傳 `card_tickets` 是帶動張數、被帶動的 task_id 記在 `task_boosts.card_ticket_ids`；帶動的票 cooling 會暫時設 false，10 分鐘內由 `refresh_dispatch_blocked` 重算；其餘驗證票不隨母任務移位）；**已存在的驗證票不隨母任務移位**（`20261104120000` 起票的基準凍結在 `dispatch_base_at`），要插某張票用 `/boost` 的 `task_ids` 指定票本身；母任務在派出前被插隊，派出後新產生的票基準會繼承那個位置 | 2026-11-04 起 POST 要維護者憑證（`20261104110000`，`boost-auth`）；不再先跑 seed（`20261019050000`，否則逾時）；只對已在佇列的列生效。**明確的 `/boost` 照舊可蓋過冷卻** |
+| 維護者 `/boost`（Edge Function `boost`，RPC `task_boost`） | 對命中的列加一份 `queue_settings.boost_seconds`（200 天，2026-11-21 起；原 30 天），`cooling=false`；**同一張工作卡（同 work_key）底下已在隊的驗證票一起加同一份插隊秒數**（`20261112060000`；帶動的票吃同一份而不累加：`GREATEST(票現值, 同卡命中任務列加完後的 boost_seconds)`；filter `card_tickets:false` 可關、回傳 `card_tickets` 是帶動張數、被帶動的 task_id 記在 `task_boosts.card_ticket_ids`；帶動的票 cooling 會暫時設 false，10 分鐘內由 `refresh_dispatch_blocked` 重算；其餘驗證票不隨母任務移位）；**已存在的驗證票不隨母任務移位**（`20261104120000` 起票的基準凍結在 `dispatch_base_at`），要插某張票用 `/boost` 的 `task_ids` 指定票本身；母任務在派出前被插隊，派出後新產生的票基準會繼承那個位置 | 2026-11-04 起 POST 要維護者憑證（`20261104110000`，`boost-auth`）；不再先跑 seed（`20261019050000`，否則逾時）；只對已在佇列的列生效。**明確的 `/boost` 照舊可蓋過冷卻** |
 | `cand_no_front_pull()` | 每小時 :03（pg_cron `cand-no-front-pull-hourly`）把補號次的任務、`cand_numbers`／含號次的 `candidacy` 驗證票、補號次的 `no_change` 驗證票，以及擋住號次缺口的同名人物合併任務（`target.cand_no_gap`，3×）往前拉：一般 2×`visitor_front_seconds`、縣市長／縣市議員 3×、當前提前職位（鄉鎮市長→原住民區長→鄉鎮市民代表→原住民區民代表→村里長，第一個還有缺口的）2.5× | **2026-11-28 之後直接回 0**；2026-11-07（`20261107000000`）起，`cool_until` 未過或 `task_in_check_cooldown`（查核階梯，2026-11-09 起）的不拉；補號次臂也不派不在中選會名冊上的人（`20261109190000`） |
 | `manual_front_pull()` | seed 內叫；台北時間每小時前 20 分鐘（`visitor_front_slot_start()`，`visitor_front_slot_hours()`=1、`visitor_front_window_minutes()`=20（`20261008165000`），即每小時 :00、:10 兩輪 seed）把 visitor 臂 open 的列（從沒派過、或最後派出早於本時段）設成 `visitor_front_seconds` | 2026-11-07（`20261107010000`）起，2 天內有 `not_found` 查核的不拉 |
 | 出生插隊 | 新手動任務的 `boost_seconds ＝ manual_front_seconds(task_id)`（上表） | BEFORE INSERT 觸發器 `trg_task_dispatches_nf_cooling_no_boost`（`20261107010000`）：uuid 任務出生時若 2 天內有 `not_found`，插隊歸零 |
