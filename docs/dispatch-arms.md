@@ -84,7 +84,7 @@ priority_days = 屆基準 ＋ 層級 ＋ 種類 ＋ 流量提層（＋ 需求疊
 | 種類 | 天 | 任務型別 |
 |---|---|---|
 | 查證票 | 19 | `verify:*`、`adjudicate` |
-| 抄公報／當屆政見 | 15 | `policy_missing`、`policy_election_missing` |
+| 抄公報／當屆政見 | 175（2026-11-22 起，原 15） | `policy_missing`、`policy_election_missing` |
 | 任內政見 | 13 | `term_policy_missing` |
 | 脈絡 | 12 | `lineage_*` |
 | 照片 | 10 | `avatar_choice`、缺官方照片（`target.missing` 含 `avatar_url`）的 `profile_gap` |
@@ -93,15 +93,15 @@ priority_days = 屆基準 ＋ 層級 ＋ 種類 ＋ 流量提層（＋ 需求疊
 | 進度 | 3 | `progress_stale`、`deadline_due` |
 | 其他 | 0 | `news_sweep`、`regional_stat_missing`、`roster_check`、`other`、沒列到的 |
 
-例：2026 縣市長抄公報 ＝ 2600＋170＋15 ＝ 2785 天；2026 村里長照片 ＝ 2660；2024 縣市長抄公報 ＝ 2585（輸給 2026 村里長照片，屆與屆之間差 200 天、層級＋種類最多 189 天，不會混排）。
+例：2026 縣市長抄公報 ＝ 2600＋170＋175 ＝ 2945 天；2026 村里長抄公報 2825；縣市長照片 2780；村里長照片 2660。**2026-11-22 起抄公報種類 175 天，任何層級的抄公報都高於任何層級的其他種類**（最高的非抄公報＝縣市長查證票 170＋19＝189；最低的抄公報＝村里長 50＋175＝225），抄公報內部仍照層級（原因：層級優先讓車隊九成人力集中在縣市長／議員層的重複政見清理與脈絡「查無」，代表、村里長抄公報幾乎停擺）。屆與屆之間仍差 200 天，但抄公報種類大於屆差內的層級差，所以 2024 縣市長抄公報（2745）已可能高於 2026 的低層其他種類；同種類下屆序不變。
 
 **層級怎麼對上**（`task_level_text`）：`lineage_*` 用 `target.level`（county→縣市長層、national→縣市長層（與總統同層 170，規格沒寫、本支定的）、township→鄉鎮市長層、village→村里長層）；其他有層級的型別用 `target.election_type`，沒有就用 `target.politician_id`＋`election_id` 查 `politician_elections`，再沒有取這個人最近一屆的職位；「其他」那組（`news_sweep`、`regional_stat_missing`、`other`、沒列到的）無層級 30（`roster_check` 照職位）。驗證票用母任務的層級（`verify_ticket_band_seconds`）。
 
-**插隊**（網站請求、`/boost`、維護者建的任務、請求併入既有缺口）一律 +200 天（`queue_settings` 的 `boost_seconds`、`manual_front_seconds`、`visitor_front_seconds`、`visitor_front_pre_election_seconds` 都是 17,280,000），**且屆基準改用最新一屆**（`latest_election_base_seconds()`＝`elections` 裡 `election_date` 最大的例行選舉，`election_reason='regular'`），不看人物所屬屆：2022 縣市長被按 ＝ 2600＋170＋15 ＋ 200 ＝ 2985 天。「插隊中」＝列上 `boost_seconds > 0`（新缺口＝手動臂且 `manual_front_seconds > 0`）；插隊派出就歸零，屆基準下一輪 seed 換回人物自己那一屆。網站只有政見／人物／進度／驗證／稽核按鈕，沒有獨立照片按鈕，網站請求的 `profile_gap` 算人物基本資料（8 天）。
+**插隊**（網站請求、`/boost`、維護者建的任務、請求併入既有缺口）一律 +400 天（2026-11-22 起，原 200 天；`queue_settings` 的 `boost_seconds`、`manual_front_seconds`、`visitor_front_seconds`、`visitor_front_pre_election_seconds` 都是 34,560,000，最低插隊 30＋0＋400＝430 高於最高抄公報 345），**且屆基準改用最新一屆**（`latest_election_base_seconds()`＝`elections` 裡 `election_date` 最大的例行選舉，`election_reason='regular'`），不看人物所屬屆：2022 縣市長抄公報被按 ＝ 2600＋170＋175 ＋ 400 ＝ 3345 天。「插隊中」＝列上 `boost_seconds > 0`（新缺口＝手動臂且 `manual_front_seconds > 0`）；插隊派出就歸零，屆基準下一輪 seed 換回人物自己那一屆。網站只有政見／人物／進度／驗證／稽核按鈕，沒有獨立照片按鈕，網站請求的 `profile_gap` 算人物基本資料（8 天）。
 
 **流量提層改比例制**：加成 ＝ 近 7 天不重複訪客數 × `traffic_boost_settings.per_user_seconds`（86400），無門檻、無上限（`min_users` 改 1，`boost_seconds` 欄位 deprecated）；缺口對到人物頁與他名下政見頁時取人數最大的那頁；`no_yield_days`／`pause_days`／`stale_after_hours` 機制保留，細節見 `CLAUDE.md`「頁面流量提層」。
 
-**驗證票**：`queue_at ＝ 基準 − verify_priority_seconds − boost_seconds ＋ 步長 × 領走次數` 的公式不動，但 `verify_priority_seconds` 設 0，領先折進入列時凍結的基準（`verify_ticket_base`）。目標：票 ＝ 屆基準 ＋ 母任務層級 ＋ 19，層級不重複算——沿用母任務位置時（已含母任務的屆基準＋層級＋種類）只再領先 (19 − 母種類) 天（`verify_ticket_parent_lead_seconds`）；新增型與母任務列已不在時基準不含層級，領先 層級＋19 天（`verify_ticket_band_seconds`）。夾限（`verify_ticket_base_floor_seconds`）先做、再減領先。**裁決任務（`adjudicate`）繼承母交件的層級**（`target.contribution_id` → 交件 payload／母任務／`applied_politician_id`，`contribution_level_text`），取不到才無層級。
+**驗證票**：`queue_at ＝ 基準 − verify_priority_seconds − boost_seconds ＋ 步長 × 領走次數` 的公式不動，`verify_priority_seconds` 為 0。**2026-11-22 起票 ＝ 屆基準＋母任務層級＋19**：`verify_ticket_base` 一律取「交件建立時間 − (選舉年秒數 ＋ `verify_ticket_band_seconds`)」，不再沿用母任務位置（抄公報 175 天會讓「19 − 母種類」變負）；/next 本來就驗證先於任務，票的秒數只影響票之間。**裁決任務（`adjudicate`）繼承母交件的層級**（`target.contribution_id` → 交件 payload／母任務／`applied_politician_id`，`contribution_level_text`），取不到才無層級。
 
 **規則表**：`activity_rules` #37（前段 +3 天）、#38（後段 −30 天）、#39（公報前降級）已停用（`enabled=false`，不刪）；#40、#44、#50 的 `priority_seconds` 不再被讀（seed 與手動入列都不呼叫 `activity_priority_seconds`）。`election_type_priority_days` 欄位與 `election_type_priority_seconds()` 留著不讀。程式見 `task_band_seconds`、`task_year_priority_seconds`、`seed_auto_task_queue()`、`contribution_tasks_insert_dispatch()`；守門 `priority-bands.test.ts`。
 
