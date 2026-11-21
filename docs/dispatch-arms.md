@@ -367,3 +367,5 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 **`autovacuum_work_mem`（未做）**：sighup 級 GUC，不能在 migration（交易內）設；目前是 -1（退回 `maintenance_work_mem`＝256 MB，3 個 autovacuum worker）。要調走 Supabase 管理面：`npx -y supabase@2 postgres-config update --project-ref <ref> --config autovacuum_work_mem=64MB`，或 Dashboard 的 Database → Settings；Supabase 只開放白名單內的參數，且資料庫角色不是 superuser、`ALTER SYSTEM` 不可用。調成 64MB 其實是把 vacuum 記憶體由 256MB 降下來。
 
 **11-22 週六三支補搬（`20261122110000_cron_shift_cec_weekly.sql`）**：`cec-sync-weekly` `0,5,10,15,20`→`1,6,11,16,21`、`cec-sync-2022-village-rest` `5,10,15,20`→`6,11,16,21`、`cec-sync-2024-weekly` `30`→`32`（皆 UTC 週六 19 點）。
+
+**11-22 最後 10 支補搬（`20261122130000_cron_shift_remaining_ten_minutes.sql`）**：`cec-sync-2022-weekly` 0→3、`cec-sync-2022-rest` `5,10`→`7,12`、`cec-reconcile-weekly` 30→33、`news-items-retention-weekly` 30→37、`gate-rejections-purge` 40→42、`policy-jp-news-purge-daily` 40→47、`dispatch-records-purge` 50→52、`moi-sync-daily` 20→22、`moi-avatar-import-daily` 50→52、`ditrust-purge-rate-limits-daily` 20→22（03 點）。至此除 seed 外沒有 cron 落整十分鐘。
