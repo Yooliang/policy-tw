@@ -76,8 +76,9 @@ Deno.test("A4 verify_ticket_base：只差兩處（新增型與有基準的退路
   const neuL = new Set(lines(neu));
   const added = lines(neu).filter((l) => !prevL.has(l));
   const removed = lines(prev).filter((l) => !neuL.has(l));
-  assertEquals(removed.length, 1, removed.join("\n")); // is_new 那一行
-  assertEquals(added.length, 2, added.join("\n"));
+  assertEquals(removed.length, 2, removed.join("\n")); // is_new 那一行與沒有母任務位置的退路
+  assertEquals(added.length, 3, added.join("\n")); // 兩個基準不含層級的分支（層級＋19）與有母任務位置的分支（領先 19 − 母種類）
+  assert(neu.includes("verify_ticket_parent_lead_seconds(p.task_type, p.target)"));
   assert(neu.includes("verify_ticket_band_seconds(p_verify_task_id)"));
   assert(neu.includes("task_queue_key(p.last_dispatched_at, p.priority_seconds, NULL, 0) - make_interval(secs => COALESCE(verify_ticket_base_floor_seconds(), 0))"), "夾限照舊");
   assert(neu.includes("p.last_dispatched_at <= COALESCE(t.created_at, now())"));
@@ -107,10 +108,10 @@ CREATE TABLE elections (id INTEGER PRIMARY KEY, election_date DATE NOT NULL, ele
 INSERT INTO elections VALUES (4, '2022-12-18', 'rerun'), (2022, '2022-11-26', 'regular'), (2024, '2024-01-13', 'regular'), (2026, '2026-11-28', 'regular');
 CREATE TABLE politician_elections (id SERIAL PRIMARY KEY, politician_id UUID, election_id INTEGER, election_type TEXT);
 CREATE TABLE task_dispatches (task_id TEXT PRIMARY KEY, task_type TEXT, target JSONB, boost_seconds BIGINT NOT NULL DEFAULT 0);
-CREATE TABLE contributions (id UUID PRIMARY KEY, task_id TEXT, payload JSONB);
+CREATE TABLE contributions (id UUID PRIMARY KEY, task_id TEXT, payload JSONB, applied_politician_id UUID);
 `;
 const FNS = [
-  "election_level_days", "task_kind_days_by_type", "task_has_level", "task_target_level_text", "task_level_text", "task_level_days", "task_kind_days",
+  "election_level_days", "task_kind_days_by_type", "task_has_level", "task_target_level_text", "contribution_level_text", "task_level_text", "task_level_days", "task_kind_days", "verify_ticket_parent_lead_seconds",
   "task_band_priority_seconds", "task_band_seconds", "latest_election_base_seconds", "task_year_priority_seconds", "verify_ticket_band_seconds",
 ];
 async function env(): Promise<PGlite> {
@@ -365,5 +366,47 @@ Deno.test("B11 驗證票帶狀：母任務層級 ＋ 19 天；母任務列不在
   assertEquals(await band(6), (30 + 19) * DAY, "什麼都對不上＝無層級");
   assertEquals(await band(7), (30 + 19) * DAY, "母任務是 other（無層級）＝無層級");
   assertEquals(await num(db, `verify_ticket_band_seconds('verify:not-a-uuid')`), (30 + 19) * DAY, "亂的 id 不拋錯");
+  await db.close();
+});
+
+Deno.test("B12 裁決（adjudicate）繼承母交件的層級：payload／母任務／applied_politician_id；取不到才無層級；仍排在同層抄公報之前", async () => {
+  const db = await env();
+  const c = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const pid = "44444444-4444-4444-8444-444444444444";
+  await db.exec(`
+    INSERT INTO politician_elections (politician_id, election_id, election_type) VALUES ('${pid}', 2026, '縣市議員');
+    INSERT INTO task_dispatches (task_id, task_type, target) VALUES ('auto:county', 'policy_missing', '{"election_id": 2026, "election_type": "縣市長"}');
+    INSERT INTO contributions (id, task_id, payload, applied_politician_id) VALUES
+      ('${c(1)}', NULL, '{"election_type": "鄉鎮市長"}', NULL),
+      ('${c(2)}', 'auto:county', '{}', NULL),
+      ('${c(3)}', 'auto:gone:x', '{"bio": "x"}', '${pid}'),
+      ('${c(4)}', NULL, '{}', NULL)`);
+  const adj = (n: number) => num(db, `task_level_days('adjudicate', ${lit({ contribution_id: c(n), contribution_type: "politician" })})`);
+  assertEquals(await adj(1), 110, "payload.election_type");
+  assertEquals(await adj(2), 170, "母任務 target.election_type");
+  assertEquals(await adj(3), 130, "母任務列已不在：applied_politician_id 的最近一屆職位（議員）");
+  assertEquals(await adj(4), 30, "取不到＝無層級");
+  assertEquals(await num(db, `task_level_days('adjudicate', ${lit({ contribution_id: "not-a-uuid" })})`), 30, "亂的 id 不拋錯");
+  assertEquals(await num(db, `task_level_days('adjudicate', ${lit({ election_type: "村里長" })})`), 50, "沒有 contribution_id 時看 target 自己");
+  // 縣市長層的裁決（2600＋170＋19）仍排在同層的抄公報（2600＋170＋15）之前
+  const adjDays = (await num(db, `task_year_priority_seconds('{}'::jsonb, false)`)) / DAY + (await adj(2)) + 19;
+  assert(adjDays > await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }));
+  await db.close();
+});
+
+Deno.test("B13 驗證票與母任務同層、票比母任務多 (19 − 母種類) 天，層級不重複算", async () => {
+  const db = await env();
+  for (const [type, k] of Object.entries(KINDS)) {
+    if (type === "verify" || type === "adjudicate" || type === "沒列到的新型別") continue;
+    const target = { election_id: 2026, election_type: "縣市議員", ...(type.startsWith("lineage") ? { level: "county" } : {}) };
+    const lead = (await num(db, `verify_ticket_parent_lead_seconds('${type}', ${lit(target)})`)) / DAY;
+    assertEquals(lead, 19 - k, `${type}：領先 19 − ${k}`);
+    assert(lead >= 0);
+    // 母任務總分（屆基準＋層級＋母種類）加領先 ＝ 屆基準＋母任務層級＋19
+    const parentLevel = await num(db, `task_level_days('${type}', ${lit(target)})`);
+    const parentTotal = await days(db, type, target);
+    assertEquals(parentTotal + lead, 2600 + parentLevel + 19, `${type}：票 ＝ 屆基準＋母任務層級＋19`);
+  }
+  assertEquals(await num(db, `verify_ticket_parent_lead_seconds('adjudicate', '{}'::jsonb)`), 0, "母任務自己就是 19：不領先");
   await db.close();
 });

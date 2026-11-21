@@ -101,7 +101,7 @@ priority_days = 屆基準 ＋ 層級 ＋ 種類 ＋ 流量提層（＋ 需求疊
 
 **流量提層改比例制**：加成 ＝ 近 7 天不重複訪客數 × `traffic_boost_settings.per_user_seconds`（86400），無門檻、無上限（`min_users` 改 1，`boost_seconds` 欄位 deprecated）；缺口對到人物頁與他名下政見頁時取人數最大的那頁；`no_yield_days`／`pause_days`／`stale_after_hours` 機制保留，細節見 `CLAUDE.md`「頁面流量提層」。
 
-**驗證票**：`queue_at ＝ 基準 − verify_priority_seconds − boost_seconds ＋ 步長 × 領走次數` 的公式不動，但 `verify_priority_seconds` 設 0，「母任務層級 ＋ 19 天」折進入列時凍結的基準（`verify_ticket_base`）；夾限（`verify_ticket_base_floor_seconds`）先做、再減層級帶狀。
+**驗證票**：`queue_at ＝ 基準 − verify_priority_seconds − boost_seconds ＋ 步長 × 領走次數` 的公式不動，但 `verify_priority_seconds` 設 0，領先折進入列時凍結的基準（`verify_ticket_base`）。目標：票 ＝ 屆基準 ＋ 母任務層級 ＋ 19，層級不重複算——沿用母任務位置時（已含母任務的屆基準＋層級＋種類）只再領先 (19 − 母種類) 天（`verify_ticket_parent_lead_seconds`）；新增型與母任務列已不在時基準不含層級，領先 層級＋19 天（`verify_ticket_band_seconds`）。夾限（`verify_ticket_base_floor_seconds`）先做、再減領先。**裁決任務（`adjudicate`）繼承母交件的層級**（`target.contribution_id` → 交件 payload／母任務／`applied_politician_id`，`contribution_level_text`），取不到才無層級。
 
 **規則表**：`activity_rules` #37（前段 +3 天）、#38（後段 −30 天）、#39（公報前降級）已停用（`enabled=false`，不刪）；#40、#44、#50 的 `priority_seconds` 不再被讀（seed 與手動入列都不呼叫 `activity_priority_seconds`）。`election_type_priority_days` 欄位與 `election_type_priority_seconds()` 留著不讀。程式見 `task_band_seconds`、`task_year_priority_seconds`、`seed_auto_task_queue()`、`contribution_tasks_insert_dispatch()`；守門 `priority-bands.test.ts`。
 

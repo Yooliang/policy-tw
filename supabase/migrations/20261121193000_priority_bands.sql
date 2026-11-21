@@ -27,7 +27,7 @@
 --   2. 其他有層級的種類：target.election_type；沒有就用 target.politician_id ＋ target.election_id 查 politician_elections；
 --      都沒有（沒帶選舉 id，例如網站請求只帶 politician_id）就取這個人「最近一屆」的職位。
 --   3. 其他（news_sweep、regional_stat_missing、other、沒列到的）一律無層級（30）；roster_check 照職位。
---   4. 驗證票：母任務的層級（母任務列的 task_type／target；母任務列已不在就看交件 payload），種類 19。
+--   4. 驗證票：母任務的層級（母任務列的 task_type／target；母任務列已不在就看交件 payload），種類 19。裁決（adjudicate）繼承母交件的層級（target.contribution_id）。
 --   ※ election_type_priority_days（11-14 的職位天數設定）被層級取代：欄位與 election_type_priority_seconds() 留著、seed 與手動入列都不再讀；回滾見下。
 --
 -- 插隊（一律 +200 天，且屆基準改用最新一屆）：
@@ -46,11 +46,11 @@
 --   boost_seconds（259200）欄位保留、不再讀（標 deprecated）。
 --
 -- 驗證票：queue_at ＝ 基準 − 14 天 − 插隊 ＋ 步長 × 領走次數（verify_ticket_key，一字不動）。
---   「14 天」是 queue_settings.verify_priority_seconds；這支把它設成 0，把「母任務層級 ＋ 19 天」折進入列時凍結的基準（verify_ticket_base 減 verify_ticket_band_seconds）。
---   基準邏輯照舊（母任務的 dispatch_base_at 夾限、新增型用交件建立時間 − 選舉年），只換「領先秒數」的來源。
---   注意：母任務的基準本身已含母任務自己的層級（priority_seconds），票再領先「層級＋19」，所以票對母任務的領先是 層級＋19 天；
---   驗證隊伍內的順序先看 verify_rank（有票先、層 0／1／2），同階才比 queue_at（20261119100000），所以這個放大只影響同階內的順序，不影響階的順序。
---   夾限（verify_ticket_base_floor_seconds）＝最大插隊值（現在 200 天）＋ verify_priority_seconds（0），夾限先做、再減層級帶狀。
+--   「14 天」是 queue_settings.verify_priority_seconds；這支把它設成 0，改把領先折進入列時凍結的基準（verify_ticket_base）。目標：票 ＝ 屆基準 ＋ 母任務層級 ＋ 19，層級不重複算：
+--     · 有母任務位置可沿用（一般任務的交件）：母任務位置已含「屆基準＋層級＋母種類」，票只再領先 (19 − 母種類) 天（verify_ticket_parent_lead_seconds）
+--     · 新增型、母任務沒有基準（基準是交件建立時間 − 選舉年，不含層級）：領先 層級＋19 天（verify_ticket_band_seconds，層級取母任務或交件 payload 的職位）
+--   夾限（verify_ticket_base_floor_seconds）＝最大插隊值（現在 200 天）＋ verify_priority_seconds（0），夾限先做、再減領先。
+--   裁決任務（adjudicate）的層級繼承母交件：target.contribution_id → 交件 payload／母任務／applied_politician_id（contribution_level_text），取不到才無層級。
 --
 -- 規則表：activity_rules #37（前段 +3 天）、#38（後段 −30 天）、#39（公報前降級）設 enabled=false，不刪。
 --   #44 manual_visitor、#40 placeholder_politicians、#50 regional_stats_missing 保留 enabled，但它們的 priority_seconds 不再被讀
@@ -58,7 +58,7 @@
 --
 -- 這支做的事：
 --   1. 新函式：election_level_days、task_kind_days_by_type、task_has_level、task_target_level_text、task_level_text、task_level_days、task_kind_days、
---      task_band_priority_seconds(level_text, task_type, has_photo_gap)、task_band_seconds、latest_election_base_seconds、task_year_priority_seconds、verify_ticket_band_seconds
+--      task_band_priority_seconds(level_text, task_type, has_photo_gap)、task_band_seconds、latest_election_base_seconds、task_year_priority_seconds、verify_ticket_band_seconds、verify_ticket_parent_lead_seconds、contribution_level_text
 --   2. traffic_boost_settings.per_user_seconds；traffic_boost_apply 改比例制（以 20261011350000 的定義為底，只差標記處）
 --   3. contribution_tasks_insert_dispatch（以 20261114010000 為底）、seed_auto_task_queue（以 20261119170000 為底）：只差標 >>> 帶狀優先 的區塊
 --   4. verify_ticket_base（以 20261114070100 為底，只差標 >>> 帶狀優先 的兩處）
@@ -140,17 +140,28 @@ LANGUAGE sql STABLE AS $$
 $$;
 COMMENT ON FUNCTION task_target_level_text IS 'target 的職位（20261121）：target.election_type → politician_id＋election_id 查 politician_elections → 這個人最近一屆的職位；都沒有 NULL。2026-11-21';
 
+-- 一筆交件的職位（裁決任務繼承母交件的層級）：交件 payload.election_type → 母任務 target → payload 的人物＋選舉 → 落庫後的 applied_politician_id 最近一屆職位
+CREATE OR REPLACE FUNCTION contribution_level_text(p_contribution_id UUID) RETURNS TEXT
+LANGUAGE sql STABLE AS $$
+  SELECT COALESCE(verify_ticket_election_type('verify:' || b.id),
+                  task_target_level_text(b.payload),
+                  task_target_level_text(jsonb_build_object('politician_id', b.applied_politician_id)))
+    FROM contributions b WHERE b.id = p_contribution_id
+$$;
+COMMENT ON FUNCTION contribution_level_text IS '一筆交件的職位（20261121）：給裁決任務（adjudicate）繼承母交件層級用。payload.election_type → 母任務 target → payload 的人物與選舉 → applied_politician_id 最近一屆；都沒有 NULL。2026-11-21';
+
 -- 任務的層級用職位文字：lineage_* 用 target.level 對映；其餘有層級的型別用 task_target_level_text；沒層級的型別 NULL
 CREATE OR REPLACE FUNCTION task_level_text(p_task_type TEXT, p_target JSONB) RETURNS TEXT
 LANGUAGE sql STABLE AS $$
   SELECT CASE
            WHEN NOT task_has_level(p_task_type) THEN NULL
+           WHEN p_task_type = 'adjudicate' THEN COALESCE(contribution_level_text(uuid_or_null(p_target->>'contribution_id')), task_target_level_text(p_target))
            WHEN p_task_type LIKE 'lineage\_%' THEN
              CASE p_target->>'level' WHEN 'county' THEN '縣市長' WHEN 'national' THEN '縣市長'
                                      WHEN 'township' THEN '鄉鎮市長' WHEN 'town' THEN '鄉鎮市長' WHEN 'village' THEN '村里長' END
            ELSE task_target_level_text(p_target) END
 $$;
-COMMENT ON FUNCTION task_level_text IS '任務的層級職位文字（20261121）：lineage_* 用 target.level（county／national→縣市長、township→鄉鎮市長、village→村里長）；其餘有層級的型別用 task_target_level_text；「其他」組與對不上的 NULL（＝無層級 30 天）。2026-11-21';
+COMMENT ON FUNCTION task_level_text IS '任務的層級職位文字（20261121）：adjudicate 繼承母交件（target.contribution_id）的層級；lineage_* 用 target.level（county／national→縣市長、township→鄉鎮市長、village→村里長）；其餘有層級的型別用 task_target_level_text；「其他」組與對不上的 NULL（＝無層級 30 天）。2026-11-21';
 
 CREATE OR REPLACE FUNCTION task_level_days(p_task_type TEXT, p_target JSONB) RETURNS INTEGER
 LANGUAGE sql STABLE AS $$ SELECT election_level_days(task_level_text(p_task_type, p_target)) $$;
@@ -203,6 +214,14 @@ LANGUAGE sql STABLE AS $$
     LEFT JOIN task_dispatches p ON p.task_id = COALESCE(b.task_id, b.payload->>'task_id')
 $$;
 COMMENT ON FUNCTION verify_ticket_band_seconds IS '驗證票的帶狀領先秒數（20261121，取代 verify_priority_seconds 的 14 天）：(母任務層級天數 ＋ 19) × 86400；母任務列不在時看交件 payload 的職位／人物；都沒有＝無層級 30。2026-11-21';
+
+-- 票相對母任務位置的領先秒數：(19 − 母任務種類天數) × 86400。母任務位置（基準）已含母任務的 屆基準＋層級＋種類，
+-- 票再領先「19 − 母種類」，合計 ＝ 屆基準＋母任務層級＋19，層級不重複算（母任務種類最大 19，所以不會是負的）
+CREATE OR REPLACE FUNCTION verify_ticket_parent_lead_seconds(p_parent_task_type TEXT, p_parent_target JSONB) RETURNS BIGINT
+LANGUAGE sql STABLE AS $$
+  SELECT GREATEST(task_kind_days_by_type('verify', false) - task_kind_days(p_parent_task_type, p_parent_target), 0)::BIGINT * 86400
+$$;
+COMMENT ON FUNCTION verify_ticket_parent_lead_seconds IS '驗證票對母任務位置的領先秒數（20261121）：(19 − 母任務種類天數) × 86400，不重複算層級（母任務位置已含）。母任務列不在、新增型走 verify_ticket_band_seconds（層級＋19）。2026-11-21';
 
 -- ------------------------------------------------------------
 -- 2. 流量提層改比例制
@@ -509,14 +528,14 @@ CREATE OR REPLACE FUNCTION verify_ticket_base(p_verify_task_id TEXT) RETURNS TIM
 LANGUAGE sql STABLE AS $$
   SELECT CASE
            WHEN t.contribution_type IS NULL THEN NULL
-           WHEN t.is_new THEN COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id) + verify_ticket_band_seconds(p_verify_task_id))  -- >>> 選舉年優先　>>> 帶狀優先：層級＋19 天取代 14 天
+           WHEN t.is_new THEN COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id) + verify_ticket_band_seconds(p_verify_task_id))  -- >>> 選舉年優先　>>> 帶狀優先：基準不含層級，領先 層級＋19 天
            ELSE COALESCE((SELECT GREATEST(p.dispatch_base_at,  -- >>> 基準夾限（20261114070100）：不早於母任務不含插隊的位置 − (最大合法插隊 ＋ 14 天)；位置算不出來就不夾
                                           task_queue_key(p.last_dispatched_at, p.priority_seconds, NULL, 0) - make_interval(secs => COALESCE(verify_ticket_base_floor_seconds(), 0)))
+                            - make_interval(secs => verify_ticket_parent_lead_seconds(p.task_type, p.target))  -- >>> 帶狀優先：母任務位置已含層級，票只再領先 (19 − 母種類) 天
                             FROM task_dispatches p
                            WHERE p.task_id = t.parent_id AND p.dispatch_base_at IS NOT NULL
                              AND p.last_dispatched_at <= COALESCE(t.created_at, now())),
-                         COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id)))  -- >>> 選舉年優先
-                - make_interval(secs => verify_ticket_band_seconds(p_verify_task_id))  -- >>> 帶狀優先：母任務層級＋19 天取代 verify_priority_seconds 的 14 天（夾限先做、再減）
+                         COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id) + verify_ticket_band_seconds(p_verify_task_id)))  -- >>> 選舉年優先　>>> 帶狀優先：沒有母任務位置時基準不含層級，領先 層級＋19 天
          END
     FROM (SELECT 1) x LEFT JOIN verify_ticket_parent(p_verify_task_id) t ON true
 $$;
@@ -578,23 +597,34 @@ BEGIN
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE '插隊中的任務列抬到 200 天：% 列', v_n;
 
+  -- 現有驗證票（要在任務列重算之前：要用母任務現在還是舊值的 priority_seconds 算差額）。原排序鍵 ＝ 基準 − 14 天；改成 基準' ＝ 原基準 − 位移，verify_priority_seconds 已是 0：
+  --   · 一般任務的交件（母任務列還在）：母任務的新位置比舊位置前 (P新 − P舊)，票再領先 (19 − 母種類) 天；14 天被取代、不是疊加。位移 ＝ (P新 − P舊) ＋ (19 − 母種類) 天
+  --   · 新增型、母任務列已不在、沒有母任務：基準不含層級，位移 ＝ 層級 ＋ 19 天（verify_ticket_band_seconds）
+  --   沒有基準的舊列先用現在的 queue_at 反推並補回舊的 14 天。
+  UPDATE task_dispatches v
+     SET dispatch_base_at = COALESCE(v.dispatch_base_at,
+                                     verify_ticket_freeze_base(v.queue_at, v.dispatch_count, v.boost_seconds, verify_ticket_step_seconds(v.task_id, v.verify_has_votes))
+                                       + make_interval(secs => v_old_vs))
+                            - make_interval(secs => s.shift)
+    FROM (SELECT t.task_id,
+                 CASE WHEN pt.parent_id IS NOT NULL AND NOT COALESCE(pt.is_new, false) AND p.task_id IS NOT NULL
+                      THEN (task_year_priority_seconds(p.target, p.boost_seconds > 0) + task_band_seconds(p.task_type, p.target)) - p.priority_seconds
+                           + verify_ticket_parent_lead_seconds(p.task_type, p.target)
+                      ELSE verify_ticket_band_seconds(t.task_id) END AS shift
+            FROM task_dispatches t
+            LEFT JOIN LATERAL verify_ticket_parent(t.task_id) pt ON true
+            LEFT JOIN task_dispatches p ON p.task_id = pt.parent_id
+           WHERE t.task_id LIKE 'verify:%') s
+   WHERE v.task_id LIKE 'verify:%' AND s.task_id = v.task_id;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RAISE NOTICE '重算 % 張驗證票的基準', v_n;
+
   -- 任務列：priority_seconds ＝ 屆基準（插隊中用最新一屆）＋ 層級 ＋ 種類；觸發器 task_dispatches_queue_key 跟著重算 queue_at。流量與需求疊加下一輪 seed 補上
   UPDATE task_dispatches d
      SET priority_seconds = (task_year_priority_seconds(d.target, d.boost_seconds > 0) + task_band_seconds(d.task_type, d.target))::INTEGER
    WHERE d.task_id NOT LIKE 'verify:%';
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RAISE NOTICE '重算 % 列任務列的 priority_seconds', v_n;
-
-  -- 現有驗證票：原基準（沒有基準的舊列先用現在的 queue_at 反推，並補回舊的 14 天）減去「母任務層級＋19 天」；
-  -- 原本排序鍵 ＝ 基準 − 14 天，現在 verify_priority_seconds 已是 0，所以新鍵 ＝ 新基準 ＝ 原基準 − 層級帶狀（14 天被層級帶狀取代，不是疊加）
-  UPDATE task_dispatches v
-     SET dispatch_base_at = COALESCE(v.dispatch_base_at,
-                                     verify_ticket_freeze_base(v.queue_at, v.dispatch_count, v.boost_seconds, verify_ticket_step_seconds(v.task_id, v.verify_has_votes))
-                                       + make_interval(secs => v_old_vs))
-                            - make_interval(secs => verify_ticket_band_seconds(v.task_id))
-   WHERE v.task_id LIKE 'verify:%';
-  GET DIAGNOSTICS v_n = ROW_COUNT;
-  RAISE NOTICE '重算 % 張驗證票的基準', v_n;
 
   -- 後：隊頭 30 筆
   FOR r IN SELECT d.task_type, COALESCE(task_level_text(d.task_type, d.target), '無層級') AS lvl, count(*) AS n
