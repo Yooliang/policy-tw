@@ -47,7 +47,7 @@ Deno.test("A1 seed：新定義＝20261017010000 的現行定義加 rekey-positio
   assertEquals(neu.split("_rekey_prev").length - 1, 3, "_rekey_prev 只出現三處：DROP、CREATE、新增那段的 LEFT JOIN");
 });
 
-Deno.test("A2 activity_health：新定義＝20261017000301 的現行定義加 dispatch_chronic_stall 一個分支（其餘一字不動）；它是 activity_health 的最新定義", async () => {
+Deno.test("A2 activity_health：新定義＝20261017000301 的現行定義加 dispatch_chronic_stall 一個分支（其餘一字不動）；它緊接在前一版之後", async () => {
   const prevName = "20261017000301_queue_tasks_eligibility_before_limit.sql";
   const prevSql = await readMig(prevName);
   const grab = (sql: string) => {
@@ -62,7 +62,8 @@ Deno.test("A2 activity_health：新定義＝20261017000301 的現行定義加 di
   assertEquals(neuView, grab(prevSql) + "\n" + HEALTH_BRANCH);
   const defining: string[] = [];
   for (const n of await migrationNames()) if (/CREATE OR REPLACE VIEW activity_health AS/.test(await readMig(n))) defining.push(n);
-  assertEquals(defining.slice(-2), [prevName, MIG_NAME], "activity_health 的前一版變了：要以最新的為底重做（HEALTH_BRANCH 接在最後）");
+  // 只比相對順序：這支之後允許有更新的重貼（例如 20261121201500 略過 priority 規則），不斷言「最新一支」
+  assertEquals(defining.slice(0, defining.indexOf(MIG_NAME) + 1).slice(-2), [prevName, MIG_NAME], "activity_health 的前一版變了：要以最新的為底重做（HEALTH_BRANCH 接在最後）");
 });
 
 /** 抓「task_id 末段是 <別名>.fp」的臂：SELECT 'auto:<臂>:' || … || ':' || x.fp（task_id 的串接那一行） */
