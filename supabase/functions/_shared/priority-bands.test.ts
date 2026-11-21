@@ -4,7 +4,7 @@
  *   priority_seconds ＝ 屆基準（插隊中用最新一屆）＋ 層級天數 ＋ 種類天數 ＋ 流量比例制（訪客數 × 1 天）＋ 需求疊加；排序鍵 task_queue_key 不動。
  *
  *   A. 文字層：seed／手動入列／traffic_boost_apply／verify_ticket_base 的新定義 ＝ 上一版逐字 ＋ 標記區塊；停用規則、插隊 200 天、不升協議版號
- *   B. PGlite：表值抽查（2026 縣市長抄公報 2785、村里長照片 2660、2022 縣市長被按 2985、county 脈絡 2782）、跨屆不混排、同層種類順序、
+ *   B. PGlite（種類天數用 20261122160000 的現行版）：表值抽查（2026 縣市長抄公報 2945、村里長抄公報 2825、縣市長照片 2780、村里長照片 2660、2022 縣市長被按 2945＋400 天、county 脈絡 2782）、抄公報高於其他種類、插隊高於抄公報、同層種類順序、
  *      層級怎麼對上（election_type／參選紀錄／最近一屆／lineage.level／「其他」組無層級）、流量 30 人 ＝ +30 天且無上限、插隊用最新一屆、驗證票帶狀
  *   不斷言「最新一支 migration」：只讀自己這支與它之前的版本。
  */
@@ -14,6 +14,9 @@ import { fnText, latestFn, readMig } from "./arms-pglite.ts";
 
 const MIG_NAME = "20261121193000_priority_bands.sql";
 const MIG = await readMig(MIG_NAME);
+// 2026-11-22 抄公報抬高（20261122160000）：種類天數函式與驗證票基準換成這支的版本，下面的 B 系列斷言都是現行數值
+const BULLETIN_NAME = "20261122160000_priority_bands_bulletin_first.sql";
+const BULLETIN = await readMig(BULLETIN_NAME);
 const DAY = 86400;
 const lines = (s: string) => s.split("\n").map((l) => l.trim()).filter((l) => l !== "");
 const fn = (name: string) => fnText(MIG, name);
@@ -139,6 +142,7 @@ async function env(): Promise<PGlite> {
   await db.exec(fnText(await readMig("20261112005000_election_year_priority.sql"), "election_year_priority_seconds"));
   await db.exec(await latestFn("verify_ticket_election_type", MIG_NAME));
   for (const n of FNS) await db.exec(fn(n));
+  await db.exec(fnText(BULLETIN, "task_kind_days_by_type")); // 抄公報 15 → 175
   return db;
 }
 const num = async (db: PGlite, sql: string): Promise<number> => Number((await db.query<{ v: string }>(`SELECT (${sql}) AS v`)).rows[0]!.v);
@@ -152,7 +156,7 @@ const LEVELS: Record<string, number> = {
   鄉鎮市長: 110, 直轄市山地原住民區民代表: 90, 鄉鎮市民代表: 70, 村里長: 50,
 };
 const KINDS: Record<string, number> = {
-  verify: 19, adjudicate: 19, policy_missing: 15, policy_election_missing: 15, term_policy_missing: 13,
+  verify: 19, adjudicate: 19, policy_missing: 175, policy_election_missing: 175, term_policy_missing: 13,
   lineage_candidate: 12, lineage_roles_missing: 12, lineage_link_candidate: 12, lineage_stance_missing: 12,
   avatar_choice: 10, profile_gap: 8, profile_detail_gap: 8, party_info_missing: 8, candidacy_source_missing: 8, candidate_status_stale: 8,
   duplicate_policy: 5, duplicate_politician: 5, policy_election_mismatch: 5, source_mismatch: 5, policy_source_missing: 5, policy_validity: 5, issue_too_broad: 5, legacy_audit: 5,
@@ -172,24 +176,26 @@ Deno.test("B2 種類天數：全部型別逐一對表（profile_gap 缺照片 10
   const db = await env();
   for (const [t, d] of Object.entries(KINDS)) assertEquals(await num(db, `task_kind_days_by_type('${t}', false)`), d, t);
   assertEquals(await num(db, `task_kind_days_by_type('profile_gap', true)`), 10);
-  assertEquals(await num(db, `task_kind_days_by_type('policy_missing', true)`), 15, "缺照片旗標只影響 profile_gap");
+  assertEquals(await num(db, `task_kind_days_by_type('policy_missing', true)`), 175, "缺照片旗標只影響 profile_gap");
   assertEquals(await num(db, `task_kind_days('profile_gap', ${lit({ missing: ["current_position", "avatar_url"] })})`), 10);
   assertEquals(await num(db, `task_kind_days('profile_gap', ${lit({ missing: ["birth_year"] })})`), 8);
   assertEquals(await num(db, `task_kind_days('profile_gap', ${lit({ region: "x" })})`), 8, "沒有 missing 欄＝人物基本資料");
   await db.close();
 });
 
-Deno.test("B3 表值抽查：2026 縣市長抄公報 2785、村里長照片 2660、2022 縣市長被按 2985、county 脈絡 2782", async () => {
+Deno.test("B3 表值抽查：2026 縣市長抄公報 2945、村里長抄公報 2825、縣市長照片 2780、村里長照片 2660、2022 縣市長被按 2945＋400 天、county 脈絡 2782", async () => {
   const db = await env();
-  assertEquals(await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }), 2600 + 170 + 15);
-  assertEquals(await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }), 2785);
+  assertEquals(await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }), 2600 + 170 + 175);
+  assertEquals(await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }), 2945);
+  assertEquals(await days(db, "policy_missing", { election_id: 2026, election_type: "村里長" }), 2825);
+  assertEquals(await days(db, "avatar_choice", { election_id: 2026, election_type: "縣市長" }), 2780);
   assertEquals(await days(db, "profile_gap", { election_id: 2026, election_type: "村里長", missing: ["avatar_url"] }), 2660);
   assertEquals(await days(db, "avatar_choice", { election_id: 2026, election_type: "村里長" }), 2660);
-  // 2022 縣市長被按（網站請求／boost）：屆基準換成最新一屆 2600；加上 200 天的 boost_seconds ＝ 2985
+  // 2022 縣市長被按（網站請求／boost）：屆基準換成最新一屆 2600；加上 400 天的 boost_seconds ＝ 3345
   const pressed = await days(db, "policy_missing", { election_id: 2022, election_type: "縣市長" }, true);
-  assertEquals(pressed, 2600 + 170 + 15);
-  assertEquals(pressed + 17280000 / DAY, 2985);
-  assertEquals(await days(db, "policy_missing", { election_id: 2022, election_type: "縣市長" }, false), 2200 + 170 + 15, "沒被按就是自己的屆");
+  assertEquals(pressed, 2600 + 170 + 175);
+  assertEquals(pressed + 34560000 / DAY, 3345);
+  assertEquals(await days(db, "policy_missing", { election_id: 2022, election_type: "縣市長" }, false), 2200 + 170 + 175, "沒被按就是自己的屆");
   // county 脈絡：2026（沒有選舉 id 當 2026）＋ 縣市長層 170 ＋ 脈絡 12
   assertEquals(await days(db, "lineage_candidate", { level: "county", region: "雲林縣" }), 2782);
   assertEquals(await days(db, "lineage_link_candidate", { level: "township" }), 2600 + 110 + 12);
@@ -199,32 +205,42 @@ Deno.test("B3 表值抽查：2026 縣市長抄公報 2785、村里長照片 2660
   await db.close();
 });
 
-Deno.test("B4 跨屆不混排：任何 2024 的組合都低於任何 2026 的組合（屆差 200 天 > 層級＋種類最大 189 天）；2026 村里長照片 > 2024 縣市長抄公報", async () => {
+Deno.test("B4 抄公報高於所有層級的其他種類；插隊高於所有抄公報；同屆下 2026 村里長抄公報 > 縣市長查證票", async () => {
   const db = await env();
-  let max2024 = -Infinity, min2026 = Infinity, max2022 = -Infinity;
+  let maxOther = -Infinity, minBulletin = Infinity, maxBulletin = -Infinity;
   for (const lvl of [...Object.keys(LEVELS), ""]) {
     for (const [type, k] of Object.entries(KINDS)) {
-      const t = (id: number) => ({ election_id: id, ...(lvl ? { election_type: lvl } : {}) });
+      const target = { election_id: 2026, ...(lvl ? { election_type: lvl } : {}), ...(type.startsWith("lineage_") ? { level: "county" } : {}) };
       const eff = type === "verify" ? "adjudicate" : type;
-      const d = (id: number) => days(db, eff, t(id));
-      const lv = lvl ? LEVELS[lvl]! : 30;
-      const lvEff = ["news_sweep", "regional_stat_missing", "other", "沒列到的新型別"].includes(type) || type.startsWith("lineage_") ? 30 : lv;
-      void k;
-      max2024 = Math.max(max2024, await d(2024));
-      max2022 = Math.max(max2022, await d(2022));
-      min2026 = Math.min(min2026, await d(2026));
-      assertEquals(await d(2026) - 2600, lvEff + KINDS[type]!, `${lvl || "無層級"} × ${type}`);
+      const d = (await days(db, eff, target)) - 2600; // 層級＋種類
+      const isBulletin = type === "policy_missing" || type === "policy_election_missing";
+      const lvEff = ["news_sweep", "regional_stat_missing", "other", "沒列到的新型別"].includes(type) ? 30 : type.startsWith("lineage_") ? 170 : (lvl ? LEVELS[lvl]! : 30);
+      assertEquals(d, lvEff + k, `${lvl || "無層級"} × ${type}`);
+      if (isBulletin) { minBulletin = Math.min(minBulletin, d); maxBulletin = Math.max(maxBulletin, d); } else maxOther = Math.max(maxOther, d);
     }
   }
-  assert(max2024 < min2026, `${max2024} < ${min2026}`);
-  assert(max2022 < min2026);
-  assert(await days(db, "profile_gap", { election_id: 2026, election_type: "村里長", missing: ["avatar_url"] }) > await days(db, "policy_missing", { election_id: 2024, election_type: "縣市長" }));
+  assertEquals(maxOther, 189, "最高的非抄公報＝縣市長查證票 170＋19");
+  assertEquals(minBulletin, 30 + 175, "最低的抄公報（無層級）；村里長抄公報＝225");
+  assert(minBulletin > maxOther, "任何層級的抄公報都高於任何層級的其他種類");
+  assertEquals(maxBulletin, 170 + 175);
+  // 抄公報內部仍照層級
+  const lv = ["縣市長", "縣市議員", "鄉鎮市長", "鄉鎮市民代表", "村里長"];
+  const ls: number[] = [];
+  for (const l of lv) ls.push(await days(db, "policy_missing", { election_id: 2026, election_type: l }));
+  for (let i = 1; i < ls.length; i++) assert(ls[i - 1]! > ls[i]!);
+  // 村里長抄公報 2825 > 縣市長查證票 2600＋170＋19 ＝ 2789
+  assert(await days(db, "policy_missing", { election_id: 2026, election_type: "村里長" }) > await days(db, "adjudicate", { election_id: 2026, election_type: "縣市長" }));
+  // 插隊：最低插隊（無層級、其他種類 0）30＋0＋400 ＝ 430 高於最高抄公報 345
+  assert(30 + 0 + 400 > maxBulletin);
+  // 屆：2024 的抄公報不再一律低於 2026 的其他種類（抄公報種類 175 ＞ 屆差內的層級差），同屆同種類的屆序仍是 2026 > 2024 > 2022
+  assert(await days(db, "policy_missing", { election_id: 2026, election_type: "村里長" }) > await days(db, "policy_missing", { election_id: 2024, election_type: "村里長" }));
+  assert(await days(db, "policy_missing", { election_id: 2024, election_type: "村里長" }) > await days(db, "policy_missing", { election_id: 2022, election_type: "村里長" }));
   await db.close();
 });
 
-Deno.test("B5 同屆同層種類順序：查證 > 抄公報 > 任內政見 > 脈絡 > 照片 > 人物基本資料 > 整理 > 進度 > 其他；層級順序縣市長 > … > 村里長", async () => {
+Deno.test("B5 同屆同層種類順序：抄公報 > 查證 > 任內政見 > 脈絡 > 照片 > 人物基本資料 > 整理 > 進度 > 其他；層級順序縣市長 > … > 村里長", async () => {
   const db = await env();
-  const order = ["adjudicate", "policy_missing", "term_policy_missing", "lineage_candidate", "avatar_choice", "profile_detail_gap", "duplicate_policy", "progress_stale", "roster_check"];
+  const order = ["policy_missing", "adjudicate", "term_policy_missing", "lineage_candidate", "avatar_choice", "profile_detail_gap", "duplicate_policy", "progress_stale", "roster_check"];
   const ds: number[] = [];
   for (const t of order) ds.push(await days(db, t, { election_id: 2026, election_type: "鄉鎮市長", ...(t.startsWith("lineage") ? { level: "township" } : {}) }));
   for (let i = 1; i < ds.length; i++) assert(ds[i - 1]! > ds[i]!, `${order[i - 1]} 排在 ${order[i]} 前面：${ds}`);
@@ -289,7 +305,7 @@ Deno.test("B7 最新一屆：election_date 最大的例行選舉（重行選舉�
 
 Deno.test("B8 帶狀秒數函式：task_band_priority_seconds(層級文字, 型別, 缺照片) ＝ (層級＋種類) × 86400；與 target 版一致", async () => {
   const db = await env();
-  assertEquals(await num(db, `task_band_priority_seconds('縣市長', 'policy_missing', false)`), (170 + 15) * DAY);
+  assertEquals(await num(db, `task_band_priority_seconds('縣市長', 'policy_missing', false)`), (170 + 175) * DAY);
   assertEquals(await num(db, `task_band_priority_seconds('村里長', 'profile_gap', true)`), (50 + 10) * DAY);
   assertEquals(await num(db, `task_band_priority_seconds(NULL, 'other', false)`), 30 * DAY);
   const target = { election_type: "鄉鎮市民代表", missing: ["avatar_url"] };
@@ -349,8 +365,8 @@ Deno.test("B9 流量比例制：30 人 ＝ +30 天、1 人 ＝ +1 天、0 人／
 Deno.test("B10 seed 屆基準＋層級＋種類：自動缺口用自己那一屆；插隊中（既有列 boost>0）與新手動缺口用最新一屆；派出後（boost 歸零）換回自己那一屆", async () => {
   const db = await seedEnv();
   await db.exec(`
-    INSERT INTO task_dispatches (task_id, boost_seconds) VALUES ('boosted', 17280000), ('dispatched', 0);
-    INSERT INTO _manual_front VALUES ('newweb', 17280000), ('newsugg', 0);
+    INSERT INTO task_dispatches (task_id, boost_seconds) VALUES ('boosted', 34560000), ('dispatched', 0);
+    INSERT INTO _manual_front VALUES ('newweb', 34560000), ('newsugg', 0);
     INSERT INTO _gaps VALUES
       ('auto2022',   'policy_missing',    'policy_missing', '{"election_id": 2022, "election_type": "縣市長"}', '{}', 0),
       ('boosted',    'policy_missing',    'policy_missing', '{"election_id": 2022, "election_type": "縣市長"}', '{}', 0),
@@ -360,12 +376,12 @@ Deno.test("B10 seed 屆基準＋層級＋種類：自動缺口用自己那一屆
       ('traffic',    'policy_missing',    'policy_missing', '{"election_id": 2026, "election_type": "縣市長"}', '{"traffic_boost": true, "traffic_users": 30}', 0)`);
   await runTraffic(db);
   await runBand(db);
-  assertEquals(await prio(db, "auto2022"), (2200 + 170 + 15) * DAY, "沒插隊：自己那一屆（2022）");
-  assertEquals(await prio(db, "boosted"), (2600 + 170 + 15) * DAY, "插隊中：最新一屆（2026）；再加 boost 200 天 ＝ 2985");
-  assertEquals(await prio(db, "dispatched"), (2200 + 170 + 15) * DAY, "手動臂但已派出（boost 歸零）：換回自己那一屆");
+  assertEquals(await prio(db, "auto2022"), (2200 + 170 + 175) * DAY, "沒插隊：自己那一屆（2022）");
+  assertEquals(await prio(db, "boosted"), (2600 + 170 + 175) * DAY, "插隊中：最新一屆（2026）；再加 boost 400 天");
+  assertEquals(await prio(db, "dispatched"), (2200 + 170 + 175) * DAY, "手動臂但已派出（boost 歸零）：換回自己那一屆");
   assertEquals(await prio(db, "newweb"), (2600 + 30 + 8) * DAY, "新網站請求缺口：最新一屆；沒帶人物 ＝ 無層級 30；profile_gap 無 missing ＝ 人物基本資料 8");
   assertEquals(await prio(db, "newsugg"), (2200 + 30 + 0) * DAY, "手動臂但沒有插隊（manual_front_seconds ＝ 0）：自己那一屆");
-  assertEquals(await prio(db, "traffic"), (30 + 2600 + 170 + 15) * DAY, "流量 30 人 ＝ +30 天，疊在屆基準＋帶狀之上");
+  assertEquals(await prio(db, "traffic"), (30 + 2600 + 170 + 175) * DAY, "流量 30 人 ＝ +30 天，疊在屆基準＋帶狀之上");
   await db.close();
 });
 
@@ -398,7 +414,7 @@ Deno.test("B11 驗證票帶狀：母任務層級 ＋ 19 天；母任務列不在
   await db.close();
 });
 
-Deno.test("B12 裁決（adjudicate）繼承母交件的層級：payload／母任務／applied_politician_id；取不到才無層級；仍排在同層抄公報之前", async () => {
+Deno.test("B12 裁決（adjudicate）繼承母交件的層級：payload／母任務／applied_politician_id；取不到才無層級", async () => {
   const db = await env();
   const c = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
   const pid = "44444444-4444-4444-8444-444444444444";
@@ -417,25 +433,40 @@ Deno.test("B12 裁決（adjudicate）繼承母交件的層級：payload／母任
   assertEquals(await adj(4), 30, "取不到＝無層級");
   assertEquals(await num(db, `task_level_days('adjudicate', ${lit({ contribution_id: "not-a-uuid" })})`), 30, "亂的 id 不拋錯");
   assertEquals(await num(db, `task_level_days('adjudicate', ${lit({ election_type: "村里長" })})`), 50, "沒有 contribution_id 時看 target 自己");
-  // 縣市長層的裁決（2600＋170＋19）仍排在同層的抄公報（2600＋170＋15）之前
+  // 抄公報（2600＋170＋175）高於同層的裁決（2600＋170＋19）
   const adjDays = (await num(db, `task_year_priority_seconds('{}'::jsonb, false)`)) / DAY + (await adj(2)) + 19;
-  assert(adjDays > await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }));
+  assert(adjDays < await days(db, "policy_missing", { election_id: 2026, election_type: "縣市長" }));
   await db.close();
 });
 
-Deno.test("B13 驗證票與母任務同層、票比母任務多 (19 − 母種類) 天，層級不重複算", async () => {
+Deno.test("B13 驗證票簡化：票 ＝ 屆基準＋母任務層級＋19（不再沿用母任務位置）；現行 verify_ticket_base 一律取交件建立時間減（選舉年＋層級＋19）", async () => {
+  const vb = fnText(BULLETIN, "verify_ticket_base");
+  assert(vb.includes("COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id) + verify_ticket_band_seconds(p_verify_task_id))"));
+  assert(!vb.includes("dispatch_base_at") && !vb.includes("verify_ticket_parent_lead_seconds"), "不再沿用母任務位置");
   const db = await env();
-  for (const [type, k] of Object.entries(KINDS)) {
-    if (type === "verify" || type === "adjudicate" || type === "沒列到的新型別") continue;
-    const target = { election_id: 2026, election_type: "縣市議員", ...(type.startsWith("lineage") ? { level: "county" } : {}) };
-    const lead = (await num(db, `verify_ticket_parent_lead_seconds('${type}', ${lit(target)})`)) / DAY;
-    assertEquals(lead, 19 - k, `${type}：領先 19 − ${k}`);
-    assert(lead >= 0);
-    // 母任務總分（屆基準＋層級＋母種類）加領先 ＝ 屆基準＋母任務層級＋19
-    const parentLevel = await num(db, `task_level_days('${type}', ${lit(target)})`);
-    const parentTotal = await days(db, type, target);
-    assertEquals(parentTotal + lead, 2600 + parentLevel + 19, `${type}：票 ＝ 屆基準＋母任務層級＋19`);
+  // 母任務的層級帶：各種層級的票比 2026 屆基準多 層級＋19 天；抄公報種類 175 不會讓票變負
+  let idx = 0;
+  for (const [lvl, d] of Object.entries(LEVELS)) {
+    idx++;
+    const c = `00000000-0000-4000-8000-${String(100 + idx).padStart(12, "0")}`;
+    await db.exec(`INSERT INTO task_dispatches (task_id, task_type, target) VALUES ('auto:t${idx}', 'policy_missing', '{"election_id": 2026, "election_type": "${lvl}"}');
+      INSERT INTO contributions (id, task_id, payload) VALUES ('${c}', 'auto:t${idx}', '{}')`);
+    assertEquals(await num(db, `verify_ticket_band_seconds('verify:${c}')`), (d + 19) * DAY, `${lvl}：票領先 層級＋19`);
   }
-  assertEquals(await num(db, `verify_ticket_parent_lead_seconds('adjudicate', '{}'::jsonb)`), 0, "母任務自己就是 19：不領先");
   await db.close();
 });
+
+Deno.test("B14 這支 migration：插隊四值 400 天、備份表與依序鎖列、欄位在前一支、不碰 seed 與觸發器", async () => {
+  assert(BULLETIN.includes("boost_seconds = 34560000, manual_front_seconds = 34560000, visitor_front_seconds = 34560000, visitor_front_pre_election_seconds = 34560000"));
+  assert(BULLETIN.includes("SET LOCAL lock_timeout = '5s'") && BULLETIN.includes("ORDER BY d.task_id FOR UPDATE") && BULLETIN.includes("priority_bands2_backup"));
+  const bcode = BULLETIN.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assert(!bcode.includes("priority_bands_backup"), "不蓋 #1026 的回滾點");
+  assert(BULLETIN.includes("priority_bands_bulletin_applied_at IS NOT NULL"));
+  const code = BULLETIN.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assert(!/ADD COLUMN/i.test(code));
+  assertEquals([...code.matchAll(/CREATE OR REPLACE FUNCTION ([a-z_]+)\(/g)].map((m) => m[1]), ["task_kind_days_by_type", "verify_ticket_base"]);
+  const cols = await readMig("20261122155900_priority_bands_bulletin_columns.sql");
+  assert(/ADD COLUMN IF NOT EXISTS priority_bands_bulletin_applied_at/.test(cols) && !/\b(UPDATE|INSERT|DELETE)\b/.test(cols.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n")));
+  assert(BULLETIN.includes("-- 回滾（順序照這樣）："));
+});
+
