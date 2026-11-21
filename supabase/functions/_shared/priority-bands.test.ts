@@ -29,12 +29,14 @@ Deno.test("A1 seed：新定義 ＝ 上一版逐字（拿掉被取代的兩段）
   assertNotEquals(neuStripped, neu, "有標記區塊");
   const prevStripped = prev
     .replace(/  -- >>> 優先秒數：流量提層的缺口[\s\S]*?  -- <<< 優先秒數\n/, "")
-    .replace(/  -- >>> 選舉年優先[\s\S]*?  -- <<< 選舉類別提前天數\n/, "");
+    .replace(/  -- >>> 選舉年優先[\s\S]*?  -- <<< 選舉類別提前天數\n/, "")
+    .replace(/  UPDATE _gaps g SET priority_seconds = p\.seconds, priority_rule_id = p\.rule_id\n[\s\S]*?p\.etype IS NOT DISTINCT FROM NULLIF\(g\.target->>'election_type', ''\);\n/, "");
   assertNotEquals(prevStripped, prev, "上一版有被取代的兩段");
   assertEquals(neuStripped, prevStripped);
-  assertEquals((neu.match(/>>> 帶狀優先/g) ?? []).length, 2, "兩個區塊（流量比例制、屆基準＋層級＋種類）");
+  assertEquals((neu.match(/>>> 帶狀優先/g) ?? []).length, 3, "三個區塊（不問規則秒數、流量比例制、屆基準＋層級＋種類）");
+  assert(!neu.includes("activity_priority_seconds(k.arm"), "seed 不再呼叫 activity_priority_seconds");
   // 順序：規則 → 流量提層 → 流量比例制（重新起算）→ 需求疊加 → 屆基準＋帶狀 → 換號沿用
-  assert(neu.indexOf("<<< 流量提層") < neu.indexOf(">>> 帶狀優先"));
+  assert(neu.indexOf("<<< 流量提層") < neu.indexOf(">>> 帶狀優先（20261121）：優先秒數從這裡重新算"));
   assert(neu.indexOf("<<< 需求疊加") < neu.lastIndexOf(">>> 帶狀優先"));
   assert(neu.lastIndexOf("<<< 帶狀優先") < neu.indexOf(">>> 換號沿用排隊位置"));
   // 不再讀的東西
@@ -91,7 +93,23 @@ Deno.test("A5 設定：插隊四值 200 天、驗證領先 0、流量無門檻�
   assert(!/DELETE FROM activity_rules/.test(MIG));
   assert(MIG.includes("priority_bands_applied_at IS NOT NULL") && MIG.includes("UPDATE queue_settings SET priority_bands_applied_at = now()"));
   assert(MIG.includes("min_users = 1, per_user_seconds = 86400"));
-  assert(MIG.includes("-- 回滾："), "檔頭有回滾方式");
+  assert(MIG.includes("-- 回滾（順序要照這樣）："), "檔頭有回滾方式");
+});
+
+Deno.test("A5b 鎖：欄位在前一支（只有 ALTER ADD COLUMN）；主 migration 檔首 lock_timeout、不再 ALTER TABLE ADD COLUMN；備份表與依序鎖列", async () => {
+  const COLS = await readMig("20261121192900_priority_bands_columns.sql");
+  const code = COLS.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assert(/SET LOCAL lock_timeout/.test(code));
+  assertEquals([...code.matchAll(/ALTER TABLE (\w+) ADD COLUMN IF NOT EXISTS (\w+)/g)].map((m) => `${m[1]}.${m[2]}`), ["traffic_boost_settings.per_user_seconds", "queue_settings.priority_bands_applied_at"]);
+  assert(!/\b(UPDATE|INSERT|DELETE|CREATE OR REPLACE FUNCTION)\b/.test(code), "前一支只加欄位、不重算");
+  const main = MIG.split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
+  assert(!/ADD COLUMN/i.test(main.replace(/ALTER TABLE _gaps ADD COLUMN[^;]*;/g, "")), "主 migration 不再 ADD COLUMN（_gaps 暫存表除外）");
+  assert(main.indexOf("SET LOCAL lock_timeout = '5s'") >= 0 && main.indexOf("SET LOCAL lock_timeout") < main.indexOf("CREATE OR REPLACE FUNCTION"), "lock_timeout 在第一個 DDL 之前");
+  assert(main.includes("priority_bands_backup") && main.includes("ORDER BY d.task_id FOR UPDATE"));
+  // 回滾 SQL 有備份表可還原、且驗證票基準不再寫「再減 14 天」的舊公式
+  assert(!MIG.includes("band_seconds(task_id) - 1209600"));
+  assert(MIG.includes("FROM priority_bands_backup b WHERE d.task_id = b.task_id AND d.task_id LIKE 'verify:%'"));
+  assertEquals((await readMig("20261121192900_priority_bands_columns.sql")).length > 0, true);
 });
 
 Deno.test("A6 不升協議版號、不動 TS、不重新定義排序鍵與觸發器", () => {
@@ -244,6 +262,17 @@ Deno.test("B6 層級怎麼對上：election_type → 參選紀錄 → 最近一�
   await db.close();
 });
 
+Deno.test("B6b 同人同屆兩筆參選紀錄不會讓查詢炸：取 id 最小那筆；lineage 沒有 town 對映", async () => {
+  const db = await env();
+  const pid = "55555555-5555-4555-8555-555555555555";
+  await db.exec(`INSERT INTO politician_elections (politician_id, election_id, election_type) VALUES ('${pid}', 2026, '縣市議員'), ('${pid}', 2026, '村里長')`);
+  assertEquals(await num(db, `task_level_days('profile_gap', ${lit({ politician_id: pid, election_id: 2026 })})`), 130);
+  assertEquals(await num(db, `task_level_days('profile_gap', ${lit({ politician_id: pid })})`), 130, "只有人物：最近一屆內取層級高的");
+  assertEquals(await num(db, `task_level_days('lineage_candidate', ${lit({ level: "town" })})`), 30, "lineage 的 town 不對映");
+  assertEquals(await num(db, `task_level_days('lineage_candidate', ${lit({ level: "national" })})`), 170, "national ＝ 縣市長層（與總統同層）");
+  await db.close();
+});
+
 Deno.test("B7 最新一屆：election_date 最大的例行選舉（重行選舉不算）；插隊用它、不插隊用自己那一屆", async () => {
   const db = await env();
   assertEquals(await num(db, "latest_election_base_seconds()"), 2600 * DAY);
@@ -272,8 +301,8 @@ Deno.test("B8 帶狀秒數函式：task_band_priority_seconds(層級文字, 型�
 function seedBlock(): { traffic: string; band: string } {
   const neu = fn("seed_auto_task_queue");
   const blocks = [...neu.matchAll(/  -- >>> 帶狀優先[^\n]*\n[\s\S]*?  -- <<< 帶狀優先\n/g)].map((m) => m[0]);
-  assertEquals(blocks.length, 2);
-  return { traffic: blocks[0]!, band: blocks[1]! };
+  assertEquals(blocks.length, 3);
+  return { traffic: blocks[1]!, band: blocks[2]! };
 }
 async function seedEnv(): Promise<PGlite> {
   const db = await env();

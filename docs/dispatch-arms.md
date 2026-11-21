@@ -95,7 +95,7 @@ priority_days = 屆基準 ＋ 層級 ＋ 種類 ＋ 流量提層（＋ 需求疊
 
 例：2026 縣市長抄公報 ＝ 2600＋170＋15 ＝ 2785 天；2026 村里長照片 ＝ 2660；2024 縣市長抄公報 ＝ 2585（輸給 2026 村里長照片，屆與屆之間差 200 天、層級＋種類最多 189 天，不會混排）。
 
-**層級怎麼對上**（`task_level_text`）：`lineage_*` 用 `target.level`（county／national→縣市長層、township→鄉鎮市長層、village→村里長層）；其他有層級的型別用 `target.election_type`，沒有就用 `target.politician_id`＋`election_id` 查 `politician_elections`，再沒有取這個人最近一屆的職位；「其他」那組（`news_sweep`、`regional_stat_missing`、`other`、沒列到的）無層級 30（`roster_check` 照職位）。驗證票用母任務的層級（`verify_ticket_band_seconds`）。
+**層級怎麼對上**（`task_level_text`）：`lineage_*` 用 `target.level`（county→縣市長層、national→縣市長層（與總統同層 170，規格沒寫、本支定的）、township→鄉鎮市長層、village→村里長層）；其他有層級的型別用 `target.election_type`，沒有就用 `target.politician_id`＋`election_id` 查 `politician_elections`，再沒有取這個人最近一屆的職位；「其他」那組（`news_sweep`、`regional_stat_missing`、`other`、沒列到的）無層級 30（`roster_check` 照職位）。驗證票用母任務的層級（`verify_ticket_band_seconds`）。
 
 **插隊**（網站請求、`/boost`、維護者建的任務、請求併入既有缺口）一律 +200 天（`queue_settings` 的 `boost_seconds`、`manual_front_seconds`、`visitor_front_seconds`、`visitor_front_pre_election_seconds` 都是 17,280,000），**且屆基準改用最新一屆**（`latest_election_base_seconds()`＝`elections` 裡 `election_date` 最大的例行選舉，`election_reason='regular'`），不看人物所屬屆：2022 縣市長被按 ＝ 2600＋170＋15 ＋ 200 ＝ 2985 天。「插隊中」＝列上 `boost_seconds > 0`（新缺口＝手動臂且 `manual_front_seconds > 0`）；插隊派出就歸零，屆基準下一輪 seed 換回人物自己那一屆。網站只有政見／人物／進度／驗證／稽核按鈕，沒有獨立照片按鈕，網站請求的 `profile_gap` 算人物基本資料（8 天）。
 

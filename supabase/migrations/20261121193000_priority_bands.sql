@@ -23,7 +23,7 @@
 --   層級 20 天一格、種類最大 19 天，所以種類不會蓋過層級；屆與屆之間差 200 天，層級＋種類（最多 189 天）也蓋不過屆。
 --
 -- 每種任務怎麼知道「層級」（task_level_text → election_level_days）：
---   1. lineage_*（脈絡）：target.level 直接對映——county／national → 縣市長層、township／town → 鄉鎮市長層、village → 村里長層；沒有或別的值 ＝ 無層級。
+--   1. lineage_*（脈絡）：target.level 直接對映——county → 縣市長層、national → 縣市長層（與總統副總統同層 170，維護者規格沒寫、本支定的）、township → 鄉鎮市長層、village → 村里長層；沒有或別的值 ＝ 無層級。
 --   2. 其他有層級的種類：target.election_type；沒有就用 target.politician_id ＋ target.election_id 查 politician_elections；
 --      都沒有（沒帶選舉 id，例如網站請求只帶 politician_id）就取這個人「最近一屆」的職位。
 --   3. 其他（news_sweep、regional_stat_missing、other、沒列到的）一律無層級（30）；roster_check 照職位。
@@ -63,23 +63,30 @@
 --   3. contribution_tasks_insert_dispatch（以 20261114010000 為底）、seed_auto_task_queue（以 20261119170000 為底）：只差標 >>> 帶狀優先 的區塊
 --   4. verify_ticket_base（以 20261114070100 為底，只差標 >>> 帶狀優先 的兩處）
 --   5. 設定：queue_settings 四個插隊值 → 200 天、verify_priority_seconds → 0；activity_rules #37／#38／#39 停用
---   6. 一次性重算：現有任務列的 priority_seconds（以及插隊中的列抬到 200 天）、現有驗證票的基準（14 天換成層級帶狀）；前後各印一次隊頭 30 筆（任務型別×層級）
+--   6. 一次性重算（先把改前的值存進 priority_bands_backup；先依 task_id 順序鎖列再改，降低與 /next、seed 的死鎖機會）：現有任務列的 priority_seconds（以及插隊中的列抬到 200 天）、現有驗證票的基準（14 天換成層級帶狀）；前後各印一次隊頭 30 筆（任務型別×層級）
 --      冪等：queue_settings.priority_bands_applied_at 有值就整段跳過。重算只給「屆基準＋層級＋種類」；流量與需求疊加在下一輪 seed（10 分鐘內）補上。
 --   不升協議版號、不改 TS、不動資料表內容（politicians／policies…）。
 --
 -- 日本站（policy_jp）：不跟（沒有職位層級與選舉年後兩碼）。drift 守門的 contribution_tasks_insert_dispatch 比對本來就讀 20261112005000 之前的版本（登記「日本站暫不跟」），
 --   seed 讀 20261017010000 之前的版本，都不受這支影響。
 --
--- 回滾：
+-- 回滾（順序要照這樣）：
 --   1. UPDATE activity_rules SET enabled = true WHERE id IN (37, 38, 39);
 --   2. UPDATE queue_settings SET boost_seconds = 2592000, manual_front_seconds = 2592000, visitor_front_seconds = 4320000, visitor_front_pre_election_seconds = 8640000, verify_priority_seconds = 1209600 WHERE id = 1;
 --      UPDATE traffic_boost_settings SET min_users = 5 WHERE id = 1;
+--      （verify_priority_seconds 要先設回，下面第 4 步改 dispatch_base_at 時觸發器才用 14 天算回原位置）
 --   3. 把 seed_auto_task_queue 換回 20261119170000、contribution_tasks_insert_dispatch 換回 20261114010000、traffic_boost_apply 換回 20261011350000、
---      verify_ticket_base 換回 20261114070100 的定義（CREATE OR REPLACE，內容在那幾支檔案）。
---   4. 已凍結的驗證票基準已折進層級帶狀、回滾不會自動還原：要還原先跑
---        UPDATE task_dispatches SET dispatch_base_at = dispatch_base_at + make_interval(secs => verify_ticket_band_seconds(task_id) - 1209600) WHERE task_id LIKE 'verify:%';
---      （在把 verify_priority_seconds 設回 1209600 之前，且要在第 3 步換回 verify_ticket_base 之前跑，才算得到層級）；任務列的 priority_seconds 下一輪 seed（10 分鐘）自己換回。
---   5. 新函式與 per_user_seconds 欄位留著不影響（不再被讀）。
+--      verify_ticket_base 換回 20261114070100 的定義（CREATE OR REPLACE，內容在那幾支檔案；seed 的兩個 SET 要帶著走）。
+--   4. 驗證票基準與插隊：這支套用時把每一列改前的值存在表 priority_bands_backup（task_id、dispatch_base_at、priority_seconds、boost_seconds、queue_at），精確還原用：
+--        UPDATE task_dispatches d SET dispatch_base_at = b.dispatch_base_at FROM priority_bands_backup b WHERE d.task_id = b.task_id AND d.task_id LIKE 'verify:%';
+--        UPDATE task_dispatches d SET boost_seconds = b.boost_seconds FROM priority_bands_backup b WHERE d.task_id = b.task_id AND d.task_id NOT LIKE 'verify:%' AND d.boost_seconds = 17280000 AND b.boost_seconds < 17280000 AND b.boost_seconds > 0;
+--      （套用之後才建的票不在備份裡，不會被還原；任務列的 priority_seconds 下一輪 seed 自己換回。）
+--   5. 新函式、per_user_seconds 欄位與備份表留著不影響（不再被讀）。
+
+-- 鎖與逾時：這支是一個交易（含一次性重算約 3.1 萬列）。lock_timeout 5 秒：拿不到鎖（例如 /next 或 seed 正在寫同一批列）就整支失敗重跑，
+-- 不是排隊等著把 /next 一起拖住；statement_timeout 給重算足夠的時間。欄位已在前一支加好，這支不再持 ACCESS EXCLUSIVE。
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '300s';
 
 -- ------------------------------------------------------------
 -- 1. 層級／種類／帶狀函式
@@ -133,7 +140,8 @@ LANGUAGE sql STABLE AS $$
   SELECT COALESCE(
     NULLIF(p_target->>'election_type', ''),
     (SELECT pe.election_type::TEXT FROM politician_elections pe
-      WHERE pe.politician_id = uuid_or_null(p_target->>'politician_id') AND pe.election_id = election_id_or_null(p_target->>'election_id')),
+      WHERE pe.politician_id = uuid_or_null(p_target->>'politician_id') AND pe.election_id = election_id_or_null(p_target->>'election_id')
+      ORDER BY pe.id LIMIT 1),
     (SELECT pe.election_type::TEXT FROM politician_elections pe JOIN elections e ON e.id = pe.election_id
       WHERE pe.politician_id = uuid_or_null(p_target->>'politician_id')
       ORDER BY e.election_date DESC, election_level_days(pe.election_type::TEXT) DESC LIMIT 1))
@@ -158,10 +166,10 @@ LANGUAGE sql STABLE AS $$
            WHEN p_task_type = 'adjudicate' THEN COALESCE(contribution_level_text(uuid_or_null(p_target->>'contribution_id')), task_target_level_text(p_target))
            WHEN p_task_type LIKE 'lineage\_%' THEN
              CASE p_target->>'level' WHEN 'county' THEN '縣市長' WHEN 'national' THEN '縣市長'
-                                     WHEN 'township' THEN '鄉鎮市長' WHEN 'town' THEN '鄉鎮市長' WHEN 'village' THEN '村里長' END
+                                     WHEN 'township' THEN '鄉鎮市長' WHEN 'village' THEN '村里長' END
            ELSE task_target_level_text(p_target) END
 $$;
-COMMENT ON FUNCTION task_level_text IS '任務的層級職位文字（20261121）：adjudicate 繼承母交件（target.contribution_id）的層級；lineage_* 用 target.level（county／national→縣市長、township→鄉鎮市長、village→村里長）；其餘有層級的型別用 task_target_level_text；「其他」組與對不上的 NULL（＝無層級 30 天）。2026-11-21';
+COMMENT ON FUNCTION task_level_text IS '任務的層級職位文字（20261121）：adjudicate 繼承母交件（target.contribution_id）的層級；lineage_* 用 target.level（county／national→縣市長［national 與總統同層 170］、township→鄉鎮市長、village→村里長）；其餘有層級的型別用 task_target_level_text；「其他」組與對不上的 NULL（＝無層級 30 天）。2026-11-21';
 
 CREATE OR REPLACE FUNCTION task_level_days(p_task_type TEXT, p_target JSONB) RETURNS INTEGER
 LANGUAGE sql STABLE AS $$ SELECT election_level_days(task_level_text(p_task_type, p_target)) $$;
@@ -226,7 +234,7 @@ COMMENT ON FUNCTION verify_ticket_parent_lead_seconds IS '驗證票對母任務�
 -- ------------------------------------------------------------
 -- 2. 流量提層改比例制
 -- ------------------------------------------------------------
-ALTER TABLE traffic_boost_settings ADD COLUMN IF NOT EXISTS per_user_seconds INTEGER NOT NULL DEFAULT 86400 CHECK (per_user_seconds >= 0);
+-- per_user_seconds 欄位由前一支 20261121192900_priority_bands_columns.sql 先加（只加欄位＋預設值，避免 ACCESS EXCLUSIVE 鎖跟著這支的大交易拖長）
 COMMENT ON COLUMN traffic_boost_settings.per_user_seconds IS '流量提層比例制（20261121）：每 1 位近 window_days 天不重複訪客加幾秒優先秒數（86400＝1 天），無門檻、無上限；取代固定的 boost_seconds。2026-11-21';
 COMMENT ON COLUMN traffic_boost_settings.boost_seconds IS 'deprecated（20261121）：流量提層改比例制（per_user_seconds × 訪客數），這欄不再被讀。2026-11-21';
 COMMENT ON COLUMN traffic_boost_settings.min_users IS '門檻：近 window_days 天不重複訪客至少幾人才算有真實流量。20261121 起比例制無門檻，值＝1（CHECK 要求 ≥ 1；0 人的頁面本來就不會在 page_traffic 裡）';
@@ -374,13 +382,8 @@ BEGIN
 
   -- >>> 優先秒數（20261011320000）：每個缺口的優先秒數（每組「臂×選舉×職位」問一次；多條規則相符取最小；20261011350000 起相符的規則 id 也從這裡記，不再另算層）
   ALTER TABLE _gaps ADD COLUMN priority_seconds INTEGER, ADD COLUMN priority_rule_id BIGINT;
-  UPDATE _gaps g SET priority_seconds = p.seconds, priority_rule_id = p.rule_id
-    FROM (SELECT k.arm, k.eid, k.etype, x.seconds, x.rule_id
-            FROM (SELECT DISTINCT y.arm, election_id_or_null(y.target->>'election_id') AS eid, NULLIF(y.target->>'election_type', '') AS etype FROM _gaps y) k
-            CROSS JOIN LATERAL activity_priority_seconds(k.arm, k.eid, k.etype) x) p
-   WHERE p.arm = g.arm
-     AND p.eid IS NOT DISTINCT FROM election_id_or_null(g.target->>'election_id')
-     AND p.etype IS NOT DISTINCT FROM NULLIF(g.target->>'election_type', '');
+  -- >>> 帶狀優先（20261121）：不再呼叫 activity_priority_seconds（規則秒數不再被讀，下面的優先秒數整個重新算）；priority_rule_id 維持 NULL，opened_by 不再記 priority_rule_id
+  -- <<< 帶狀優先
   -- <<< 優先秒數
 
   -- >>> 流量提層：人物頁、政見頁近 window_days 天有真實流量（page_traffic_hot）的，名下缺口標 opened_by.traffic_boost（下一段給秒數）；page_traffic 與狀態都是空的就什麼都不做（參數與規則見 traffic_boost_settings、traffic_boost_apply）
@@ -549,7 +552,7 @@ UPDATE activity_rules
        note = COALESCE(note || '｜', '') || '2026-11-21 層級×種類帶狀優先取代：停用（維護者「這樣改吧」）。優先秒數整個改由 task_band_seconds 等函式決定'
  WHERE id IN (37, 38, 39) AND activity IN ('priority:*', 'priority:raw:policy_missing') AND enabled;
 
-ALTER TABLE queue_settings ADD COLUMN IF NOT EXISTS priority_bands_applied_at TIMESTAMPTZ;
+-- priority_bands_applied_at 欄位由前一支 20261121192900_priority_bands_columns.sql 先加
 COMMENT ON COLUMN queue_settings.priority_bands_applied_at IS '層級×種類帶狀優先（20261121）的一次性設定與重算做完的時間；有值＝已套用，重跑 migration 不再動設定、不再疊加。2026-11-21';
 COMMENT ON COLUMN queue_settings.election_type_priority_days IS 'deprecated（20261121）：被層級帶狀（election_level_days）取代，seed 與手動入列不再讀；欄位與 election_type_priority_seconds() 留著。原：依選舉類別的優先提前天數（20261114010000）';
 COMMENT ON COLUMN queue_settings.verify_priority_seconds IS '驗證列另加的領先秒數。20261121 起設 0：領先改成「母任務層級 ＋ 19 天」（verify_ticket_band_seconds），折進入列時凍結的基準（verify_ticket_base）。原 14 天（1209600）';
@@ -566,6 +569,15 @@ BEGIN
     RETURN;
   END IF;
   SELECT q.verify_priority_seconds INTO v_old_vs FROM queue_settings q WHERE q.id = 1;
+
+  -- 備份改前的值（精確回滾用，見檔頭回滾第 4 步），並依 task_id 順序先把要改的列鎖住（順序一致，降低與別的寫入互等死鎖的機會；等不到鎖 5 秒就整支失敗重跑）
+  CREATE TABLE IF NOT EXISTS priority_bands_backup (task_id TEXT PRIMARY KEY, dispatch_base_at TIMESTAMPTZ, priority_seconds INTEGER, boost_seconds BIGINT, queue_at TIMESTAMPTZ, saved_at TIMESTAMPTZ NOT NULL DEFAULT now());
+  ALTER TABLE priority_bands_backup ENABLE ROW LEVEL SECURITY;
+  COMMENT ON TABLE priority_bands_backup IS '層級×種類帶狀優先（20261121193000）套用前的 task_dispatches 值備份，只給回滾用；沒有任何 policy＝只有 service_role 讀得到。2026-11-21';
+  INSERT INTO priority_bands_backup (task_id, dispatch_base_at, priority_seconds, boost_seconds, queue_at)
+    SELECT d.task_id, d.dispatch_base_at, d.priority_seconds, d.boost_seconds, d.queue_at FROM task_dispatches d ORDER BY d.task_id
+  ON CONFLICT (task_id) DO NOTHING;
+  PERFORM 1 FROM task_dispatches d ORDER BY d.task_id FOR UPDATE;
 
   -- 前：隊頭 30 筆（任務列：沒被擋的前 30 筆；驗證票：驗證隊伍的前 30 筆）
   CREATE TEMP TABLE _pb_head_before ON COMMIT DROP AS
@@ -591,7 +603,7 @@ BEGIN
          note = COALESCE(note || '；', '') || '2026-11-21 比例制：每位近 7 天訪客 +1 天、無門檻無上限（min_users 改 1）'
    WHERE id = 1;
 
-  -- 插隊中的任務列（boost_seconds > 0）抬到 200 天，與新設定一致（舊值 30／50／100 天或其倍數）
+  -- 插隊中的任務列（boost_seconds > 0）抬到 200 天，與新設定一致（舊值 30／50／100 天或其倍數）。驗證票的插隊秒數不動、刻意不抬：驗證隊伍先看 verify_rank，同階才比 queue_at，票的插隊只在同階內有意義（cand_no_front_pull 等另有自己的量級）
   UPDATE task_dispatches d SET boost_seconds = 17280000
    WHERE d.task_id NOT LIKE 'verify:%' AND d.boost_seconds > 0 AND d.boost_seconds < 17280000;
   GET DIAGNOSTICS v_n = ROW_COUNT;
