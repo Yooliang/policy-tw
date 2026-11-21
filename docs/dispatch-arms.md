@@ -365,3 +365,5 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 **autovacuum 門檻**：`contribution_votes`、`contributions`、`task_dispatches`（public）analyze 0.02、vacuum 0.05；`jev_decisions` 因大量 UPDATE 且約 913 MB，放寬為 analyze 0.05、vacuum 0.1。
 
 **`autovacuum_work_mem`（未做）**：sighup 級 GUC，不能在 migration（交易內）設；目前是 -1（退回 `maintenance_work_mem`＝256 MB，3 個 autovacuum worker）。要調走 Supabase 管理面：`npx -y supabase@2 postgres-config update --project-ref <ref> --config autovacuum_work_mem=64MB`，或 Dashboard 的 Database → Settings；Supabase 只開放白名單內的參數，且資料庫角色不是 superuser、`ALTER SYSTEM` 不可用。調成 64MB 其實是把 vacuum 記憶體由 256MB 降下來。
+
+**11-22 週六三支補搬（`20261122110000_cron_shift_cec_weekly.sql`）**：`cec-sync-weekly` `0,5,10,15,20`→`1,6,11,16,21`、`cec-sync-2022-village-rest` `5,10,15,20`→`6,11,16,21`、`cec-sync-2024-weekly` `30`→`32`（皆 UTC 週六 19 點）。
