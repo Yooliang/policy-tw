@@ -329,6 +329,8 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 | policy-jp-vote-baseline-hourly | 17 | 30 |
 | news-fetch-hourly | 5 | 10 |
 
+**11-21 再搬 9 支（`20261121002500_cron_shift_off_seed_minutes.sql`）**：seed 每 10 分鐘跑約 25 秒，同分鐘排到的 job 等完就 `job startup timeout` 失敗、不補跑（近 24 小時漏跑 2～9 次）。上表的兩支整點快照、`cec-roster-mirror-5min` 當時沒動，`legacy`／`vote-baseline`／`news-fetch` 搬到的 20、50、30、10 分仍是整十分鐘，所以這版統一搬離：`pipeline-snapshot-hourly` 11、`policy-jp-pipeline-snapshot-hourly` 13、`policy-jp-vote-baseline-hourly` 33、`news-fetch-hourly` 43、`system-one-legacy-30min` 26,56、`system-one-bio-gaps-hourly` 53、`roster-group-tasks-hourly` 55、`cec-roster-mirror-5min` `2-57/5`（仍 UTC 18–21 點）、`cec-sync-settle-6h` 36。往後新增 job 不要排在 0/10/20/30/40/50 分。守門 `_shared/cron-shift-off-seed.test.ts`。
+
 （10 分鐘級「N 起」＝每小時第 N、N+10、…分。）新增週期性 job 前先看目前每分鐘的啟動數，別又疊回同一分鐘；守門 `_shared/db-tuning.test.ts` 把錯開後的分佈釘在每分鐘 ≤ 4。回滾＝新 migration 把上表改回。
 
 **`cron.job_run_details` 清理**：`cron_run_details_purge()`（設定單列表 `cron_run_details_settings`：保留 7 天、每批 5,000、最多 50 批），pg_cron `cron-run-details-purge` 每天 UTC 19:55。現在沒有任何程式或 SQL 讀這張表（只有人工查排程）；**若之後有程式去讀，保留天數要大於它的回看期**。
