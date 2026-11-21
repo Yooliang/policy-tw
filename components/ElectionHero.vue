@@ -54,7 +54,7 @@ const timeLeft = computed(() => {
   <!-- before：背景往上延伸 6rem 到頁首／吸頂分頁條後方，頁首收起時露出的是同一個底色，不是空白（頁首與分頁條 z 較高、不透明，平時蓋住它） -->
   <section class="md:hidden relative flex min-h-[200px] flex-col justify-end bg-navy-900 pb-6 pt-6 text-white before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-24 before:bg-navy-900 overflow-visible" :style="{ backgroundImage: `url(${heroBackgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'right center', backgroundRepeat: 'no-repeat' }" data-testid="mobile-hero">
     <div class="pointer-events-none absolute inset-0 bg-navy-900/80"></div>
-    <div class="relative z-10 mb-3 px-4 text-[2rem] font-black leading-tight tracking-tight">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="ml-1.5 text-amber-400">候選人與政見</span></div>
+    <div class="relative z-10 mb-3 px-4 text-[2rem] font-black leading-tight tracking-tight">{{ electionYear || election.electionDate.slice(0, 4) }} {{ county ? `${county}${mobileTownship ?? ''}` : '全台' }}<span class="block text-amber-400">候選人與政見</span></div>
     <ElectionViewPills class="relative z-10" dark :view="view" :has-matrix="hasMatrix" :election-seg="electionSeg" :view-link="viewLink" @select="$emit('select', $event)" />
   </section>
   <!-- 桌面版（md 以上）：細標題列。檢視切換、縣市選擇都在左邊延伸欄，這裡不再重複膠囊與縣市選擇器 -->
