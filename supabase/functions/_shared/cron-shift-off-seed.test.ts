@@ -57,3 +57,34 @@ Deno.test("C4 兩支快照不在同一分鐘，vote-baseline 在 jp 快照之後
   assert(a !== b);
   assert(v > b);
 });
+
+// ── 2026-11-22 追加：每週六中選會同步三支（20261122110000_cron_shift_cec_weekly.sql）──
+const MIG2 = "20261122110000_cron_shift_cec_weekly.sql";
+const mig2 = (await Deno.readTextFile(new URL(MIG2, MIGRATIONS))).replace(/\r\n/g, "\n");
+
+function moves2(): Array<[string, string]> {
+  const body = mig2.slice(mig2.indexOf("FROM (VALUES"), mig2.indexOf(") AS m(jobname, new_schedule)"));
+  return [...body.matchAll(/\('([^']+)',\s*'([^']+)'\)/g)].map((m) => [m[1], m[2]]);
+}
+
+Deno.test("C5 週六 cec-sync 三支都在名單、只 alter_job、分鐘全避開整十分鐘", () => {
+  const list = moves2();
+  assertEquals(list.map(([n]) => n).sort(), ["cec-sync-2022-village-rest", "cec-sync-2024-weekly", "cec-sync-weekly"]);
+  assert(!/cron\.(schedule|unschedule)\(/.test(mig2.replace(/^--.*$/gm, "")), "只能 alter_job，不重建 job");
+  for (const [n, sched] of list) {
+    const f = sched.split(" ");
+    assertEquals(f.slice(1).join(" "), "19 * * 6", `${n} 時段必須仍是週六 UTC 19 點`);
+    for (const m of minutes(f[0])) assert(m % 10 !== 0, `${n} 仍落在 :${m}`);
+  }
+});
+
+Deno.test("C6 週六 cec-sync：weekly 仍每 5 分鐘 5 次、village-rest 少第一次、2024 在 weekly 之後", () => {
+  const m = new Map(moves2());
+  const w = minutes(m.get("cec-sync-weekly")!.split(" ")[0]);
+  const v = minutes(m.get("cec-sync-2022-village-rest")!.split(" ")[0]);
+  const y = minutes(m.get("cec-sync-2024-weekly")!.split(" ")[0])[0];
+  assertEquals(w.length, 5);
+  assertEquals(w.slice(1), v);
+  for (let i = 1; i < w.length; i++) assertEquals(w[i] - w[i - 1], 5);
+  assert(y > w[w.length - 1]);
+});
