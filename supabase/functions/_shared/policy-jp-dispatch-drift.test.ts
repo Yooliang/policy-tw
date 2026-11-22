@@ -171,8 +171,8 @@ const OV_POOL_CLAUSE =
  * 所以另有「走樣（投票不看 IP）」一條守：日本站在這支重新定義的函式＝登記的清單；needs_two_ips／apply_consensus／verify_dispatch_claim 還原後逐字＝同檔 public；
  * 驗證池因簽名與型別比對（uuid_if_canonical）不同，用結構檢查（見該條）。PAIRS 的 contribution_verify_pool 仍讀 OV_MIG 那一版對 LEGACY 之前的 public 比（歷史複本）。
  */
-/** 不確定票不扣分（20261122180000，#1031 的日本版）：這兩支的現行版；比對讀同檔 public 的現行定義（兩站一致，沒有登記的偏離） */
-const UNSURE_JP_MIG = "20261122180000_policy_jp_unsure_no_penalty.sql";
+/** 不確定票不扣分（20261122180000，#1031 的日本版；檔名不帶 _policy_jp_，同 NOIP_MIG：鏈上測試資料庫不套它，由 policy-jp-unsure-overvoted.test.ts 疊上去測）：這兩支的現行版；比對讀同檔 public 的現行定義（兩站一致，沒有登記的偏離） */
+const UNSURE_JP_MIG = "20261122180000_unsure_no_penalty_jp.sql";
 const UNSURE_JP_SQL = await readMig(UNSURE_JP_MIG);
 const UNSURE_JP_FOLLOWED = ["contribution_unsure_penalty", "contribution_apply_consensus"];
 const NOIP_MIG = "20261104130000_vote_no_ip.sql";
@@ -702,7 +702,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1])) && !(name === OV_MIG && OV_FOLLOWED.includes(m[1])) && !(name === UNSURE_JP_MIG && UNSURE_JP_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1])) && !(name === OV_MIG && OV_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");

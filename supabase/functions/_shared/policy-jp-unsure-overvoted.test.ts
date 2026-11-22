@@ -16,6 +16,8 @@ import { loadEntry, type RestCall } from "./jp/entry-harness.ts";
 
 const MIG = "20261102230000_policy_jp_unsure_overvoted.sql";
 const MIG_SQL = await readMig(MIG);
+/** 不確定不扣分（20261122180000，檔名不帶 _policy_jp_，鏈上資料庫不套）：下面兩條罰則測試疊在 freshDb 上 */
+const NO_PENALTY_SQL = await readMig("20261122180000_unsure_no_penalty_jp.sql");
 
 type Db = Awaited<ReturnType<typeof freshDb>>;
 let seq = 0;
@@ -37,6 +39,7 @@ const state = (db: Db, id: string) =>
 
 Deno.test("SQL 罰則：不確定不扣分（20261122180000，#1031 的日本版）：罰則恆 0；3 張 unsure＋0 反對 0 分不退件；2 agree＋2 unsure＝2 分；weight 欄一律 0", async () => {
   const db = await freshDb();
+  await db.exec(NO_PENALTY_SQL);
   assertEquals((await one<{ p: number[] }>(db, `SELECT array_agg(policy_jp.contribution_unsure_penalty(n) ORDER BY n) AS p FROM unnest(ARRAY[0,1,2,3,4,9]) n`)).p, [0, 0, 0, 0, 0, 0]);
   const id = await addContribution(db);
   for (let i = 1; i <= 3; i++) await vote(db, id, "unsure", i);
@@ -53,6 +56,7 @@ Deno.test("SQL 罰則：不確定不扣分（20261122180000，#1031 的日本版
 
 Deno.test("SQL 罰則：連續的「確認不了」不再把交件推到退件線；只有 disagree 能退件；備註不印扣分說明", async () => {
   const db = await freshDb();
+  await db.exec(NO_PENALTY_SQL);
   const id = await addContribution(db);
   for (let i = 1; i <= 5; i++) await vote(db, id, "unsure", i);
   const s = await state(db, id);
