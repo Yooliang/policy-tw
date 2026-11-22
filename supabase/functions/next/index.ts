@@ -563,7 +563,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           // 疑似口號、行程、個人表態：先問「這是不是政見」，不要因為來源真的這樣寫就投同意
           ...(pick.contribution_type === "policy"
             ? (() => {
-              const notice = policyLikenessNotice(verifyPayload.title, verifyPayload.description);
+              const notice = policyLikenessNotice(verifyPayload.title, verifyPayload.description, verifyPayload.pledge_kind);
               return notice ? { warning: notice } : {};
             })()
             : {}),
@@ -574,7 +574,7 @@ async function handle(req: Request, mark: (name: string) => void): Promise<Respo
           (bundleView ? `${BUNDLE_HOW_TO} ` : "") +
           // 公報來源的政見（2026-11-11）：不找第二來源
           (bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? []) ? `${BULLETIN_POLICY_VERIFY_NOTE}（公報網址：${bulletinSourceUrl(pick.contribution_type, pick.source_urls ?? [])}，混合來源時打開這一條）。` : "") + (pick.contribution_type === "policy"
-          ? "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。"
+          ? "新增政見（contribution_type=policy）先問一句『這是不是政見』——政見是當選後要做的具體事情，標語、團隊組成、行程、個人表態不是，那種投 disagree。**例外：payload.pledge_kind＝principle（原則宣示）的，是選舉公報政見欄上的口號、原則、態度表述——只要公報上確實印著這段話就投 agree，不因為「沒有具體做法」投 disagree。**"
           : pick.contribution_type === "adjudication"
           ? "你判的是**這份裁決站不站得住**，不是自己重判一次爭議：看裁決者的 reason 能不能從它列的 checked_urls 推得出來、有沒有漏掉反方的反證。"
           : pick.contribution_type === "no_change"

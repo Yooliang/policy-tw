@@ -82,7 +82,7 @@ export const VOTE_DIMENSIONS: Record<string, Dimension[]> = {
     },
     {
       key: "not_concrete",
-      instructions: "target 是一條具體政見，還是口號／願景／包裹式標題？政見＝當選後要做的具體事情，看得出做什麼、給誰、做到什麼程度。",
+      instructions: "target 是一條具體政見，還是口號／願景／包裹式標題？政見＝當選後要做的具體事情，看得出做什麼、給誰、做到什麼程度。（target 帶 pledge_kind＝principle 的，是選舉公報政見欄上的原則宣示，口號本身就是它的內容，一律選 policy；團隊組成、行程、個人經歷仍不是。）",
       hit: { key: "not_policy", means: "口號、願景、或把好幾條包起來的標題，本身沒有具體內容" },
       miss: { key: "policy", means: "具體政見：看得出做什麼、給誰、做到什麼程度" },
     },

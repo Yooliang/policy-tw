@@ -48,7 +48,9 @@ export interface PolicyLikeness {
   reasons: string[];
 }
 
-export function checkPolicyLikeness(title: unknown, description: unknown): PolicyLikeness {
+export function checkPolicyLikeness(title: unknown, description: unknown, pledgeKind?: unknown): PolicyLikeness {
+  // 原則宣示（pledge_kind=principle，1.142.0）：公報上的口號本來就收，「看不出要做什麼」不是問題，不標
+  if (pledgeKind === "principle") return { suspect: false, reasons: [] };
   const t = typeof title === "string" ? title : "";
   const d = typeof description === "string" ? description : "";
   const text = `${t} ${d}`;
@@ -65,8 +67,8 @@ export function checkPolicyLikeness(title: unknown, description: unknown): Polic
 }
 
 /** 給驗證者看的一句話；不可疑就回 null */
-export function policyLikenessNotice(title: unknown, description: unknown): string | null {
-  const { suspect, reasons } = checkPolicyLikeness(title, description);
+export function policyLikenessNotice(title: unknown, description: unknown, pledgeKind?: unknown): string | null {
+  const { suspect, reasons } = checkPolicyLikeness(title, description, pledgeKind);
   if (!suspect) return null;
   return `⚠️ 這筆疑似不是政見（${reasons.join("；")}）。先判斷它是不是「當選後要做的具體事情」——` +
     `標語、團隊組成、行程、個人表態都不是。不是政見就投 disagree 並在 note 說明，不要因為「來源確實這樣寫」就投同意。`;

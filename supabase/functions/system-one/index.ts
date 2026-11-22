@@ -134,7 +134,7 @@ async function settleNewPerson(supabase: Sb, contributionId: string, idAsk: NewP
 /** 組一筆政見的 state 並問 Jev。回傳寫入結果與答案；找不到政見回 null */
 async function askPolicy(supabase: Sb, apiKey: JevKeyLike, policyId: string) {
   const { data: target, error: tErr } = await supabase.from("policies")
-    .select("id, politician_id, title, description, election_id").eq("id", policyId).is("removed_at", null).maybeSingle();
+    .select("id, politician_id, title, description, election_id, pledge_kind").eq("id", policyId).is("removed_at", null).maybeSingle();
   if (tErr) throw new Error(`policies read: ${tErr.message}`);
   if (!target) return null;
   // query-bounds: ok — 同一個人的政見，目前最多 26 筆，而且一個人不會有上千條政見

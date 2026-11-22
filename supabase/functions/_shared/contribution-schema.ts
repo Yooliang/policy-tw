@@ -22,7 +22,7 @@ import {
   DATE_PRECISIONS, EVENT_DECIDED_BY_MAX, EVENT_DECIDED_BY_MIN, EVENT_DESCRIPTION_MAX, EVENT_DESCRIPTION_MIN, EVENT_INITIATOR_NOTE_MAX, EVENT_INITIATOR_NOTE_MIN,
   EVENT_TYPES, eventItemKey, ITEMS_NOTE_MAX, ITEMS_NOTE_MIN, MAX_EVENTS, MAX_STANCES, STANCE_CONDITION_MAX, STANCE_CONDITION_MIN, STANCE_KINDS,
   STANCE_NOTE_MAX, STANCE_QUOTE_MAX, STANCE_QUOTE_MIN, stanceItemKey,
-  PARTICIPANT_BASES, PARTICIPANT_NOTE_MAX, PARTICIPANT_ROLES, POLICY_ORIGINS,
+  PARTICIPANT_BASES, PARTICIPANT_NOTE_MAX, PARTICIPANT_ROLES, POLICY_ORIGINS, POLICY_PLEDGE_KINDS,
 } from "./lineage.ts";
 
 /**
@@ -129,7 +129,8 @@ export const CORRECTION_FIELDS: Record<(typeof CORRECTION_TABLES)[number], reado
   // 任期（#345 後續）：只開放卸任日與原因——轉任的卸任日是推定的，附出處可以更正；其餘欄位由參選紀錄同步
   politician_offices: ["end_date", "end_reason"],
   // origin（政見從哪裡來，#349）：pledge 競選承諾／policy_address 施政報告／assembly 議會提案／budget 預算
-  policies: ["title", "description", "category", "status", "proposed_date", "source_url", "election_id", "origin"],
+  // pledge_kind（政見性質，1.142.0）：specific 具體承諾／principle 原則宣示
+  policies: ["title", "description", "category", "status", "proposed_date", "source_url", "election_id", "origin", "pledge_kind"],
 };
 
 /**
@@ -318,6 +319,7 @@ function validateProposedDate(value: unknown, electionId: unknown, push: (path: 
   }
 }
 const oneOf = <T extends readonly string[]>(list: T, v: unknown): v is T[number] => typeof v === "string" && (list as readonly string[]).includes(v);
+const PLEDGE_KIND_MSG = "pledge_kind 要是 specific（具體承諾）／principle（原則宣示）之一";
 const ORIGIN_MSG = "origin 要是 pledge（競選承諾）／policy_address（施政報告、施政方針）／assembly（議會或立法院提案）／budget（預算）之一";
 
 /** 政策脈絡（#349）：一串 uuid（不可重複），1～LINEAGE_MAX_POLICIES 個 */
@@ -486,6 +488,8 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
       validateHints(p, push);
       // 政見從哪裡來（#349，協議 1.52.0；照日本站 policy_origin）：選填，不給的話競選承諾由資料庫自動標 pledge
       if (p.origin !== undefined && !oneOf(POLICY_ORIGINS, p.origin)) push("payload.origin", ORIGIN_MSG);
+      // 政見性質（1.142.0）：選填，缺＝specific；只有口號、原則、態度表述的填 principle
+      if (p.pledge_kind !== undefined && !oneOf(POLICY_PLEDGE_KINDS, p.pledge_kind)) push("payload.pledge_kind", PLEDGE_KIND_MSG);
       break;
     }
     case "policy_progress": {
@@ -980,6 +984,7 @@ function validatePayload(type: ContributionType, p: Obj, push: (path: string, me
         else if (table === "policies" && c.field === "proposed_date") validateProposedDate(c.correct_value, undefined, (_path, message) => push(`${at}.correct_value`, message));
         else if (table === "policies" && c.field === "election_id" && !(isKnownElectionId(c.correct_value))) push(`${at}.correct_value`, `要是 ${electionIdsText()}（elections 表的選舉 id）`);
         else if (table === "policies" && c.field === "origin" && !oneOf(POLICY_ORIGINS, c.correct_value)) push(`${at}.correct_value`, ORIGIN_MSG);
+        else if (table === "policies" && c.field === "pledge_kind" && !oneOf(POLICY_PLEDGE_KINDS, c.correct_value)) push(`${at}.correct_value`, PLEDGE_KIND_MSG);
       });
       // 退選前有沒有登記只在「退選」的紀錄上有意義：同一筆又改參選狀態的話，落庫時狀態一變這一欄就被清掉（#345 後續）
       if (table === "politician_elections" && changes.some((c) => c.field === "withdrawn_after_filing") && changes.some((c) => c.field === "candidate_status")) {

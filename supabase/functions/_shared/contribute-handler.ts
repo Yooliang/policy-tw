@@ -1098,7 +1098,7 @@ export async function handleContribute(
       ...(item.contribution_type === "policy"
         ? (() => {
           const p = (item.payload && typeof item.payload === "object" ? item.payload : {}) as Record<string, unknown>;
-          const notice = policyLikenessNotice(p.title, p.description);
+          const notice = policyLikenessNotice(p.title, p.description, p.pledge_kind);
           return notice ? { warning: notice } : {};
         })()
         : {}),
