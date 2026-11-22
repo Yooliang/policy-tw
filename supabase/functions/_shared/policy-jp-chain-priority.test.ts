@@ -24,6 +24,7 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const MIG_FILE = "20261009300000_policy_jp_chain_priority.sql";
 const SEC_FILE = "20261011360000_policy_jp_queue_priority_seconds.sql"; // 派工排序改秒數：seed 改寫、rebalance_queue 刪掉（這支測試跟著改了）
+const KEY_FILE = "20261122190000_policy_jp_verify_ticket_key_election_month.sql"; // 驗證票排序鍵＋選舉月基準：seed 改寫（取代日期定層與前段／後段規則）；這支測試裡「層」的斷言跟著改
 const REKEY_FILE = "20261019040100_policy_jp_rekey_keeps_queue_position.sql"; // 換號沿用排隊位置（同形於正見 20261019040000）：seed 多一段記下舊列位置、新增時沿用；日期定層與排序鍵不動（policy-jp-dispatch-drift.test.ts 逐字守）
 const JP_FILES = (await migrationNames()).filter((n) => n.includes("_policy_jp_"));
 const JP_SQL = Object.fromEntries(await Promise.all(JP_FILES.map(async (n) => [n, await read(n)] as const)));
@@ -32,7 +33,7 @@ assert(JP_FILES.includes(MIG_FILE), "掃得到這支 migration");
 // 例外：chain_step_rank 是鏈上加步驟的擴充點（"多一行 WHEN"），第 2～4 步的 migration 各加一行；它們的順位由 policy-jp-chain-*.test.ts 守，
 // 這裡只守既有的相對順序（選舉發現 < 團體 < 統計）與『沒登記的 auto 型別排最後』（下面 f）
 for (const later of JP_FILES.filter((n) => n > MIG_FILE)) {
-  for (const fn of [...(later === SEC_FILE ? [] : later === REKEY_FILE ? ["rebalance_queue"] : ["rebalance_queue", "seed_auto_task_queue"]), "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
+  for (const fn of [...(later === SEC_FILE ? [] : later === REKEY_FILE || later === KEY_FILE ? ["rebalance_queue"] : ["rebalance_queue", "seed_auto_task_queue"]), "contribution_auto_tasks_regional_stats_missing", "contribution_auto_tasks_local_government_missing", "chain_date_tier", "chain_sort_date"]) {
     assert(!new RegExp("FUNCTION\\s+policy_jp\\." + fn + "\\s*\\(").test(JP_SQL[later]), `${later} 改寫了 policy_jp.${fn}，請更新 policy-jp-chain-priority.test.ts`);
   }
 }
@@ -129,39 +130,39 @@ async function threeElections(db: PGlite): Promise<{ near: string; mid: string; 
   return { near, mid, far };
 }
 
-Deno.test("層：投票日 20／100／300 天後的三場選舉（倒著開出來），seed＋重排後 queue_at 由近到遠，層是前段／中段／後段", async () => {
+const monthSec = async (db: PGlite, eid: string) => Number((await one<{ s: string }>(db, `SELECT policy_jp.election_month_seconds($1, NULL)::TEXT AS s`, [eid])).s);
+const statsRows = (db: PGlite) => rows<{ e: string; lg: string; ps: string }>(db,
+  `SELECT target->>'election_id' AS e, target->>'lg_code' AS lg, priority_seconds::TEXT AS ps FROM policy_jp.task_dispatches WHERE task_type = 'regional_stats_missing' ORDER BY queue_at, task_id`);
+
+Deno.test("選舉月基準（20261122 起取代前段／中段／後段）：投票日 20／100／300 天後的三場選舉（倒著開出來），seed 後 queue_at 由近到遠，priority_seconds＝選舉月基準", async () => {
   const db = await freshDb();
   const { near, mid, far } = await threeElections(db);
   const q = await queueOrder(db);
   assertEquals(ids(q), [`auto:regional_stats_missing:${ICHI}`, `auto:regional_stats_missing:${HAKODATE}`, `auto:regional_stats_missing:${KOMORO}`]);
-  assertEquals(q.map((d) => d.priority), [1, 2, 3], "前段／中段／後段");
-  // 層的來源是規則（priority:regional_stats_missing），不是寫死：opened_by 記規則 id，中段（預設層）沒有規則
-  const ob = await rows<{ task_id: string; rid: string | null }>(db,
-    `SELECT task_id, opened_by->>'priority_rule_id' AS rid FROM policy_jp.task_dispatches WHERE task_type = 'regional_stats_missing' ORDER BY task_id`);
-  const by = Object.fromEntries(ob.map((o) => [o.task_id.split(":").pop()!, o.rid]));
-  assert(by[ICHI] !== null && by[KOMORO] !== null && by[HAKODATE] === null, JSON.stringify(by));
-  assertEquals((await queueOrder(db)).length, 3);
-  // 選舉 id 帶在 target，用來排序
-  const t = await rows<{ e: string }>(db, `SELECT target->>'election_id' AS e FROM policy_jp.task_dispatches WHERE task_type = 'regional_stats_missing' ORDER BY queue_at`);
+  const t = await statsRows(db);
   assertEquals(t.map((x) => x.e), [near, mid, far]);
+  for (const x of t) assertEquals(Number(x.ps), await monthSec(db, x.e), "優先秒數＝選舉月基準（前段／後段規則已停用，沒有 +3 天／−30 天）");
+  assert(Number(t[0].ps) > Number(t[1].ps) && Number(t[1].ps) > Number(t[2].ps), "近的 base 大");
+  // 規則停用：不再有 priority_rule_id（層的來源已不是規則）
+  const ob = await rows<{ rid: string | null }>(db, `SELECT opened_by->>'priority_rule_id' AS rid FROM policy_jp.task_dispatches WHERE task_type = 'regional_stats_missing'`);
+  assert(ob.every((o) => o.rid === null), JSON.stringify(ob));
   await db.close();
 });
 
-Deno.test("層的邊界：投票日前 60 天＝前段、61 天＝中段、180 天＝中段、181 天＝後段；投票後（鏈還開著）仍是前段", async () => {
+Deno.test("月界：同一個月的選舉同 base、跨月差 200 天；投票日過了（鏈還開著）改用已投完公式＝排在所有未來選舉之後", async () => {
   const db = await freshDb();
-  await clock(db, TODAY);
+  await clock(db, TODAY); // 2027-03-01
   await onlyTerm(db, ICHI, null);
-  const cases: Array<[string, number, number]> = [[KOMORO, 60, 1], [HAKODATE, 61, 2], [SAPPORO, 180, 2], ["202037", 181, 3], [ICHI, -10, 1]];
-  for (const [lg, days] of cases) await insertElection(db, lg, addDays(TODAY, days));
+  const a = await insertElection(db, KOMORO, "2027-03-05");
+  const b = await insertElection(db, HAKODATE, "2027-03-28"); // 同月
+  const c = await insertElection(db, SAPPORO, "2027-04-04"); // 下個月
+  const past = await insertElection(db, ICHI, addDays(TODAY, -10)); // 已投完（鏈還開著）
   await seed(db);
-  const got = await rows<{ lg: string; priority: number }>(db,
-    `SELECT target->>'lg_code' AS lg, ${PRIORITY_TIER_SQL} AS priority FROM policy_jp.task_dispatches d WHERE task_type = 'regional_stats_missing'`);
-  const m = Object.fromEntries(got.map((g) => [g.lg, g.priority]));
-  for (const [lg, days, tier] of cases) assertEquals(m[lg], tier, `${lg}（${days} 天後）`);
-  // 日期 → 層函式與規則同一組數字
-  const f = (d: number) => one<{ t: number }>(db, `SELECT policy_jp.chain_date_tier($1::DATE, $2::DATE) AS t`, [addDays(TODAY, d), TODAY]).then((r) => r.t);
-  assertEquals([await f(-5), await f(60), await f(61), await f(180), await f(181)], [1, 1, 2, 2, 3]);
-  assertEquals((await one<{ t: number }>(db, `SELECT policy_jp.chain_date_tier(NULL, $1::DATE) AS t`, [TODAY])).t, 2, "沒有日期＝預設層");
+  const sec = Object.fromEntries((await statsRows(db)).map((x) => [x.e, Number(x.ps)]));
+  assertEquals(sec[a], sec[b]);
+  assertEquals(sec[a] - sec[c], 200 * 86400);
+  assert(sec[past] < 0 && sec[past] < sec[c], "已投完的＝負的、排在所有未來選舉之後");
+  assertEquals(sec[past], ((27 * 12 + 2) * 200 - 300000) * 86400);
   await db.close();
 });
 
@@ -198,7 +199,7 @@ Deno.test("同層內先進先出（20261011360000 起不再看步驟與日期）
   await db.close();
 });
 
-Deno.test("同層同步驟：日期近的先（等團體落庫的選舉 30 天後、200 天後，後者先開）；沒有 polling 里程碑的缺口依 target 日期定層（前段／後段）", async () => {
+Deno.test("等團體落庫的選舉（沒有選舉列）用 target 自己的日期算選舉月：近的先、遠的後（30 天後、200 天後，後者先開）", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   await onlyTerm(db, ICHI, null);
@@ -209,34 +210,33 @@ Deno.test("同層同步驟：日期近的先（等團體落庫的選舉 30 天�
   await seed(db);
   const q = await queueOrder(db);
   const lgs = q.map((d) => d.task_id.split(":").pop());
-  // 北海道（010006）掛在投票日最早的那場（30 天後＝前段）→ 札幌市（前段）→ 函館市（200 天後＝後段）
+  // 北海道（010006）掛在投票日最早的那場（30 天後）→ 札幌市（30 天後）→ 函館市（200 天後）
   assertEquals(lgs, ["010006", SAPPORO, HAKODATE]);
-  assertEquals(q.map((d) => d.priority), [1, 1, 3]);
+  const ps = (await rows<{ ps: string }>(db, `SELECT priority_seconds::TEXT AS ps FROM policy_jp.task_dispatches d WHERE task_type = 'local_government_missing' ORDER BY queue_at, task_id`)).map((r) => Number(r.ps));
+  assertEquals(ps[0], ps[1]);
+  assert(ps[1] > ps[2], "遠的 base 小");
   await db.close();
 });
 
 // =============================================================================================
-// d. 還原驗證：層內排序鍵換回 queue_at，順序就變回先進先出
+// d. 還原驗證：seed 的選舉月基準一行拿掉，近遠就不分了
 // =============================================================================================
-Deno.test("還原驗證：選舉發現／等團體的選舉不定層（拿掉 seed 的日期定層一段），就都落預設層（中段）；有這一段：満了日 60 天後的選舉發現＝前段、300 天後才投票的等團體選舉＝後段", async () => {
+Deno.test("還原驗證：拿掉 seed 的選舉月基準一行，優先秒數全是 0、近的不再先派；有這一行：優先秒數＝選舉月基準", async () => {
   const run = async (db: PGlite) => {
     await clock(db, TODAY);
-    await onlyTerm(db, ICHI, addDays(TODAY, 60)); // 投票窗口起日＝満了日 −30 → 30 天後：前段
+    await onlyTerm(db, ICHI, null);
     await keepOnly(db, []);
-    await waitingElection(db, HAKODATE, addDays(TODAY, 300)); // 300 天後：後段
+    await waitingElection(db, HAKODATE, addDays(TODAY, 300));
+    await waitingElection(db, SAPPORO, addDays(TODAY, 30));
     await seed(db);
-    return Object.fromEntries((await queueOrder(db)).map((d) => [d.task_type === "election_discovery" ? "discovery" : d.task_id.split(":").pop(), d.priority]));
+    return (await rows<{ ps: string }>(db, `SELECT DISTINCT priority_seconds::TEXT AS ps FROM policy_jp.task_dispatches WHERE task_id LIKE 'auto:%'`)).map((r) => Number(r.ps)).sort((a, b) => a - b);
   };
   const db = await freshDb();
-  assertEquals(await run(db), { discovery: 1, "010006": 3, [HAKODATE]: 3 });
+  const good = await run(db);
+  assert(good.length >= 2 && good.every((x) => x > 0), JSON.stringify(good));
   await db.close();
-  const db2 = await freshDb((sql) => {
-    const a = sql.indexOf("  -- >>> 日本版：選舉發現的層\n");
-    const b = sql.indexOf("  -- <<< 日本版：選舉發現的層\n") + "  -- <<< 日本版：選舉發現的層\n".length;
-    assert(a > 0 && b > a);
-    return sql.slice(0, a) + sql.slice(b);
-  }, REKEY_FILE); // seed 的最新定義在換號沿用排隊位置那支（日期定層一段原樣帶著）
-  assertEquals(await run(db2), { discovery: 2, "010006": 2, [HAKODATE]: 2 }, "沒有定層＝預設層");
+  const db2 = await freshDb((sql) => mutate(sql, "COALESCE(g.priority_seconds, 0) + policy_jp.election_month_seconds(policy_jp.election_id_or_null(g.target->>'election_id'), g.target);", "COALESCE(g.priority_seconds, 0);"), KEY_FILE);
+  assertEquals(await run(db2), [0], "沒有這一行＝規則停用後什麼都沒有（優先序全平）");
   await db2.close();
 });
 
@@ -366,7 +366,7 @@ Deno.test("手動任務（無 auto: 前綴）第一次進佇列插隊一次，�
   await db.close();
 });
 
-Deno.test("層間不再交錯（20261011360000）：同一輪開出來的七件，排序鍵＝進隊時間 − 那一層的秒數 → 前段三件、中段三件、後段一件依序；同層同時進隊的照 task_id", async () => {
+Deno.test("選舉月基準的排序（取代層間 6:3:1／前中後段）：同一輪開出來的七件，排序鍵＝進隊時間 − 選舉月基準 → 投票日近的月先；同月的同 base", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   await onlyTerm(db, ICHI, null);
@@ -374,12 +374,10 @@ Deno.test("層間不再交錯（20261011360000）：同一輪開出來的七件�
   const days = [10, 20, 30, 90, 100, 110, 250];
   for (let i = 0; i < lgs.length; i++) await insertElection(db, lgs[i], addDays(TODAY, days[i]));
   await seed(db);
-  const q = await queueOrder(db);
-  assertEquals(q.map((d) => d.priority), [1, 1, 1, 2, 2, 2, 3]);
-  // 同一輪進隊（last_dispatched_at 相同）：前段比中段早 3 天、後段比中段晚 30 天
-  const at = (k: number) => Date.parse(q[k].queue_at);
-  assertEquals(at(3) - at(0), 259200_000);
-  assertEquals(at(6) - at(3), 2592000_000);
+  const q = await statsRows(db);
+  const dates = await Promise.all(q.map(async (x) => (await one<{ d: string }>(db, `SELECT election_date::TEXT AS d FROM policy_jp.elections WHERE id = $1`, [x.e])).d));
+  const months = dates.map((d) => d.slice(0, 7));
+  assertEquals(months, [...months].sort(), "投票日近的月先派（同月同 base，月內照進隊先後）");
   const keys = await rows<{ ok: boolean }>(db,
     `SELECT queue_at = policy_jp.task_queue_key(last_dispatched_at, priority_seconds, cool_until, boost_seconds) AS ok FROM policy_jp.task_dispatches WHERE task_id NOT LIKE 'verify:%'`);
   assert(keys.length > 0 && keys.every((k) => k.ok), "queue_at 就是排序鍵");

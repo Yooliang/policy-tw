@@ -108,7 +108,7 @@ Deno.test("預設關：臂は行を返すが（読み取りだけ）、seed し�
   assertEquals(await dispatchIds(db, PE_TYPES), [taskId(s.policyId)]);
   const d = (await dispatches(db, PE_TYPES))[0];
   assertEquals(d.opened_by?.chain_gate, { after_step: "candidacy", via: "done" });
-  assertEquals([d.opened_by?.arm, d.priority, d.region], ["policy_elements", 1, "愛知県"]);
+  assertEquals([d.opened_by?.arm, d.priority, d.region], ["policy_elements", 2, "愛知県"]); // 20261122：前段・後段の規則は停用（優先序は選舉月基準）＝規則の層は中段
   assertEquals([d.target.policy_id, d.target.politician_election_id, d.target.election_id, d.target.election_type, d.target.lg_code, d.target.chain_lg_code, d.target.chain_step],
     [s.policyId, s.peid, E1, "mayor", ICHI, ICHI, "policy"]);
   await db.close();

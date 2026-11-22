@@ -116,7 +116,7 @@ Deno.test("派工列：規則が開いているので seed で派工列になる
   await seed(db);
   assertEquals((await dispatchIds(db, DS_TYPES)).sort(), [taskId(E_PREF), taskId(E_MUNI)].sort());
   const d = (await dispatches(db, DS_TYPES)).find((x) => x.task_id === taskId(E_MUNI))!;
-  assertEquals([d.opened_by?.arm, d.priority, d.region, d.target.election_id, d.target.chain_lg_code], ["district_seats", 1, "愛知県", E_MUNI, ICHI]);
+  assertEquals([d.opened_by?.arm, d.priority, d.region, d.target.election_id, d.target.chain_lg_code], ["district_seats", 2, "愛知県", E_MUNI, ICHI]); // 20261122：前段・後段の規則は停用（優先序は選舉月基準）＝規則の層は中段
   assertEquals(d.opened_by?.chain_gate, undefined, "鎖の gate なし");
   // cap=1：投票日が同じなら選挙 id の小さい方だけ
   await db.query(`UPDATE policy_jp.activity_rules SET params = '{"cap":1}'::JSONB WHERE activity = 'district_seats' AND priority IS NULL`);
