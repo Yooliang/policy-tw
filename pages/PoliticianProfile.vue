@@ -478,7 +478,12 @@ const headInput = computed(() => {
 })
 const jobTitles = computed(() => [...titles.value, ...(otherCurrentPosition.value ? [otherCurrentPosition.value] : [])])
 
-const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', pledgeElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
+// 當屆（定期改選裡投票日最新的一屆）那一組的標題寫「{年} 政見與公報」（維護者 2026-11-22）；往屆照舊「{屆別}承諾」。年份取投票日，不寫死 2026
+const campaignGroups = computed(() => groupPoliciesByElection(campaignPledges.value, '承諾', pledgeElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null))
+  .map((g) => {
+    const year = g.electionId !== null && g.electionId === latestElectionId.value ? getElectionById(g.electionId)?.electionDate?.slice(0, 4) : undefined
+    return g.label !== null && year ? { ...g, label: `${year} 政見與公報` } : g
+  }))
 const historyGroups = computed(() => groupPoliciesByElection(shownHistorical.value, '政見', electedElectionGroups.value.map(g => g.electionId).filter((id): id is number => id !== null)))
 
 usePageHead({
