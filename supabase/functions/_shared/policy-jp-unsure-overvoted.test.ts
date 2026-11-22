@@ -1,5 +1,5 @@
 /**
- * 日本站跟上正見：不確定第 2 張起每張 −1、投太多輪（2 倍標出、3 倍停派）、爭點驗證、單邊額度用完（policy-ops#178 A、#128）。
+ * 日本站跟上正見：不確定（2026-11-22 起不扣分，原第 2 張起每張 −1）、投太多輪（2 倍標出、3 倍停派）、爭點驗證、單邊額度用完（policy-ops#178 A、#128）。
  * migration 20261102230000_policy_jp_unsure_overvoted.sql；jp-next／jp-report 的行為。
  *
  *   1. SQL（PGlite，套全部 policy_jp migration）：不確定罰則（0／0／−1／−2…）、weight 欄不被動、罰則把交件推向退件線、
@@ -7,7 +7,7 @@
  *   2. jp-next（真的載入入口）：提交額度用完只派驗證票、驗證額度用完只派任務、兩邊用完 none；爭點驗證附 item.dispute 與 how_to
  *   3. jp-report 驗證：爭點驗證（回報當下超過線）擋 unsure 與盲反對（400 dispute_no_unsure），沒超過線照收
  *
- * 還原驗證（人工做過，見 PR 說明）：①migration 的 `v_score := v_score - policy_jp.contribution_unsure_penalty(v_unsure);` 拿掉 → 罰則兩條紅；
+ * 還原驗證（人工做過，見 PR 說明）：①migration 的 `v_score := v_score - policy_jp.contribution_unsure_penalty(v_unsure);` 拿掉 → 罰則兩條紅（20261122180000 起，罰則恆 0：把 migration 的 SELECT 0 改回 GREATEST(…−1,0) 也紅）；
  * ②驗證池的投太多輪條件拿掉 → 停派那條紅；③jp-next 的 `verifyFull` 判斷拿掉 → 額度兩條紅；④verify-handler 的 dispute 區塊拿掉 → jp-report 那條紅。
  */
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1";
@@ -16,6 +16,8 @@ import { loadEntry, type RestCall } from "./jp/entry-harness.ts";
 
 const MIG = "20261102230000_policy_jp_unsure_overvoted.sql";
 const MIG_SQL = await readMig(MIG);
+/** 不確定不扣分（20261122180000，檔名不帶 _policy_jp_，鏈上資料庫不套）：下面兩條罰則測試疊在 freshDb 上 */
+const NO_PENALTY_SQL = await readMig("20261122180000_unsure_no_penalty_jp.sql");
 
 type Db = Awaited<ReturnType<typeof freshDb>>;
 let seq = 0;
@@ -35,32 +37,37 @@ async function vote(db: Db, id: string, verdict: string, n: number) {
 const state = (db: Db, id: string) =>
   one<{ score: number; status: string; unsure_count: number; review_notes: string | null }>(db, `SELECT score, status, unsure_count, review_notes FROM policy_jp.contributions WHERE id = $1`, [id]);
 
-Deno.test("SQL 罰則：第 1 張不確定 0 分、第 2 張起每張 −1；weight 欄一律 0 不動；agree 照加", async () => {
+Deno.test("SQL 罰則：不確定不扣分（20261122180000，#1031 的日本版）：罰則恆 0；3 張 unsure＋0 反對 0 分不退件；2 agree＋2 unsure＝2 分；weight 欄一律 0", async () => {
   const db = await freshDb();
-  assertEquals((await one<{ p: number[] }>(db, `SELECT array_agg(policy_jp.contribution_unsure_penalty(n) ORDER BY n) AS p FROM unnest(ARRAY[0,1,2,3,4,9]) n`)).p, [0, 0, 1, 2, 3, 8]);
+  await db.exec(NO_PENALTY_SQL);
+  assertEquals((await one<{ p: number[] }>(db, `SELECT array_agg(policy_jp.contribution_unsure_penalty(n) ORDER BY n) AS p FROM unnest(ARRAY[0,1,2,3,4,9]) n`)).p, [0, 0, 0, 0, 0, 0]);
   const id = await addContribution(db);
-  const seen: number[] = [];
-  for (let i = 1; i <= 2; i++) { await vote(db, id, "unsure", i); seen.push((await state(db, id)).score); }
-  assertEquals(seen, [0, -1], "第 1 張 0 分、第 2 張起 −1");
-  await vote(db, id, "agree", 1);
-  assertEquals((await state(db, id)).score, 0, "agree +1，扣 1 張不確定的罰則 −1");
+  for (let i = 1; i <= 3; i++) await vote(db, id, "unsure", i);
+  const s3 = await state(db, id);
+  assertEquals([s3.score, s3.status, s3.unsure_count], [0, "pending", 3], "3 張 unsure：0 分不退件，張數仍計入");
+  const id2 = await addContribution(db);
+  for (let i = 1; i <= 2; i++) await vote(db, id2, "agree", i);
+  for (let i = 1; i <= 2; i++) await vote(db, id2, "unsure", i);
+  const s4 = await state(db, id2);
+  assertEquals([s4.score, s4.unsure_count], [2, 2], "2 agree＋2 unsure：2 分（unsure 不扣）");
   const w = await rows<{ verdict: string; weight: number }>(db, `SELECT verdict, weight FROM policy_jp.contribution_votes WHERE contribution_id = $1`, [id]);
-  for (const r of w.filter((x) => x.verdict === "unsure")) assertEquals(r.weight, 0, "unsure 票自己的 weight 仍是 0，罰則只扣在合計");
-  assertEquals((await state(db, id)).status, "pending");
+  for (const r of w) assertEquals(r.weight, 0, "unsure 票自己的 weight 是 0");
 });
 
-Deno.test("SQL 罰則：連續的「確認不了」自己把交件推到退件線（4 張不確定＝−3 退件，備註說明含不確定張數）", async () => {
+Deno.test("SQL 罰則：連續的「確認不了」不再把交件推到退件線；只有 disagree 能退件；備註不印扣分說明", async () => {
   const db = await freshDb();
+  await db.exec(NO_PENALTY_SQL);
   const id = await addContribution(db);
-  for (let i = 1; i <= 4; i++) await vote(db, id, "unsure", i);
+  for (let i = 1; i <= 5; i++) await vote(db, id, "unsure", i);
   const s = await state(db, id);
-  assertEquals(s.score, -3);
-  assertEquals(s.status, "rejected");
-  assertStringIncludes(s.review_notes ?? "", "含不確定 4 張，第 2 張起每張 −1");
-  // 對照：3 張不確定（−2）還在等
+  assertEquals([s.score, s.status], [0, "pending"]);
   const id2 = await addContribution(db);
-  for (let i = 1; i <= 3; i++) await vote(db, id2, "unsure", i);
-  assertEquals((await state(db, id2)).status, "pending");
+  for (let i = 1; i <= 3; i++) await vote(db, id2, "disagree", i);
+  for (let i = 1; i <= 2; i++) await vote(db, id2, "unsure", i);
+  const s2 = await state(db, id2);
+  assertEquals([s2.score, s2.status], [-3, "rejected"]);
+  assertStringIncludes(s2.review_notes ?? "", "依分數制退件");
+  assert(!(s2.review_notes ?? "").includes("第 2 張起每張"), "備註不再印扣分說明");
 });
 
 Deno.test("SQL 投太多輪：基準＝近 30 天已結案平均票數；> 2 倍是爭點驗證線、> 3 倍驗證池停派（> 而不是 ≥）", async () => {
