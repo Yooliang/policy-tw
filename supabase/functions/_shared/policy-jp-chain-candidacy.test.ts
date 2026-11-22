@@ -154,7 +154,7 @@ Deno.test("窗口：投票日當天還派、翌日收回（記 window）；新�
   await db.close();
 });
 
-Deno.test("優先層：投票日前 60 天內＝前段（1）、61～180 天＝預設層、181 天以上＝後段（3）；步驟順位排在統計之後", async () => {
+Deno.test("優先層：20261122 起前段（60 天內）／後段（181 天以上）規則停用，任何距離都是預設層（優先序改選舉月基準，見 policy-jp-election-month.test.ts）", async () => {
   const db = await freshDb();
   await openElectionWithRegion(db, ICHI, POLLING);
   // 開窗規則自 20261011100000 起只在投票日前 60 天內開；這裡只驗優先層規則本身，先把起點拿掉
@@ -164,10 +164,11 @@ Deno.test("優先層：投票日前 60 天內＝前段（1）、61～180 天＝�
     await seed(db);
     return (await dispatches(db, ROSTER))[0]?.priority;
   };
-  assertEquals(await prio(addDays(POLLING, -59)), 1);
+  const DEFAULT_TIER = (await one<{ id: number }>(db, `SELECT id::INT FROM policy_jp.task_priority_tiers WHERE is_default`)).id;
+  assertEquals(await prio(addDays(POLLING, -59)), DEFAULT_TIER);
   const mid = await prio(addDays(POLLING, -120));
   assertEquals(mid, (await one<{ id: number }>(db, `SELECT id::INT FROM policy_jp.task_priority_tiers WHERE is_default`)).id);
-  assertEquals(await prio(addDays(POLLING, -200)), 3);
+  assertEquals(await prio(addDays(POLLING, -200)), DEFAULT_TIER);
   await db.close();
 });
 

@@ -76,9 +76,9 @@ Deno.test("A4 這支只動該動的：不碰排序鍵、入列觸發器、日本
   assert(!/election_id\s*(=|IN)\s*\(?\s*(2024|2026)/.test(upd[0]!), "2024／2026 不動");
 });
 
-Deno.test("A5 日本站 drift 守門：contribution_tasks_insert_dispatch 登記讀這支之前的版本", async () => {
+Deno.test("A5 日本站 drift 守門：contribution_tasks_insert_dispatch 登記讀含這支（選舉年優先）的版本，日本版換成選舉月基準（20261122）", async () => {
   const t = await Deno.readTextFile(new URL("./policy-jp-dispatch-drift.test.ts", import.meta.url));
-  assert(/name: "contribution_tasks_insert_dispatch", before: "20261112005000_election_year_priority\.sql"/.test(t));
+  assert(/name: "contribution_tasks_insert_dispatch", before: "20261114010000_election_type_priority_days\.sql"/.test(t));
 });
 
 // ============================================================

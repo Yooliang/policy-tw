@@ -380,7 +380,7 @@ Deno.test("mayor_policies：1 件目の落庫で policy_missing の任務は収�
   const gate = d[0].opened_by?.chain_gate as { after_step: string; via: string };
   assertEquals(gate.after_step, "candidacy");
   assert(["done", "fallback", "sticky"].includes(gate.via), gate.via);
-  assertEquals(d[0].priority, 1, "投票日の 10 日前＝前段（policy_missing と同じ）");
+  assertEquals(d[0].priority, 2, "20261122：前段・後段の規則は停用（優先序は選舉月基準）＝規則の層は中段（policy_missing と同じ）");
   assertEquals((await events(db, tid)).map((e) => e.event), ["opened", "closed", "reopened"]);
   await db.close();
 });

@@ -105,7 +105,7 @@ Deno.test("candidate_status_stale：告示前は開かない／告示日に開�
     ["candidate_status_stale", "announced", NOTICE, NOTICE, POLLING]);
   assertEquals([d.target.politician_election_id, d.target.politician_id, d.target.election_id, d.target.candidacy_status, d.target.district_kind, d.target.chain_lg_code, d.target.chain_step],
     [a.peid, a.pid, E1, "declared", "at_large", ICHI, "candidacy"]);
-  assertEquals(d.priority, 1, "投票日前 60 日以内＝前段");
+  assertEquals(d.priority, 2, "20261122：前段・後段の規則は停用（優先序は選舉月基準）＝規則の層は中段");
   assert(d.what_we_need.includes("filed") && d.what_we_need.includes("withdrawn_after_filing=false") && d.what_we_need.includes("no_change"), "届出した／していない／一覧が見つからない の三つの答え方");
   assert(d.what_we_need.includes(a.peid) === false && d.what_we_need.includes(a.pid), "politician_id を payload の例に出す");
   assertEquals(d.region, (await one<{ name: string }>(db, `SELECT name FROM policy_jp.local_governments WHERE lg_code = policy_jp.lg_pref_code('${ICHI}')`)).name);
@@ -153,7 +153,7 @@ Deno.test("not_running：届出前に取りやめ（withdrawn・false）だけ�
   await seed(db);
   assertEquals(await dispatchIds(db, RECHECK), [taskNr(a.peid), taskFiling(u.peid)].sort(), "false は not_running、空は withdrawn_filing、true はどちらにも派さない");
   const d = (await dispatches(db, RECHECK)).find((x) => x.task_id === taskNr(a.peid))!;
-  assertEquals([d.task_type, d.target.kind, d.opened_by?.arm, d.priority], ["not_running_recheck", "not_running", "not_running", 1]);
+  assertEquals([d.task_type, d.target.kind, d.opened_by?.arm, d.priority], ["not_running_recheck", "not_running", "not_running", 2]); // 20261122：前段・後段の規則は停用（優先序は選舉月基準）＝規則の層は中段
   assert(d.what_we_need.includes("outcome=confirmed") && d.what_we_need.includes("task_suggestion") && d.what_we_need.includes("not_found"));
   assertEquals(t.peid.length > 0, true);
   // 照合（no_change confirmed）→ 收回

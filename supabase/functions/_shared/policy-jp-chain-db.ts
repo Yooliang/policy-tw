@@ -169,7 +169,11 @@ export const expireCooling = (db: PGlite) =>
  * 用 to_jsonb 讀欄位，兩種版本的資料庫都能跑同一條查詢。
  */
 export const PRIORITY_TIER_SQL = `COALESCE((to_jsonb(d)->>'priority')::INT,
-  (SELECT t.id FROM policy_jp.task_priority_tiers t WHERE (to_jsonb(t)->>'seconds')::INT = (to_jsonb(d)->>'priority_seconds')::INT ORDER BY t.id LIMIT 1)::INT)`;
+  (SELECT t.id FROM policy_jp.task_priority_tiers t
+    WHERE (((to_jsonb(t)->>'seconds')::BIGINT % 17280000) + 17280000) % 17280000 = (((to_jsonb(d)->>'priority_seconds')::BIGINT % 17280000) + 17280000) % 17280000
+    ORDER BY t.id LIMIT 1)::INT)`;
+// 20261122（選舉月基準）：priority_seconds 多了「選舉月基準」（200 天＝17,280,000 秒的整數倍），所以對 200 天取餘數再比層的秒數——
+// 前段 +3 天／中段 0／後段 −30 天的規則秒數照舊看得出來（規則停用的臂＝餘數 0＝中段）
 export type Dispatch = { task_id: string; task_type: string; target: Record<string, unknown>; opened_by: Record<string, unknown> | null; what_we_need: string; priority: number; region: string };
 export const dispatches = (db: PGlite, types: string[]) => rows<Dispatch>(db,
   `SELECT task_id, task_type, target, opened_by, what_we_need, ${PRIORITY_TIER_SQL} AS priority, region FROM policy_jp.task_dispatches d WHERE task_type = ANY ($1) ORDER BY task_id`, [types]);

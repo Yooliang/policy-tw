@@ -26,6 +26,7 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const MIG_FILE = "20261010030000_policy_jp_boost.sql";
 const PRIO_FILE = "20261009300000_policy_jp_chain_priority.sql";
+const KEY_FILE = "20261122190000_policy_jp_verify_ticket_key_election_month.sql"; // 驗證票排序鍵＋選舉月基準：task_boost 驗證票改加插隊秒數、task_boost_remaining 不看年份
 const SEC_FILE = "20261011360000_policy_jp_queue_priority_seconds.sql"; // 派工排序改秒數：task_boost／task_boost_remaining 改寫（同正見 20261011320000）
 // 全部 policy_jp migration（不寫死短清單：之後新增的日本站 migration 也會被套進來，插隊要跟它們共存）
 const JP_FILES = (await migrationNames()).filter((n) => n.includes("_policy_jp_"));
@@ -59,10 +60,10 @@ const boost = (db: PGlite, label: string, filter: Record<string, unknown>) =>
   one<{ r: { id: number; matched_tasks: number; matched_verifies: number; queue_at: string } }>(db, `SELECT policy_jp.task_boost($1, $2::JSONB, 'tester', 'iphash') AS r`, [label, JSON.stringify(filter)]).then((x) => x.r);
 const matches = async (db: PGlite, filter: Record<string, unknown>) =>
   (await rows<{ task_id: string }>(db, `SELECT task_id FROM policy_jp.task_boost_matches($1::JSONB) ORDER BY 1`, [JSON.stringify(filter)])).map((r) => r.task_id).sort();
-/** 插隊中的列（任務列：插隊秒數 > 0；驗證列：queue_at 早於 1990 年＝1970／1980 年段；同 task_boost_remaining 的判準），照 queue_at */
+/** 插隊中的列（任務列與驗證列都是插隊秒數 > 0，20261122 起；同 task_boost_remaining 的判準），照 queue_at */
 const front = (db: PGlite) => rows<{ task_id: string; queue_at: string }>(db,
   `SELECT task_id, queue_at FROM policy_jp.task_dispatches
-    WHERE CASE WHEN task_id LIKE 'verify:%' THEN queue_at < TIMESTAMPTZ '1990-01-01' ELSE boost_seconds > 0 END ORDER BY queue_at, task_id`);
+    WHERE boost_seconds > 0 ORDER BY queue_at, task_id`);
 const boostSec = async (db: PGlite, id: string) => Number((await one<{ b: string }>(db, `SELECT boost_seconds::TEXT AS b FROM policy_jp.task_dispatches WHERE task_id = $1`, [id])).b);
 const BOOST = 157680000; // queue_settings.boost_seconds 的預設（5 年）
 const frontIds = async (db: PGlite) => (await front(db)).map((r) => r.task_id);
@@ -199,7 +200,7 @@ Deno.test("插隊：只有命中的任務列加插隊秒數（5 年），排在�
   const r = await boost(s.db, "愛知県 選挙発見", { pref_codes: [AICHI], task_types: ["election_discovery"] });
   assertEquals(r.id, 1);
   assertEquals([r.matched_tasks, r.matched_verifies], [1, 0]);
-  assertEquals(new Date(r.queue_at).toISOString(), "1979-12-31T23:59:00.000Z", "回傳的 queue_at 照舊（驗證列用的 1980 年段）");
+  assertEquals(new Date(r.queue_at).getTime(), await atMs(s.db, s.DISC), "回傳的 queue_at＝命中的列最前面的排序鍵（20261122 起驗證票也是插隊秒數，不再有 1980 年段）");
   assertEquals(await boostSec(s.db, s.DISC), BOOST);
   const fr = await frontIds(s.db);
   assertEquals(fr[0], s.VISITOR, "訪客優先（10 年）照舊最前");
@@ -214,16 +215,18 @@ Deno.test("插隊：只有命中的任務列加插隊秒數（5 年），排在�
   await s.db.close();
 });
 
-Deno.test("驗證項目被插隊：verify: 列也進 1980 年段，在其他驗證列前面", async () => {
+Deno.test("驗證項目被插隊：verify: 列加插隊秒數（20261122 起），queue_at 往前搬；領走不歸零", async () => {
   const s = await scene();
+  const before = await atMs(s.db, s.VERIFY);
   const r = await boost(s.db, "只推驗證", { kinds: ["verify"] });
   assertEquals([r.matched_tasks, r.matched_verifies], [0, 1]);
   assertEquals((await frontIds(s.db)).includes(s.VERIFY), true);
-  assertEquals(await atMs(s.db, s.VERIFY) < Date.parse("1980-01-01T00:00:00Z"), true);
+  assertEquals(await boostSec(s.db, s.VERIFY), BOOST);
+  assertEquals(before - (await atMs(s.db, s.VERIFY)), BOOST * 1000, "queue_at 往前搬插隊秒數");
   await s.db.close();
 });
 
-Deno.test("第 n 次插隊：任務列插幾次加幾份插隊秒數，兩次都命中的排更前；驗證列 1980 減 n 分鐘、LEAST；手動任務的 last_dispatched_at 清成 NULL", async () => {
+Deno.test("第 n 次插隊：任務列插幾次加幾份插隊秒數，兩次都命中的排更前；驗證列同樣加秒數；手動任務的 last_dispatched_at 清成 NULL", async () => {
   const s = await scene();
   await s.db.query(`UPDATE policy_jp.contribution_tasks SET last_dispatched_at = now() WHERE id = $1::UUID`, [s.MANUAL]);
   const a = await boost(s.db, "全部有日期的", { election_before: addDays(TODAY, 400) }); // 第 1 次：命中千種、小諸、函館、驗證、小諸的手動任務
@@ -234,7 +237,7 @@ Deno.test("第 n 次插隊：任務列插幾次加幾份插隊秒數，兩次都
   assertEquals(await boostSec(s.db, s.ST_HAK), BOOST);
   assertEquals(await boostSec(s.db, s.ST_KOMORO), 2 * BOOST, "第 2 次也命中的，加兩份");
   assertEquals(await boostSec(s.db, s.MANUAL), 2 * BOOST);
-  assertEquals(await atMs(s.db, s.VERIFY), Date.parse("1980-01-01T00:00:00Z") - 60_000, "驗證列照舊 1980 減 n 分鐘");
+  assertEquals(await boostSec(s.db, s.VERIFY), BOOST, "驗證列也是加插隊秒數（只命中一次）");
   const order = await frontIds(s.db);
   assertEquals(order.indexOf(s.ST_KOMORO) < order.indexOf(s.ST_CHI), true, "插兩次的排在插一次的前面");
   assertEquals((await one<{ n: string | null }>(s.db, `SELECT last_dispatched_at::TEXT AS n FROM policy_jp.contribution_tasks WHERE id = $1::UUID`, [s.MANUAL])).n, null);
@@ -256,7 +259,7 @@ Deno.test("一次性：task_dispatched 把領走的列插隊秒數歸零、回�
   await s.db.query(`SELECT policy_jp.task_dispatched($1)`, [s.DISC]);
   await s.db.query(`SELECT policy_jp.task_dispatched($1)`, [s.VERIFY]);
   const rem1 = (await one<{ r: { tasks: number; verifies: number } }>(s.db, `SELECT policy_jp.task_boost_remaining($1) AS r`, [r.id])).r;
-  assertEquals(rem1, { tasks: 3, verifies: 0 });
+  assertEquals(rem1, { tasks: 3, verifies: 1 }, "驗證票的插隊不因領走歸零（一路保留到結案）");
   assertEquals((await frontIds(s.db)).includes(s.DISC), false);
   assertEquals(await boostSec(s.db, s.DISC), 0, "派出就歸零");
   const k = await one<{ ok: boolean; tail: boolean }>(s.db,
@@ -302,7 +305,7 @@ Deno.test("與 seed 共存：seed 多跑幾輪，插隊中的列位置不變、�
 
 Deno.test("還原驗證（一次性）：拿掉觸發器「派出就歸零」那一行，領走的列還留在插隊中，斷言就紅", async () => {
   const bad = await surviveCheck({
-    [SEC_FILE]: (sql) => mutate(sql, "    NEW.boost_seconds := 0;  -- 插隊是一次性的：派出就歸零，回隊尾\n", ""),
+    [KEY_FILE]: (sql) => mutate(sql, "    NEW.boost_seconds := 0;  -- 插隊是一次性的：派出就歸零，回隊尾\n", ""),
   });
   assert(!bad.restored, "不歸零的話領走的列應該還在插隊中（測試咬得到）");
 });
@@ -347,7 +350,7 @@ Deno.test("task_boosts 記 label／filter／命中數／agent／ip_hash；anon �
 // =============================================================================================
 Deno.test("還原驗證（插隊）：拿掉 task_boost 加插隊秒數那一行，命中的任務列不會動、前面幾個測試的斷言就紅", async () => {
   const key = "UPDATE policy_jp.task_dispatches d SET boost_seconds = d.boost_seconds + q.boost_seconds, cooling = false";
-  const bad = await scene({ [SEC_FILE]: (sql) => mutate(sql, key, "UPDATE policy_jp.task_dispatches d SET boost_seconds = d.boost_seconds, cooling = false") });
+  const bad = await scene({ [KEY_FILE]: (sql) => mutate(sql, key, "UPDATE policy_jp.task_dispatches d SET boost_seconds = d.boost_seconds, cooling = false") });
   const r = await boost(bad.db, "愛知県 選挙発見", { pref_codes: [AICHI], task_types: ["election_discovery"] });
   assertEquals(r.matched_tasks, 1, "命中數照舊（篩選沒壞）");
   assertEquals(await boostSec(bad.db, bad.DISC), 0, "命中的列沒有加秒數 → 「排在最前面」的斷言會紅");
@@ -368,27 +371,26 @@ function skeleton(def: string): string[] {
   return def.replace(/ SET search_path = policy_jp, pg_temp/g, "").replaceAll("policy_jp.", "")
     .split("\n").map((l) => l.replace(/--.*$/, "").trim().replace(/\s+/g, " ")).filter((l) => l !== "");
 }
-// 2026-10-13 正見改成「優先級秒數」（20261011320000：插隊改加 boost_seconds），日本站在 20261011360000 跟上：
-// 日本版（SEC_FILE）對照正見的現行定義（20261011320000）；正見在那支之後再改，下面的「最後一版」斷言就紅，要重新決定跟不跟
-const TW_SECONDS_MIG = "20261011320000";
-// 2026-10-17 正見第二步（20261017010000：驗證票的插隊也改成秒數、跟著母任務）改了 task_boost／task_boost_remaining 的驗證那一段；
-// 日本站暫不跟（登記的偏離：「日本站還沒跟」）——比對改讀這支之前的正見版本，下面另有一條斷言守「正見的現行版確實偏離了」，不是悄悄漂走
-const TW_NOT_FOLLOWED_MIG = "20261017010000_verify_ticket_follows_task.sql";
+// 2026-11-22 日本站跟上正見的驗證票排序鍵（20261104120000／20261017010000）：task_boost 的驗證那一段改加插隊秒數，骨架逐行等於正見 20261017010000 版
+// （正見之後的 20261019050000 拿掉開頭的 seed、20261112060000 加工作卡票，日本站暫不跟）；task_boost_remaining 只有兩行是日本專屬
+// （選舉月基準讓很多列的 queue_at 早於 1990 年，不能再用年份判斷插隊，改看 boost_seconds）。
+const TW_NOT_FOLLOWED_MIG = "20261019050000_boost_no_seed.sql";
 async function twVsJp(name: string): Promise<{ tw: string[]; jp: string[] }> {
-  return { tw: skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), jp: skeleton(fnText(JP_SQL[SEC_FILE], `policy_jp.${name}`)) };
+  const jp = skeleton(fnText(JP_SQL[KEY_FILE], `policy_jp.${name}`));
+  return { tw: skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), jp };
 }
 
-Deno.test("骨架對照：policy_jp.task_boost／task_boost_remaining ＝ 正見現行（秒數化）定義（去註解、去 policy_jp. 前綴與 search_path）；正見之後再改這裡紅", async () => {
-  for (const name of ["task_boost", "task_boost_remaining"]) {
-    assertEquals(skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), skeleton(await latestFn(name, TW_SECONDS_MIG + "_~")), `${name}：正見在 ${TW_SECONDS_MIG} 之後、${TW_NOT_FOLLOWED_MIG} 之前又改了，要決定日本版跟不跟`);
-    assertNotEquals(skeleton(await latestFn(name)), skeleton(await latestFn(name, TW_NOT_FOLLOWED_MIG)), `${name}：登記的偏離（日本站暫不跟 ${TW_NOT_FOLLOWED_MIG}）不見了——正見現行版跟日本版一樣了就拿掉這個登記`);
-    const { tw, jp } = await twVsJp(name);
-    assert(tw.length > 5);
-    assertEquals(jp, tw, `${name}：日本站跟正見的現行定義不一致，要決定日本版跟不跟`);
-  }
+Deno.test("骨架對照：policy_jp.task_boost／task_boost_remaining ＝ 正見 20261017010000 版（去註解、去 policy_jp. 前綴與 search_path；remaining 只差兩行年份判斷）；正見之後再改這裡紅", async () => {
+  const boostPair = await twVsJp("task_boost");
+  assert(boostPair.tw.length > 5);
+  assertEquals(boostPair.jp, boostPair.tw, "task_boost：日本站跟正見 20261017010000 版不一致");
+  assertNotEquals(skeleton(await latestFn("task_boost")), boostPair.tw, "task_boost：登記的偏離（日本站暫不跟 20261019050000 之後）不見了——正見現行版跟日本版一樣了就拿掉這個登記");
+  const rem = await twVsJp("task_boost_remaining");
+  const twRem = rem.tw.map((l) => l
+    .replace("count(*) FILTER (WHERE m.kind = 'task' AND (d.queue_at < TIMESTAMPTZ '1990-01-01' OR d.boost_seconds > 0)),", "count(*) FILTER (WHERE m.kind = 'task' AND d.boost_seconds > 0),"));
+  assertEquals(rem.jp, twRem, "task_boost_remaining：日本站只該差一行年份判斷");
   // 偵測器咬得到：正見改一個字就不等
-  const { tw, jp } = await twVsJp("task_boost");
-  assertNotEquals(jp, tw.map((l) => l.replace("INTERVAL '1 minute'", "INTERVAL '2 minute'")));
+  assertNotEquals(boostPair.jp, boostPair.tw.map((l) => l.replace("boost_seconds + q.boost_seconds", "boost_seconds + 1")));
 });
 
 // =============================================================================================
