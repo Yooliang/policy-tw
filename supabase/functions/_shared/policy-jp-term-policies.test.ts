@@ -156,7 +156,7 @@ Deno.test("term_policies：派工列は後段（priority 3）・鎖の gate は 
   await seed(db);
   const d = await dispatches(db, TERM_TYPES);
   assertEquals(d.map((r) => r.task_id), [`auto:term_policy_missing:${x.peid}`]);
-  assertEquals([d[0].priority, d[0].opened_by?.arm, d[0].region, d[0].target.election_id], [3, "term_policies", "愛知県", E1]);
+  assertEquals([d[0].priority, d[0].opened_by?.arm, d[0].region, d[0].target.election_id], [2, "term_policies", "愛知県", E1]);
   assertEquals(d[0].opened_by?.chain_gate, { after_step: "regional_stats", via: "done" });
   await seed(db);
   assertEquals((await dispatches(db, TERM_TYPES)).length, 1);

@@ -139,7 +139,7 @@ Deno.test("placeholder_politicians：テスト名の公開済みの人物だけ�
   const task = `auto:placeholder_politician:${t.pid}`;
   assertEquals(await dispatchIds(db, PH), [task], "テスト名だけ。山田太郎は派さない");
   const d = (await dispatches(db, PH))[0];
-  assertEquals(d.priority, 1, "前段");
+  assertEquals(d.priority, 2, "中段（20261122 帶狀：優先序不再讀規則秒數，層一律中段）");
   assertEquals(d.opened_by?.arm, "placeholder_politicians");
   assertEquals(d.region, null);
   assertEquals(d.target.politician_id, t.pid);

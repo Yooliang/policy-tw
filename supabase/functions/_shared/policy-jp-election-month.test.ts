@@ -122,7 +122,7 @@ Deno.test("B 沒掛選舉的件＝最近一場未來選舉的月；target 帶自
 // =============================================================================================
 // C. 疊進 priority_seconds（手動任務、seed）與排序
 // =============================================================================================
-Deno.test("C 手動任務進隊：priority_seconds＝規則秒數＋選舉月基準；近的選舉排前面、已投完的最後（差 200 天一階）；沒掛選舉的＝最近未來選舉的月", async () => {
+Deno.test("C 手動任務進隊：priority_seconds＝選舉月基準＋帶狀（層級＋種類）；近的選舉排前面、已投完的最後（差 200 天一階）；沒掛選舉的＝最近未來選舉的月", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   const nov = await insertElection(db, 0, "2026-11-29");
@@ -132,9 +132,10 @@ Deno.test("C 手動任務進隊：priority_seconds＝規則秒數＋選舉月基
   const tFeb = await mkTask(db, "suggested", { election_id: feb });
   const tOct = await mkTask(db, "suggested", { election_id: oct });
   const tNone = await mkTask(db, "suggested", {});
-  const rule = await secs(db, `SELECT COALESCE((SELECT x.seconds FROM policy_jp.activity_priority_seconds('manual_open', NULL, NULL) x LIMIT 1), 0)::TEXT AS n`);
+  // 20261122 起優先秒數＝選舉月基準＋層級＋種類（帶狀）；profile_note 種類 0、層級看 target（沒有選舉＝無層級 30、市長選＝市区町村 130）
+  const band = (t: string) => secs(db, `SELECT policy_jp.task_band_seconds(task_type, target)::TEXT AS n FROM policy_jp.task_dispatches WHERE task_id = $1`, [t]);
   for (const [t, d] of [[tNov, 7400], [tFeb, 6800], [tOct, -7800], [tNone, 7400]] as Array<[string, number]>) {
-    assertEquals(Number((await disp(db, t)).priority_seconds), rule + d * DAY, t);
+    assertEquals(Number((await disp(db, t)).priority_seconds), (await band(t)) + d * DAY, t);
   }
   // 排序：近的先；同時進隊，差距就是月基準的差（誤差 < 1 分鐘）
   const q = async (t: string) => (await disp(db, t)).queue_at;
@@ -150,12 +151,12 @@ Deno.test("C seed 的缺口：priority_seconds＝選舉月基準（規則停用�
   const near = await insertElection(db, 0, "2026-12-13");
   const far = await insertElection(db, 1, "2027-02-21");
   await seed(db);
-  const gaps = () => rows<{ task_id: string; eid: string; ps: string; qa: string }>(db,
-    `SELECT task_id, target->>'election_id' AS eid, priority_seconds::TEXT AS ps, queue_at::TEXT AS qa FROM policy_jp.task_dispatches
+  const gaps = () => rows<{ task_id: string; eid: string; ps: string; qa: string; band: string }>(db,
+    `SELECT task_id, target->>'election_id' AS eid, priority_seconds::TEXT AS ps, queue_at::TEXT AS qa, policy_jp.task_band_seconds(task_type, target)::TEXT AS band FROM policy_jp.task_dispatches
       WHERE task_id LIKE 'auto:%' AND target->>'election_id' IN ($1, $2) ORDER BY queue_at, task_id`, [near, far]);
   const g1 = await gaps();
   assert(g1.length >= 2, "兩場選舉都有缺口");
-  for (const g of g1) assertEquals(Number(g.ps), (await days(db, g.eid)) * DAY, `${g.task_id} 的優先秒數＝選舉月基準（沒有前段／後段加減）`);
+  for (const g of g1) assertEquals(Number(g.ps), (await days(db, g.eid)) * DAY + Number(g.band), `${g.task_id} 的優先秒數＝選舉月基準＋帶狀（沒有前段／後段加減）`);
   assertEquals(g1[0].eid, near, "近的選舉在前");
   assertEquals(g1[g1.length - 1].eid, far);
   // 投票日過了：近的那場變已投完，排到遠的後面
@@ -163,7 +164,7 @@ Deno.test("C seed 的缺口：priority_seconds＝選舉月基準（規則停用�
   await seed(db);
   const g2 = await gaps();
   assertEquals(g2[0].eid, far, "已投完的選舉排在未來選舉之後");
-  for (const g of g2.filter((x) => x.eid === near)) assertEquals(Number(g.ps), (await days(db, near)) * DAY);
+  for (const g of g2.filter((x) => x.eid === near)) assertEquals(Number(g.ps), (await days(db, near)) * DAY + Number(g.band));
   assertEquals(await days(db, near), (26 * 12 + 12 - 361) * 200);
 });
 
@@ -184,13 +185,13 @@ Deno.test("D 舊的選舉鏈排序被取代：priority:<臂> 的前段（polling
   const sql = await readMig(KEY_FILE);
   const seedFn = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION policy_jp.seed_auto_task_queue("));
   assert(!seedFn.includes("chain_date_tier") && !seedFn.includes("日本版：選舉發現的層"), "seed 不再用日期定層");
-  assert(seedFn.includes("policy_jp.election_month_seconds("), "seed 疊選舉月基準");
+  assert(seedFn.includes("policy_jp.election_month_seconds(") || (await readMig("20261122210000_policy_jp_priority_bands_jp.sql")).includes("policy_jp.election_month_seconds("), "seed 疊選舉月基準");
 });
 
 // =============================================================================================
 // E. 驗證票排序鍵
 // =============================================================================================
-Deno.test("E 驗證票：基準＝母任務派出前的位置；queue_at＝基準 − 14 天；每被領走一次 ＋7 天（no_change ＋14 天）；插隊不因領走歸零；任務列照舊歸零", async () => {
+Deno.test("E 驗證票：基準＝母任務派出前的位置再領先 (19 − 母種類) 天；queue_at＝基準（verify_priority_seconds 0）；每被領走一次 ＋7 天（no_change ＋14 天）；插隊不因領走歸零；任務列照舊歸零", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   const nov = await insertElection(db, 0, "2026-11-29");
@@ -210,16 +211,17 @@ Deno.test("E 驗證票：基準＝母任務派出前的位置；queue_at＝基�
   for (const [c, step] of [[c1, 7], [c2, 14]] as Array<[string, number]>) {
     const t = `verify:${c}`;
     const v0 = await disp(db, t);
-    assertEquals(v0.dispatch_base_at, p1.dispatch_base_at, "票沿用母任務的基準");
-    assertAlmostEquals(await diffSec(db, p1.dispatch_base_at!, v0.queue_at), 14 * DAY, 1);
+    // 母任務是 profile_note（種類 0）：票沿用母任務的基準再領先 19 天（帶狀：查證票 19 − 母種類 0）
+    assertAlmostEquals(await diffSec(db, p1.dispatch_base_at!, v0.dispatch_base_at!), 19 * DAY, 1, "票沿用母任務的基準再領先 (19 − 母種類) 天");
+    assertAlmostEquals(await diffSec(db, v0.dispatch_base_at!, v0.queue_at), 0, 1, "verify_priority_seconds 已是 0，領先折進基準");
     await db.query(`UPDATE policy_jp.task_dispatches SET boost_seconds = 777 WHERE task_id = $1`, [t]);
     await db.query(`SELECT policy_jp.task_dispatched($1)`, [t]);
     const v1 = await disp(db, t);
     assertEquals(v1.dispatch_count, 1);
     assertEquals(Number(v1.boost_seconds), 777, "驗證票的插隊不因領走歸零");
-    assertEquals(v1.dispatch_base_at, p1.dispatch_base_at, "基準凍結在票上，不再看母任務");
-    // queue_at ＝ 基準 − 14 天 − 777 ＋ 步長 × 1
-    assertAlmostEquals(await diffSec(db, v1.queue_at, p1.dispatch_base_at!), -14 * DAY - 777 + step * DAY, 1, `${t} 步長 ${step} 天`);
+    assertEquals(v1.dispatch_base_at, v0.dispatch_base_at, "基準凍結在票上，不再看母任務");
+    // queue_at ＝ 基準 − 777 ＋ 步長 × 1
+    assertAlmostEquals(await diffSec(db, v1.queue_at, v0.dispatch_base_at!), -777 + step * DAY, 1, `${t} 步長 ${step} 天`);
   }
   // 母任務之後被領走，已存在的票不跟著動
   const frozen = (await disp(db, `verify:${c1}`)).queue_at;
@@ -228,7 +230,7 @@ Deno.test("E 驗證票：基準＝母任務派出前的位置；queue_at＝基�
   assertEquals((await disp(db, `verify:${c1}`)).queue_at, frozen);
 });
 
-Deno.test("E 新增型交件與沒有基準的票：基準＝建立時間 − 選舉月基準（交件 payload.election_id）；沒有選舉＝最近未來選舉的月；凍結基準的反運算＝原位置", async () => {
+Deno.test("E 新增型交件與沒有基準的票：基準＝建立時間 − 選舉月基準 − (層級＋19) 天（交件 payload.election_id）；沒有選舉＝最近未來選舉的月；凍結基準的反運算＝原位置", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   const nov = await insertElection(db, 0, "2026-11-29");
@@ -237,15 +239,16 @@ Deno.test("E 新增型交件與沒有基準的票：基準＝建立時間 − �
   const cFeb = await mkContribution(db, "task_suggestion", null, { election_id: feb });
   const cNone = await mkContribution(db, "task_suggestion", null, {});
   const created = async (c: string) => (await one<{ t: string }>(db, `SELECT created_at::TEXT AS t FROM policy_jp.contributions WHERE id = $1::UUID`, [c])).t;
-  for (const [c, d] of [[cNov, 7400], [cFeb, 6800], [cNone, 7400]] as Array<[string, number]>) {
+  // 層級：交件的選舉是市長選＝市区町村 130；沒有選舉＝無層級 30；種類 19
+  for (const [c, d, lvl] of [[cNov, 7400, 130], [cFeb, 6800, 130], [cNone, 7400, 30]] as Array<[string, number, number]>) {
     const v = await disp(db, `verify:${c}`);
-    assertAlmostEquals(await diffSec(db, await created(c), v.dispatch_base_at!), d * DAY, 1, "基準＝建立時間 − 選舉月基準");
-    assertAlmostEquals(await diffSec(db, await created(c), v.queue_at), d * DAY + 14 * DAY, 1, "queue_at＝基準 − 14 天");
+    assertAlmostEquals(await diffSec(db, await created(c), v.dispatch_base_at!), (d + lvl + 19) * DAY, 1, "基準＝建立時間 − 選舉月基準 − (層級＋19) 天");
+    assertAlmostEquals(await diffSec(db, await created(c), v.queue_at), (d + lvl + 19) * DAY, 1, "queue_at＝基準（verify_priority_seconds 0）");
   }
   // 母任務沒有基準（沒經過 /next 派出就交件）：同樣退回建立時間
   const parent = await mkTask(db, "suggested", { election_id: feb });
   const c = await mkContribution(db, "correction", parent, { election_id: feb });
-  assertAlmostEquals(await diffSec(db, await created(c), (await disp(db, `verify:${c}`)).dispatch_base_at!), 6800 * DAY, 1);
+  assertAlmostEquals(await diffSec(db, await created(c), (await disp(db, `verify:${c}`)).dispatch_base_at!), (6800 + 130 + 19) * DAY, 1);
   // 凍結基準的反運算：key(freeze(q, n, b, s), n, b, s) ＝ q
   const r = await one<{ same: boolean }>(db,
     `SELECT policy_jp.verify_ticket_key(policy_jp.verify_ticket_freeze_base(t.q, 3, 123, 604800), 3, 123, 604800) = t.q AS same FROM (SELECT TIMESTAMPTZ '2026-10-30 12:00:00+00' AS q) t`);
