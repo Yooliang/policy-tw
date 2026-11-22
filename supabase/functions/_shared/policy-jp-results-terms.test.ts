@@ -117,7 +117,7 @@ Deno.test("election_results：投票日まで開かない／翌日に開く（vi
   assertEquals(d.opened_by?.chain_gate, { after_step: "candidacy", via: "done" });
   assertEquals([d.opened_by?.arm, d.opened_by?.milestone_kind, d.opened_by?.milestone_on_date, d.opened_by?.expected_open_on], ["election_results", "polling", POLLING, addDays(POLLING, 1)]);
   assertEquals([d.target.kind, d.target.politician_election_id, d.target.politician_id, d.target.candidacy_status, d.target.chain_step, d.target.chain_lg_code], ["result", a.peid, a.pid, "filed", "results", ICHI]);
-  assertEquals(d.priority, 1, "投票日の翌日から前段");
+  assertEquals(d.priority, 2, "中段（20261122 帶狀：優先序不再讀規則秒數，層一律中段）");
   assert(d.what_we_need.includes("elected") && d.what_we_need.includes("not_elected") && d.what_we_need.includes("得票数") && d.what_we_need.includes("withdrawn_after_filing=true"), "当選／落選／辞退／得票数は書かない");
   const dc = (await dispatches(db, RESULT)).find((x) => x.task_id === taskResult(c.peid))!;
   assert(dc.what_we_need.includes("withdrawn_after_filing=false"), "届出していない人は届出前の取りやめ");

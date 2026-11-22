@@ -205,6 +205,27 @@ const KEY_EDIT_SEED: Edit[] = [
   { span: ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], with: "" },
   { span: ["  -- >>> 選舉年優先（20261112005000）", "  -- <<< 選舉年優先\n"], with: SEED_MONTH_BLOCK },
 ];
+/**
+ * 層級 × 種類帶狀優先（正見 #1026／20261121193000 的日本版，2026-11-22，維護者 17:10 定案）：同一支 migration（BANDS_MIG）重新定義三支複本，
+ * 走樣比對仍讀正見當時的版本（edits 登記差異）：contribution_tasks_insert_dispatch 的優先秒數換成帶狀（task_band_seconds＋月基準）、seed 的「選舉月基準」一行換成「帶狀優先」、
+ * verify_ticket_base 三處加帶狀領先（母任務位置再領先 19−母種類 天、新增型再減 層級＋19 天）。新增的十支函式都是日本專屬（JP_ONLY）：日本站的層級看 election_type／elections.level，不是台灣的職位字串。
+ * 日本站不做的：台灣 20261122160000 的抄公報 +175（日本沒有公報來源）、流量提層（日本站沒有 page_traffic）、基準夾限。
+ */
+const BANDS_MIG = "20261122210000_policy_jp_priority_bands_jp.sql";
+const BANDS_SQL = await readMig(BANDS_MIG);
+const BANDS_FOLLOWED = ["contribution_tasks_insert_dispatch", "seed_auto_task_queue", "verify_ticket_base"];
+const BANDS_NEW = [
+  "election_level_days", "level_text_of", "task_kind_days_by_type", "task_has_level", "task_target_level_text", "task_level_text", "task_band_seconds",
+  "contribution_level_text", "verify_ticket_band_seconds", "verify_ticket_parent_lead_seconds",
+];
+const BANDS_BLOCK = "  -- >>> 帶狀優先（20261122，日本站；台灣 #1026 的日本版）：優先秒數＝選舉月基準＋層級＋種類（task_band_seconds），取代規則秒數與上一版單獨的選舉月基準一行；\n  --     插隊中的列（已有列 boost_seconds > 0，或手動任務的新缺口）月基準一律用最近一場未來選舉的月。台灣的抄公報 +175 不做（日本沒有公報來源）、流量提層日本站沒有\n  UPDATE _gaps g SET priority_seconds = task_band_seconds(g.task_type, g.target)\n         + election_month_seconds(CASE WHEN x.boosted THEN NULL ELSE election_id_or_null(g.target->>'election_id') END, CASE WHEN x.boosted THEN NULL ELSE g.target END),\n         priority_rule_id = NULL\n    FROM (SELECT g2.task_id, COALESCE((SELECT d.boost_seconds > 0 FROM task_dispatches d WHERE d.task_id = g2.task_id), g2.arm LIKE 'manual\\_%') AS boosted FROM _gaps g2) x\n   WHERE x.task_id = g.task_id;\n  -- <<< 帶狀優先\n";
+const BANDS_EDIT_INSERT: Edit[] = [["         COALESCE((SELECT x.seconds FROM activity_priority_seconds(CASE WHEN manual_task_is_visitor(NEW.source, NEW.task_type) THEN 'manual_visitor' ELSE 'manual_open' END, NULL, NULL) x LIMIT 1), 0)\n           + election_year_priority_seconds(election_id_or_null(m.target->>'election_id')),  -- 選舉年優先（20261112005000）：沒有選舉 id 的當 2026\n", "         task_band_seconds(m.task_type, m.target)\n           + (CASE WHEN COALESCE(manual_front_seconds(m.task_id), 0) > 0 THEN election_month_seconds(NULL, NULL)\n                   ELSE election_month_seconds(election_id_or_null(m.target->>'election_id'), m.target) END),  -- 帶狀優先（20261122，日本站）：優先秒數＝選舉月基準＋層級＋種類；插隊（第一次進佇列）的月基準用最近一場未來選舉的月\n"]];
+const BANDS_EDIT_VB: Edit[] = [["           WHEN t.is_new THEN COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id))  -- >>> 選舉年優先\n", "           WHEN t.is_new THEN COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id) + verify_ticket_band_seconds(p_verify_task_id))  -- >>> 帶狀優先（月基準＋層級＋19）\n"], ["           ELSE COALESCE((SELECT p.dispatch_base_at FROM task_dispatches p\n", "           ELSE COALESCE((SELECT p.dispatch_base_at - make_interval(secs => verify_ticket_parent_lead_seconds(p.task_type, p.target)) FROM task_dispatches p  -- >>> 帶狀優先（領先 19 − 母種類 天）\n"], ["                         COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id)))  -- >>> 選舉年優先\n", "                         COALESCE(t.created_at, now()) - make_interval(secs => verify_ticket_election_seconds(p_verify_task_id) + verify_ticket_band_seconds(p_verify_task_id)))  -- >>> 帶狀優先（月基準＋層級＋19）\n"]];
+const BANDS_EDIT_SEED: Edit[] = [
+  { span: ["  -- >>> 流量提層：", "  -- <<< 流量提層\n"], with: "" },
+  { span: ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], with: "" },
+  { span: ["  -- >>> 選舉年優先（20261112005000）", "  -- <<< 選舉年優先\n"], with: BANDS_BLOCK },
+];
 /** OV_MIG（2026-11-02）那一版 apply_consensus 對應的 public（NOIP_MIG 之前的版本）要扣掉的片段：名冊兩處 */
 const OV_AC_EDITS: Edit[] = [
   [
@@ -280,7 +301,7 @@ const PAIRS: Pair[] = [
     name: "seed_auto_task_queue",
     before: "20261112065000_bundle_vote_fanout.sql",
     note: "取正見加 bundle 扇出（20261112065000，日本站沒有 policy_bundles，暫不跟）之前的版本＝含驗證票跟著任務（20261017010000）、換號沿用排隊位置（20261019040000）、選舉年優先（20261112005000）；拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；選舉年優先換成日本專屬的「選舉月基準」一行（KEY_MIG，取代舊的選舉鏈排序：規則的前段／後段與 seed 的日期定層）；（型別不動：選舉月基準最大約 7,400 天，INTEGER 放得下）",
-    edits: KEY_EDIT_SEED,
+    edits: BANDS_EDIT_SEED,
   },
   // 換號沿用排隊位置（20261019040100）新增的兩支複本（REKEY_NEW）：臂清單與穩定鍵，逐字
   { name: "task_rekey_arms", before: "20261120170000_lineage_arms_start_date.sql", note: "取台灣加兩支脈絡缺口臂 lineage_stance_missing／lineage_event_missing（20261120170000，policy-tw#675 第二期；日本站的脈絡缺口臂暫不跟，第六期）之前的版本" },
@@ -359,7 +380,7 @@ const PAIRS: Pair[] = [
   { name: "contribution_votes_trg" },
   { name: "contribution_votes_set_weight" },
   { name: "contribution_tasks_drop_dispatch" },
-  { name: "contribution_tasks_insert_dispatch", before: "20261114010000_election_type_priority_days.sql", note: "取正見加選舉職位天數（20261114010000，暫不跟）之前的版本＝含選舉年優先（20261112005000）；選舉年優先換成日本專屬的選舉月基準一行（日本站的選舉 id 是 election_key 字串、沒有年後兩碼的算法）", edits: KEY_EDIT_INSERT },
+  { name: "contribution_tasks_insert_dispatch", before: "20261114010000_election_type_priority_days.sql", note: "取正見加選舉職位天數（20261114010000，暫不跟）之前的版本＝含選舉年優先（20261112005000）；優先秒數換成日本專屬的帶狀（task_band_seconds＋選舉月基準，BANDS_MIG；日本站的選舉 id 是 election_key 字串、沒有年後兩碼的算法）", edits: BANDS_EDIT_INSERT },
   // 20261011360000 新增的複本（SEC_NEW）
   { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
@@ -376,7 +397,7 @@ const PAIRS: Pair[] = [
   { name: "verify_ticket_step_seconds", before: TW_VERIFY_FIRST, note: "取正見驗證先於任務（20261119100000，日本站暫不跟：步長多一個「有票」參數）之前的版本" },
   { name: "verify_ticket_key" },
   { name: "verify_ticket_freeze_base" },
-  { name: "verify_ticket_base", before: "20261114070100_verify_base_clamp.sql", note: "取正見加基準夾限（20261114070100，日本站暫不跟）之前的版本＝含選舉年優先的 verify_ticket_election_seconds 呼叫；日本站同名函式（JP_ONLY）改算選舉月基準，呼叫處逐字相同" },
+  { name: "verify_ticket_base", before: "20261114070100_verify_base_clamp.sql", note: "取正見加基準夾限（20261114070100，日本站暫不跟）之前的版本＝含選舉年優先的 verify_ticket_election_seconds 呼叫；日本站同名函式（JP_ONLY）改算選舉月基準，呼叫處逐字相同；再加帶狀領先三處（BANDS_MIG：母任務位置領先 19−母種類 天、新增型／沒基準再減 層級＋19 天）", edits: BANDS_EDIT_VB },
   { name: "refresh_verify_ticket_keys", before: TW_VERIFY_FIRST, note: "取正見驗證先於任務（20261119100000，日本站暫不跟）之前的版本" },
 ];
 
@@ -412,7 +433,7 @@ function reverse(jp: string): string {
   return s;
 }
 
-const jpBody = (name: string) => fnText(KEY_FOLLOWED.includes(name) ? KEY_SQL : UNSURE_JP_FOLLOWED.includes(name) ? UNSURE_JP_SQL : NOIP_FOLLOWED.includes(name) ? NOIP_SQL : OV_FOLLOWED.includes(name) ? OV_SQL : REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
+const jpBody = (name: string) => fnText(BANDS_FOLLOWED.includes(name) ? BANDS_SQL : KEY_FOLLOWED.includes(name) ? KEY_SQL : UNSURE_JP_FOLLOWED.includes(name) ? UNSURE_JP_SQL : NOIP_FOLLOWED.includes(name) ? NOIP_SQL : OV_FOLLOWED.includes(name) ? OV_SQL : REKEY_FOLLOWED.includes(name) ? REKEY_JP_SQL : SEC_FOLLOWED.includes(name) ? SEC_SQL : FOLLOWED[name] ?? MIG_SQL, `policy_jp.${name}`);
 
 for (const p of PAIRS) {
   Deno.test(`走樣 ${p.name}：還原後＝public 的${p.before ? `（${p.before.slice(0, 14)} 之前的）` : "現行"}定義${p.edits?.length ? "（扣掉登記的台灣專用片段）" : ""}`, async () => {
@@ -739,7 +760,7 @@ Deno.test("走樣：後續的 policy_jp migration 不得重新定義已登記的
     const sql = await readMig(name);
     for (const m of sql.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)) {
       // 例外只有登記過的跟進版（FOLLOWED：那個檔的定義就是逐字比對讀的那一份）
-      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1])) && !(name === OV_MIG && OV_FOLLOWED.includes(m[1])) && !(name === KEY_MIG && KEY_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
+      if (copies.has(m[1]) && !(name === FOLLOW_MIG && m[1] in FOLLOWED) && !(name === DEV_MIG && m[1] in DEVIATED) && !(name === KANA_MIG && m[1] in DEVIATED_KANA) && !(name === LIN_MIG && m[1] in DEVIATED_LINEAGE) && !(name === SEC_MIG && SEC_FOLLOWED.includes(m[1])) && !(name === REKEY_JP_MIG && REKEY_FOLLOWED.includes(m[1])) && !(name === OV_MIG && OV_FOLLOWED.includes(m[1])) && !(name === KEY_MIG && KEY_FOLLOWED.includes(m[1])) && !(name === BANDS_MIG && BANDS_FOLLOWED.includes(m[1]))) offenders.push(`${name}：${m[1]}`);
     }
   }
   assertEquals(offenders, [], "已登記的複本要改，就去改走樣守門的登記（PAIRS 加 edits／before，或照 FOLLOWED 登記跟進版），不要在後面的 migration 悄悄重新定義");
@@ -796,6 +817,7 @@ const T_SYSONE = "20261011110000"; // 系統票の投票端 jp-system-one?action
 const T_SYSONE_REASK = "20261011130000"; // 系統票：宣稱に投票日が入っていた candidacy の旧判定を一度だけ聞き直す
 
 const T_SEC = ID(SEC_MIG); // 派工排序改秒數（正見 20261011320000／350000 的日本版）
+const T_BANDS = ID(BANDS_MIG); // 層級×種類帶狀優先（正見 #1026 的日本版）
 const T_KEY = ID(KEY_MIG); // 驗證票排序鍵（正見 20261104120000）＋選舉月基準（正見 20261112005000 選舉年優先的日本版）
 
 type JpOnly = { mig: string[]; why: string };
@@ -884,6 +906,16 @@ const JP_ONLY: Record<string, JpOnly> = {
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
   chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY, T_CONS, T_AVATAR], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
+  election_level_days: { mig: [T_BANDS], why: "層級字串（national／regional／local）→ 層級天數：國政 170、都道府県 150、市区町村 130、無層級 30（正見的 election_level_days 吃台灣職位字串，日本版吃 elections.level）" },
+  level_text_of: { mig: [T_BANDS], why: "脈絡 target.level 的正規化（national／regional／local，也收 prefectural／municipal）" },
+  task_kind_days_by_type: { mig: [T_BANDS], why: "任務型別 → 種類天數 0～19（日本站的型別：avatar_missing 10、party_missing 8…；沒有台灣的抄公報 +175）" },
+  task_has_level: { mig: [T_BANDS], why: "這種任務型別有沒有層級（「其他」組沒有；roster_check、election_discovery 照選舉）" },
+  task_target_level_text: { mig: [T_BANDS], why: "target → 層級字串：election_type → election_id → politician_election_id → 這個人最近一屆" },
+  task_level_text: { mig: [T_BANDS], why: "任務的層級字串：lineage_* 看 target.level，有層級的種類看 target" },
+  task_band_seconds: { mig: [T_BANDS], why: "帶狀秒數＝(層級天數＋種類天數)×86400；優先秒數＝選舉月基準＋這個" },
+  contribution_level_text: { mig: [T_BANDS], why: "交件／母任務 target → 層級字串（驗證票用）" },
+  verify_ticket_band_seconds: { mig: [T_BANDS], why: "驗證票的帶狀領先（沒有母任務位置時）：(層級＋19)×86400" },
+  verify_ticket_parent_lead_seconds: { mig: [T_BANDS], why: "驗證票沿用母任務位置時的領先：(19−母種類)×86400" },
   election_month_seconds: { mig: [T_KEY], why: "選舉月基準秒數（日本專屬，取代正見的 election_year_priority_seconds）：M＝(選舉年%100)×12＋月；未來的選舉 (360−M)×200 天（M＞360 夾成 0）、已投完的 (M−361)×200 天；沒掛選舉的件當最近一場未來選舉的月。疊進 priority_seconds，數值抽查在 policy-jp-election-month.test.ts" },
   verify_ticket_election_seconds: { mig: [T_KEY], why: "一張驗證票那份交件的選舉月基準（正見同名函式算選舉年優先，日本版算選舉月基準；verify_ticket_base 的複本呼叫它，呼叫處逐字相同）" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
@@ -1233,4 +1265,21 @@ Deno.test("驗證票排序鍵＋選舉月基準（KEY_MIG，20261122）：定義
   const expected = applyEdits(await latestFn("task_dispatches_queue_key", TW_VERIFY_FIRST), PAIRS.find((p) => p.name === "task_dispatches_queue_key")!.edits);
   assertEquals(reverse(trg), expected);
   assertNotEquals(reverse(trg.replace("NEW.dispatch_base_at := COALESCE(policy_jp.verify_ticket_base(NEW.task_id), now());", "NEW.dispatch_base_at := now();")), expected);
+});
+
+Deno.test("層級×種類帶狀（BANDS_MIG，20261122）：定義的函式＝登記的三支複本（BANDS_FOLLOWED）＋十支日本專屬（BANDS_NEW，JP_ONLY）；不碰 public、不重新定義 task_queue_key；日本站不帶台灣的抄公報 +175 與流量機制", () => {
+  const defined = [...BANDS_SQL.matchAll(/CREATE OR REPLACE FUNCTION policy_jp\.(\w+)\(/g)].map((m) => m[1]).sort();
+  assertEquals(defined, [...BANDS_FOLLOWED, ...BANDS_NEW].sort());
+  const copies = new Set(PAIRS.map((p) => p.name));
+  for (const n of BANDS_FOLLOWED) assert(copies.has(n), `${n} 要在複本清單 PAIRS 裡`);
+  for (const n of BANDS_NEW) assert(JP_ONLY[n]?.mig.includes(T_BANDS) && !copies.has(n), `${n} 要登記在 JP_ONLY（mig 含 ${T_BANDS}），不是複本`);
+  for (const n of defined) {
+    const t = fnText(BANDS_SQL, `policy_jp.${n}`);
+    if (/LANGUAGE plpgsql/.test(t)) assert(t.includes("SET search_path = policy_jp, pg_temp"), `${n} 沒釘 search_path`);
+  }
+  const stripped = BANDS_SQL.replace(/--[^\n]*/g, "");
+  assert(!/\bpublic\./.test(stripped) && !/search_path\s*=\s*public/i.test(stripped), "不碰 public");
+  assert(!/FUNCTION policy_jp\.task_queue_key\(/.test(stripped), "task_queue_key 不動（型別維持 INTEGER）");
+  assert(!/ALTER COLUMN priority_seconds|TYPE BIGINT/.test(stripped), "型別維持 INTEGER");
+  assert(!/175|bulletin|公報抬|traffic_boost|page_traffic/.test(stripped), "日本站不做抄公報 +175，也沒有流量提層");
 });

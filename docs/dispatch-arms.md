@@ -369,3 +369,14 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 **11-22 週六三支補搬（`20261122110000_cron_shift_cec_weekly.sql`）**：`cec-sync-weekly` `0,5,10,15,20`→`1,6,11,16,21`、`cec-sync-2022-village-rest` `5,10,15,20`→`6,11,16,21`、`cec-sync-2024-weekly` `30`→`32`（皆 UTC 週六 19 點）。
 
 **11-22 最後 10 支補搬（`20261122130000_cron_shift_remaining_ten_minutes.sql`）**：`cec-sync-2022-weekly` 0→3、`cec-sync-2022-rest` `5,10`→`7,12`、`cec-reconcile-weekly` 30→33、`news-items-retention-weekly` 30→37、`gate-rejections-purge` 40→42、`policy-jp-news-purge-daily` 40→47、`dispatch-records-purge` 50→52、`moi-sync-daily` 20→22、`moi-avatar-import-daily` 50→52、`ditrust-purge-rate-limits-daily` 20→22（03 點）。至此除 seed 外沒有 cron 落整十分鐘。
+
+## 日本站（policy_jp）的優先序：選舉月基準＋層級×種類帶狀（2026-11-22，`20261122190000`、`20261122210000_policy_jp_priority_bands_jp.sql`）
+
+日本站的排序鍵與台灣同一條（`queue_at ＝ GREATEST(進隊時間 − priority_seconds, cool_until) − boost_seconds`，`policy_jp.task_queue_key` 一字不動、INTEGER）。`priority_seconds ＝ 選舉月基準 ＋ 層級 ＋ 種類`（天，×86400）：
+
+- **選舉月基準**（`election_month_seconds`）：M＝(選舉年−2000)×12＋月；未來選舉（投票日 ≥ 今天，日本時間）`(360−M)×200` 天（2026-11＝7,400、2027-02＝6,800；M＞360 夾成 0）、已投完 `(M−361)×200` 天（下限 −20,000）；沒掛選舉的件當最近一場未來選舉的月。
+- **層級**（每級 20 天）：國政 170、都道府県 150、市区町村 130、無層級 30；來源 `target.election_type`（`election_level`）→ `election_id` → `politician_election_id` → 這個人最近一屆；`lineage_*` 看 `target.level`。「其他」組無層級；`election_discovery`、`roster_check` 照選舉。
+- **種類**（0～19）：查證票／adjudicate 19、`policy_missing` 15、`term_policy_missing` 13、`lineage_*` 12、`avatar_missing` 10、人物基本資料 8（`profile_gap`、`profile_detail_gap`、`party_info_missing`、`party_missing`、`candidacy_source_missing`、`candidate_status_stale`）、整理 5、進度 3、其他 0。日本站沒有台灣的「抄公報 +175」與流量提層。
+- **插隊** 400 天（三個 `queue_settings` 值），月基準用最近一場未來選舉的月；**驗證票**＝月基準＋母任務層級＋19（`verify_priority_seconds` 0，領先折進入列時凍結的基準）。
+- 例（2026-12 的選舉）：國政 `policy_missing` ＝ 7,200＋170＋15 天；市区町村 `avatar_missing` ＝ 7,200＋130＋10 天。
+- 舊的 `priority:<臂>` 規則秒數不再被讀；改值要改 `task_band_seconds` 家族函式的 migration。

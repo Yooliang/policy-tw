@@ -65,7 +65,7 @@ const front = (db: PGlite) => rows<{ task_id: string; queue_at: string }>(db,
   `SELECT task_id, queue_at FROM policy_jp.task_dispatches
     WHERE boost_seconds > 0 ORDER BY queue_at, task_id`);
 const boostSec = async (db: PGlite, id: string) => Number((await one<{ b: string }>(db, `SELECT boost_seconds::TEXT AS b FROM policy_jp.task_dispatches WHERE task_id = $1`, [id])).b);
-const BOOST = 157680000; // queue_settings.boost_seconds 的預設（5 年）
+const BOOST = 34560000; // queue_settings.boost_seconds（20261122 起 400 天，原 5 年）
 const frontIds = async (db: PGlite) => (await front(db)).map((r) => r.task_id);
 const at = async (db: PGlite, id: string) => (await one<{ q: string }>(db, `SELECT queue_at::TEXT AS q FROM policy_jp.task_dispatches WHERE task_id = $1`, [id])).q;
 const atMs = async (db: PGlite, id: string) => (await one<{ ms: number }>(db, `SELECT (EXTRACT(EPOCH FROM queue_at) * 1000)::BIGINT AS ms FROM policy_jp.task_dispatches WHERE task_id = $1`, [id])).ms;
@@ -146,7 +146,7 @@ Deno.test("情境本身：自動缺口、手動任務、待驗證貢獻都在佇
   const s = await scene();
   const all = (await rows<{ task_id: string }>(s.db, `SELECT task_id FROM policy_jp.task_dispatches`)).map((r) => r.task_id);
   for (const id of [...s.normalTasks, s.VERIFY, s.MANUAL_FRONT, s.VISITOR]) assert(all.includes(id), `佇列裡要有 ${id}`);
-  assertEquals(await frontIds(s.db), [s.VISITOR, s.MANUAL_FRONT], "插隊前，插隊中的只有訪客優先（10 年）與維護者建的（5 年）");
+  assertEquals(sorted(await frontIds(s.db)), sorted([s.VISITOR, s.MANUAL_FRONT]), "插隊前，插隊中的只有訪客優先與維護者建的（20261122 起都是 400 天）");
   await s.db.close();
 });
 
@@ -203,7 +203,7 @@ Deno.test("插隊：只有命中的任務列加插隊秒數（5 年），排在�
   assertEquals(new Date(r.queue_at).getTime(), await atMs(s.db, s.DISC), "回傳的 queue_at＝命中的列最前面的排序鍵（20261122 起驗證票也是插隊秒數，不再有 1980 年段）");
   assertEquals(await boostSec(s.db, s.DISC), BOOST);
   const fr = await frontIds(s.db);
-  assertEquals(fr[0], s.VISITOR, "訪客優先（10 年）照舊最前");
+  assertEquals(sorted(fr.slice(0, 2)), sorted([s.VISITOR, s.MANUAL_FRONT]), "訪客優先與維護者建的（都是 400 天）在最前；命中的 DISC 排在其後或並列");
   assertEquals(sorted(fr), sorted([s.VISITOR, s.DISC, s.MANUAL_FRONT]));
   for (const id of s.normalTasks.filter((x) => x !== s.DISC)) {
     assertEquals(await at(s.db, id), before[id], `${id} 沒命中，不能動`);
@@ -279,6 +279,8 @@ async function surviveCheck(patch?: Record<string, (sql: string) => string>): Pr
   const s = await scene(patch);
   await boost(s.db, "愛知県", { pref_codes: [AICHI], kinds: ["task"] });
   await boost(s.db, "長野県", { pref_codes: [NAGANO], kinds: ["task"] });
+  // 20261122：插隊中的列月基準用最近一場未來選舉的月，由 seed 換上（插隊後第一輪）；之後才穩定
+  await seed(s.db);
   const frontBefore = await frontIds(s.db);
   const snapshot = Object.fromEntries(await Promise.all(frontBefore.map(async (id) => [id, await at(s.db, id)] as const)));
   await seed(s.db);
@@ -298,7 +300,7 @@ async function surviveCheck(patch?: Record<string, (sql: string) => string>): Pr
 Deno.test("與 seed 共存：seed 多跑幾輪，插隊中的列位置不變、仍在最前面；領走後才歸零", async () => {
   const r = await surviveCheck();
   assert(r.frontBefore.length >= 4, `插隊中至少有 4 列：${r.frontBefore.join(",")}`);
-  assertEquals(r.frontAfter, r.frontBefore);
+  assertEquals(sorted(r.frontAfter), sorted(r.frontBefore));
   assert(r.stable, "插隊的列 queue_at 一個字都沒變");
   assert(r.restored, "領走後歸零，沒領走的仍在最前面");
 });

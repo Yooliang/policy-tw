@@ -156,7 +156,7 @@ Deno.test("news_discovery：線索 → election_discovery 任務（target.discov
   assertEquals(d.map((x) => x.task_id), [`auto:election_discovery:${D0}:${ICHI}:head`]);
   const t = d[0];
   assertEquals(t.task_type, "election_discovery");
-  assertEquals(t.priority, 1, "前段");
+  assertEquals(t.priority, 2, "中段（20261122 帶狀：優先序不再讀規則秒數，層一律中段）");
   assertEquals(t.opened_by?.arm, "news_discovery");
   assertEquals(t.region, "愛知県");
   const g = t.target as Record<string, unknown>;

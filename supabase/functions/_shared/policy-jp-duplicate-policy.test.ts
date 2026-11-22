@@ -116,7 +116,7 @@ Deno.test("預設關：臂は行を返す（読み取りだけ）が、総表は
   const taskId = `auto:duplicate_policy:${s.a.peid}:${fp}`;
   assertEquals(await dispatchIds(db, DUP_TYPES), [taskId]);
   const d = (await dispatches(db, DUP_TYPES))[0];
-  assertEquals([d.task_type, d.priority, d.region, d.opened_by?.arm, d.opened_by?.chain_gate], ["duplicate_policy", 3, "愛知県", "duplicate_policy", undefined], "後段・鎖の gate なし");
+  assertEquals([d.task_type, d.priority, d.region, d.opened_by?.arm, d.opened_by?.chain_gate], ["duplicate_policy", 2, "愛知県", "duplicate_policy", undefined], "中段（20261122 帶狀：優先序不再讀規則秒數，層一律中段）・鎖の gate なし");
   assertEquals(d.target.fingerprint, fp);
   assertEquals(fp.length, 32);
   await db.close();
