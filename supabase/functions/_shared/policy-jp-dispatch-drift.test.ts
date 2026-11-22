@@ -171,6 +171,7 @@ const OV_POOL_CLAUSE =
  * 所以另有「走樣（投票不看 IP）」一條守：日本站在這支重新定義的函式＝登記的清單；needs_two_ips／apply_consensus／verify_dispatch_claim 還原後逐字＝同檔 public；
  * 驗證池因簽名與型別比對（uuid_if_canonical）不同，用結構檢查（見該條）。PAIRS 的 contribution_verify_pool 仍讀 OV_MIG 那一版對 LEGACY 之前的 public 比（歷史複本）。
  */
+const UNSURE_FREE_MIG = "20261122170000_unsure_no_penalty.sql";
 const NOIP_MIG = "20261104130000_vote_no_ip.sql";
 const NOIP_SQL = await readMig(NOIP_MIG);
 const NOIP_FOLLOWED = ["contribution_needs_two_ips", "contribution_apply_consensus"];
@@ -307,7 +308,8 @@ const PAIRS: Pair[] = [
   {
     name: "contribution_apply_consensus",
     // 2026-11-04 日本站跟上（20261104130000，投票不看 IP）：比對讀同檔 public 的定義；2026-11-02（OV_MIG）那一版對應的是當時的 public，見 OV_AC_EDITS
-    note: "拿掉中選會名冊整批驗證分支（batch_verified_by）；v_ips >= 2／名冊吻合的條件已隨投票不看 IP 消失",
+    before: UNSURE_FREE_MIG,
+    note: "拿掉中選會名冊整批驗證分支（batch_verified_by）；取正見改成不扣分（20261122170000，日本站暫不跟：不確定第 2 張起仍 −1、退件備註照舊）之前的版本",
     edits: [
       { span: ["    ELSIF (SELECT batch_verified_by", "      v_new := 'verified';\n"], with: "" },
     ],
@@ -336,7 +338,9 @@ const PAIRS: Pair[] = [
   { name: "activity_priority_seconds" },
   { name: "manual_front_seconds", before: "20261114020000_boost_days_level.sql", note: "取台灣插隊改天級（20261114020000，2026-11-14，日本站暫不跟：網站請求插隊依目標選舉階段分選前／選後，日本站沒有）之前的版本" },
   // 20261102230000 新增的複本（OV_NEW）
-  ...OV_NEW.map((name) => ({ name })),
+  ...OV_NEW.map((name) => name === "contribution_unsure_penalty"
+    ? { name, before: UNSURE_FREE_MIG, note: "取正見改成不扣分（20261122170000，維護者 2026-11-22，日本站暫不跟）之前的版本" }
+    : { name }),
   { name: "verify_inherited_priority_seconds" },
   { name: "task_dispatches_queue_key", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：驗證列改走 verify_queue_key、拿掉 1970／1980 年段）之前的版本" },
 ];

@@ -434,7 +434,7 @@ export function planRetry(previousRetryCount: number, now: number = Date.now()):
 
 export type VoteWeight = -2 | -1 | 0 | 1 | 2;
 
-/** 一票值幾分：agree +1（Jev 核過來源 +2）、disagree −1（Jev 核過反證 −2）、unsure 0（第 2 張起的罰則看 unsurePenalty，不在單票權重裡） */
+/** 一票值幾分：agree +1（Jev 核過來源 +2）、disagree −1（Jev 核過反證 −2）、unsure 0（不確定不扣分，2026-11-22 起；unsurePenalty 恆 0） */
 export function voteWeight(verdict: string, judgeBacked: boolean): VoteWeight {
   if (verdict === "agree") return judgeBacked ? 2 : 1;
   if (verdict === "disagree") return judgeBacked ? -2 : -1;
@@ -442,12 +442,12 @@ export function voteWeight(verdict: string, judgeBacked: boolean): VoteWeight {
 }
 
 /**
- * 不確定的罰則（維護者 2026-10-17，補充 09-19「我看不到不是我反對」）：同一份交件的第 1 張 unsure 照舊 0 分，第 2 張起每張 −1，
- * 所以 n 張不確定（每個來源 IP 只算最新一票）共扣 max(n−1, 0) 分。SQL 鏡像：contribution_unsure_penalty（20261017020000），
- * 扣在 contribution_apply_consensus 計分那一步、不寫進 contribution_votes.weight——罰則只看張數不看順序，重算永遠一致；守門 unsure-penalty.test.ts。
+ * 不確定不扣分（維護者 2026-11-22：「unsure 將他改成不扣分」）。2026-10-17～11-22 曾是第 2 張起每張 −1（20261017020000），
+ * 現在恆 0；防洗輪次改由驗證票「投太多輪」停派線接管（unsure 仍計入張數）。SQL 鏡像：contribution_unsure_penalty（20261122170000）；
+ * 守門 unsure-penalty.test.ts。函式留著，呼叫端與兩邊逐案比對不必動。
  */
-export function unsurePenalty(unsureCount: number): number {
-  return Math.max(Math.trunc(unsureCount || 0) - 1, 0);
+export function unsurePenalty(_unsureCount: number): number {
+  return 0;
 }
 
 /**
@@ -469,8 +469,8 @@ export function weightReason(verdict: string, judgeBacked: boolean, hasEvidence 
     return "反對且理由具體；附上系統核過的反證（evidence_url）才是 −2";
   }
   // unsureCount＝投完之後這份交件的不確定張數（含這一張）；0＝呼叫端沒給
-  if (unsureCount >= 2) return `存疑，而且這是這份交件的第 ${unsureCount} 張不確定：第 2 張起每張 −1 分（第 1 張 0 分）。看不出來就別再補一張，換一份能打開的來源再判斷，確實確認不了才投 unsure`;
-  return "存疑：同一份交件的第 1 張不確定 0 分；第 2 張起每張 −1 分，所以確認不了又沒試過別的來源時先換來源再判斷";
+  if (unsureCount >= 2) return `存疑，這是這份交件的第 ${unsureCount} 張不確定：不扣分（0 分），但算進這份交件的票數，票數過多會停止派工。看不出來就別再補一張，換一份能打開的來源再判斷，確實確認不了才投 unsure`;
+  return "存疑：不確定票 0 分、不扣分，但算進這份交件的票數（票數過多會停止派工），所以確認不了又沒試過別的來源時先換來源再判斷";
 }
 
 /**
