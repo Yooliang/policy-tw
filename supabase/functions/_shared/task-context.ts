@@ -1578,9 +1578,9 @@ function shapeVerifyCurrentInner(contributionType: string, payload: Obj, data: V
         };
       }
       return {
-        policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date"])!, ["description"]) : null,
+        policy: data.policy ? truncateFields(pick(data.policy, ["id", "title", "description", "category", "status", "source_url", "election_id", "proposed_date", "pledge_kind"])!, ["description"]) : null,
         politician: data.politicians?.[0] ? pick(data.politicians[0], POLITICIAN_BRIEF) : null,
-        hint: "看這筆政見的標題與內容：它是不是「當選後要做的具體事情」？口號、行程、表態、團隊組成不是政見 → agree 移除；是政見但只是缺出處 → disagree 並在 note 說應該用 correction 補 source_url",
+        hint: "看這筆政見的標題與內容：它是不是「當選後要做的具體事情」？口號、行程、表態、團隊組成不是政見 → agree 移除；**但 pledge_kind＝principle（原則宣示）的是選舉公報政見欄上的口號、原則，本來就收，只要公報上確實印著就不要移除**；是政見但只是缺出處 → disagree 並在 note 說應該用 correction 補 source_url",
       };
     case "party_info": {
       // 逐個政黨對照：交上來的值、我們現有的值（空白＝還沒有）；名冊外的政黨（moi_no 空的）要特別看前身那一欄

@@ -85,6 +85,8 @@ export interface PolicyLite {
   title: string;
   description: string | null;
   election_id: number | null;
+  /** 政見性質（1.142.0）：specific 具體承諾／principle 原則宣示；缺＝specific */
+  pledge_kind?: string | null;
 }
 export interface ElectionLite {
   election_id: number;
@@ -111,12 +113,12 @@ export function buildPolicyAsk(target: PolicyLite, siblings: PolicyLite[], elect
 } {
   const sib = siblings.filter((q) => q.id !== target.id);
   const state: Record<string, unknown> = {
-    target: { title: target.title, description: (target.description ?? "").slice(0, TARGET_DESC_MAX) },
+    target: { title: target.title, description: (target.description ?? "").slice(0, TARGET_DESC_MAX), ...(target.pledge_kind === "principle" ? { pledge_kind: "principle" } : {}) },
   };
   const questions: Record<string, JevQuestion> = {
     is_policy: {
       type: "choice",
-      instructions: "target 是一條具體政見，還是口號／願景／包裹式標題？政見＝當選後要做的具體事情，看得出做什麼、給誰、做到什麼程度。",
+      instructions: "target 是一條具體政見，還是口號／願景／包裹式標題？政見＝當選後要做的具體事情，看得出做什麼、給誰、做到什麼程度。（target 帶 pledge_kind＝principle 的，是選舉公報政見欄上的原則宣示，口號本身就是它的內容，一律選 policy；團隊組成、行程、個人經歷仍不是。）",
       criteria: { policy: "具體政見", not_policy: "口號、願景、或把好幾條政見包起來的標題，本身沒有具體內容" },
     },
   };
@@ -285,7 +287,7 @@ export function validateRecord(r: Partial<DecisionRecord> | null | undefined): s
 const CLAIM_FIELDS_BY_TYPE: Readonly<Record<string, readonly string[]>> = {
   candidacy: ["name", "party", "region", "election_id", "election_type", "candidate_status", "electoral_district"],
   politician: ["name", "party", "region", "birth_year", "current_position", "education_level"],
-  policy: ["name", "politician_name", "title", "description", "election_id", "category"],
+  policy: ["name", "politician_name", "title", "description", "election_id", "category", "pledge_kind"],
   policy_progress: ["policy_title", "status", "progress", "description"],
   // correction 走 flattenCorrection：攤成「<欄位>＝新值」＋ subject_name，不問 target_table／reason 這種頁面證明不了的東西
   correction: ["subject_name"],

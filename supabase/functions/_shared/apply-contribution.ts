@@ -827,6 +827,8 @@ async function applyPolicy(supabase: SupabaseLike, row: ContributionRow): Promis
     tags: Array.isArray(p.tags) ? p.tags : null,
     // 政見從哪裡來（#349）：交件有給才寫；沒給的競選承諾由資料庫觸發器自動標 pledge
     ...(str(p.origin) ? { origin: str(p.origin) } : {}),
+    // 政見性質（1.142.0）：交件有給才寫（principle 原則宣示）；沒給由資料庫預設 specific 具體承諾
+    ...(str(p.pledge_kind) ? { pledge_kind: str(p.pledge_kind) } : {}),
   };
   const { data: inserted, error } = await supabase.from("policies").insert(rowToInsert).select("*").maybeSingle();
   throwIf(error, "policies insert");

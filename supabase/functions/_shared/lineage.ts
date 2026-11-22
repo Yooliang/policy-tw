@@ -80,6 +80,13 @@ export const LOCATOR_MAX = 200;
 /** 政見從哪裡來（照日本站 policy_origin） */
 export const POLICY_ORIGINS = ["pledge", "policy_address", "assembly", "budget"] as const;
 export type PolicyOrigin = (typeof POLICY_ORIGINS)[number];
+
+/**
+ * 政見性質（2026-11-22 維護者裁示，協議 1.142.0，policies.pledge_kind）：
+ * specific 具體承諾（有具體標的、做法或數字；缺＝這個）／principle 原則宣示（公報上只有口號、原則、態度表述）。
+ */
+export const POLICY_PLEDGE_KINDS = ["specific", "principle"] as const;
+export type PolicyPledgeKind = (typeof POLICY_PLEDGE_KINDS)[number];
 export const POLICY_ORIGIN_LABEL: Record<PolicyOrigin, string> = {
   pledge: "競選承諾",
   policy_address: "施政報告",
