@@ -18,15 +18,16 @@
 --
 -- ── (b) 選舉月基準 ──
 --   公式不動：queue_at ＝ GREATEST(進隊時間 − priority_seconds, cool_until) − boost_seconds（task_queue_key）；這支只讓 priority_seconds 多一項「選舉月基準」：
---     M ＝ (選舉年 % 100) × 12 ＋ 月（elections.election_date 的投票日）
---     未來的選舉（投票日 ≥ 今天，日本時間）：base ＝ (1200 − M) × 200 天——越近要投的越大、越先派；相鄰月差 200 天，剛好容納之後的層級×種類 0～199 天
---     已投完的選舉：base ＝ M × 200 − 300,000 天——一律排在所有未來選舉之後，已投完的之間較近的先
+--     M ＝ (選舉年 − 2000) × 12 ＋ 月（2000～2099 年等於 (選舉年 % 100) × 12 ＋ 月，更早的年份不會繞回 99）（elections.election_date 的投票日）
+--     未來的選舉（投票日 ≥ 今天，日本時間）：base ＝ (REF − M) × 200 天，REF＝360（2029-12）——越近要投的越大、越先派；相鄰月差 200 天，剛好容納之後的層級×種類 0～199 天
+--     M 大於 360（2029-12 之後）的未來選舉夾成 0
+--     已投完的選舉：base ＝ (M − 361) × 200 天（下限 −20,000 天，再舊的夾成同值，INTEGER 才放得下）——一律是負的、排在所有未來選舉之後，已投完的之間較近的先
 --     沒掛選舉的件（網站請求、人物、合併…）：當「最近一場未來選舉」的月；選舉發現／等團體落庫的缺口沒有選舉列，用 target 自己的日期（election_date、vote_window_from）。
---   例：2026-11 的未來選舉 base ＝ 175,400 天、2027-02 ＝ 174,800 天；2026-10 已投完的 ＝ −235,600 天。
+--   例：2026-11 的未來選舉 base ＝ 7,400 天、2027-02 ＝ 6,800 天；2026-10 已投完的 ＝ −7,800 天。
 --   疊進 priority_seconds 的地方跟正見的選舉年一樣三處：seed_auto_task_queue（每 10 分鐘，缺口）、contribution_tasks_insert_dispatch（手動任務第一次進佇列）、
 --   驗證票（沿用母任務位置＝母任務列的 priority_seconds 已含這一項；新增型／沒基準的退路＝建立時間 − 那份交件選舉的 base）。
---   priority_seconds 與 task_queue_key 的優先秒數參數因此從 INTEGER 改 BIGINT（base 最大約 1.5×10^10 秒，INTEGER 上限 2.1×10^9）；queue_at 會落在公元 1500 年前後，
---   所以 task_boost_remaining 不再用「queue_at 早於 1990 年」判斷插隊（改看 boost_seconds）；其他用 2000-01-01 的判斷只在冷卻列（queue_at ≥ 冷卻結束時間）上，不受影響。
+--   最大約 7,400 天（6.4×10^8 秒），INTEGER 放得下：priority_seconds 欄與 task_queue_key 的型別一個字不動（task_queue_key 是 policy_jp 自己那份，不碰 public）。
+--   queue_at 會落在 2006 年前後（現在往前約 20 年），所以 task_boost_remaining 不再用「queue_at 早於 1990 年」判斷插隊（改看 boost_seconds）；其他用 2000-01-01 的判斷只在冷卻列上（queue_at ≥ 冷卻結束時間），不受影響。
 --
 -- ── 取代舊的「選舉鏈排序」（不是疊加） ──
 --   舊做法（20261009300000 ／ 20261011360000）＝①activity_rules 的 priority:<臂> 規則：投票日前 60 天內 +3 天、181 天以上 −30 天（30 條，from/until＝polling −60／−181）；
@@ -47,7 +48,6 @@
 --      （20261019040100 版）、contribution_tasks_insert_dispatch、task_boost／task_boost_remaining 的定義 CREATE OR REPLACE 回去，INTEGER 版的 task_queue_key 要重建）；
 --      最後 UPDATE policy_jp.task_dispatches d SET queue_at = b.queue_at FROM policy_jp.priority_backup_20261122 b WHERE b.task_id = d.task_id AND d.task_id LIKE 'verify:%';
 --   ③ queue_settings.election_month_priority_applied_at 設回 NULL。新欄位與函式留著無害（沒人呼叫）。
---   priority_seconds 欄的 BIGINT 不必退回（INTEGER 放不下 base 的值，退回前先把值改小）。
 --
 -- 只動日本站（policy_jp），不碰 public；不升協議版號、不改 TS。
 
@@ -67,8 +67,6 @@ COMMENT ON TABLE policy_jp.priority_backup_20261122 IS '20261122 驗證票排序
 COMMENT ON TABLE policy_jp.priority_backup_20261122_rules IS '20261122 改前的 priority: 規則（enabled 欄是改前的值；回滾時照它把被停用的規則開回來）';
 
 -- ── 1. 欄位與參數 ──────────────────────────────────────────
--- priority_seconds 要放得下選舉月基準（最大約 1.5×10^10 秒，超過 INTEGER 的 2.1×10^9）：欄位與用到它的函式一起改 BIGINT
-ALTER TABLE policy_jp.task_dispatches ALTER COLUMN priority_seconds TYPE BIGINT;
 ALTER TABLE policy_jp.queue_settings
   ADD COLUMN IF NOT EXISTS verify_redispatch_seconds INTEGER NOT NULL DEFAULT 604800
     CHECK (verify_redispatch_seconds BETWEEN 0 AND 31536000);
@@ -82,16 +80,13 @@ COMMENT ON COLUMN policy_jp.queue_settings.election_month_priority_applied_at IS
 ALTER TABLE policy_jp.task_dispatches ADD COLUMN IF NOT EXISTS dispatch_base_at TIMESTAMPTZ;
 COMMENT ON COLUMN policy_jp.task_dispatches.dispatch_base_at IS '任務列：最近一次被派出（dispatch_count 變動）當下、派出前的排序位置（含插隊秒數；負的優先秒數照 verify_inherit_negative），給之後交件產生的驗證票當基準；驗證列：入列時凍結的基準（之後不再看母任務）。沒經過 /next 派出的任務列是 NULL。2026-11-22';
 
--- ── 2. 函式：參數／回傳型別變了的先刪舊簽名（內容照舊，只是 INTEGER → BIGINT） ───────────────
-DROP FUNCTION IF EXISTS policy_jp.task_queue_key(TIMESTAMPTZ, INTEGER, TIMESTAMPTZ, BIGINT);
-DROP FUNCTION IF EXISTS policy_jp.verify_inherited_priority_seconds(TEXT);
-
+-- ── 2. 函式 ────────────────────────────────────────────────
 -- 選舉月基準（日本專屬，取代台灣的選舉年優先）
-CREATE OR REPLACE FUNCTION policy_jp.election_month_seconds(p_election_id TEXT, p_target JSONB DEFAULT NULL) RETURNS BIGINT
+CREATE OR REPLACE FUNCTION policy_jp.election_month_seconds(p_election_id TEXT, p_target JSONB DEFAULT NULL) RETURNS INTEGER
 LANGUAGE sql STABLE AS $$
-  SELECT (CASE WHEN d.v >= policy_jp.activity_today() THEN (1200 - d.m)::BIGINT * 200
-               ELSE d.m::BIGINT * 200 - 300000 END) * 86400
-    FROM (SELECT x.v, ((EXTRACT(YEAR FROM x.v)::INTEGER % 100) * 12 + EXTRACT(MONTH FROM x.v)::INTEGER) AS m
+  SELECT ((CASE WHEN d.v >= policy_jp.activity_today() THEN GREATEST(360 - d.m, 0)::BIGINT * 200
+                ELSE GREATEST((d.m - 361)::BIGINT * 200, -20000) END) * 86400)::INTEGER
+    FROM (SELECT x.v, ((EXTRACT(YEAR FROM x.v)::INTEGER - 2000) * 12 + EXTRACT(MONTH FROM x.v)::INTEGER) AS m
             FROM (SELECT COALESCE(
                     (SELECT e.election_date FROM policy_jp.elections e WHERE e.id = p_election_id),
                     policy_jp.date_or_null(p_target->>'election_date'),
@@ -99,7 +94,7 @@ LANGUAGE sql STABLE AS $$
                     (SELECT min(e2.election_date) FROM policy_jp.elections e2 WHERE e2.election_date >= policy_jp.activity_today()),
                     policy_jp.activity_today()) AS v) x) d
 $$;
-COMMENT ON FUNCTION policy_jp.election_month_seconds IS '選舉月基準秒數（2026-11-22，維護者 11-22 17:10 定案）：M＝(選舉年 % 100) × 12 + 月（投票日）。未來的選舉（投票日 >= 今天，日本時間）＝(1200 − M) × 200 天，越近越大、越先派，相鄰月差 200 天剛好容納之後的層級×種類 0～199 天；已投完的選舉＝M × 200 − 300,000 天，一律排在所有未來選舉之後、較近的先。'
+COMMENT ON FUNCTION policy_jp.election_month_seconds IS '選舉月基準秒數（2026-11-22，維護者 11-22 17:10 定案）：M＝(選舉年 − 2000) × 12 + 月（投票日；2000～2099 年等於 (選舉年 % 100) × 12 + 月，更早的年份不會繞回 99）。未來的選舉（投票日 >= 今天，日本時間）＝(REF − M) × 200 天，REF＝360（2029-12），越近越大、越先派，相鄰月差 200 天剛好容納之後的層級×種類 0～199 天；M 大於 360 的選舉夾成 0（沒有更近的月可分，要用得更遠要改 REF）；已投完的選舉＝(M − 361) × 200 天（下限 −20,000 天＝約 1.7×10^9 秒，再舊的選舉夾成同一個值，避免超過 INTEGER），一律是負的、排在所有未來選舉之後、較近的先。最大約 7,400 天（6.4×10^8 秒），INTEGER 放得下。'
   '選舉日期取 elections.election_date（p_election_id）；沒有選舉 id 的件看 target 自己的日期（election_date、vote_window_from，選舉發現／等團體落庫的缺口）；都沒有（網站請求、人物、合併…）當最近一場未來選舉的月。疊進 priority_seconds，排序鍵 task_queue_key 不動。';
 
 CREATE OR REPLACE FUNCTION policy_jp.uuid_or_null(p_text TEXT) RETURNS UUID
@@ -107,7 +102,7 @@ LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE WHEN p_text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN p_text::UUID ELSE NULL END;
 $$;
 
-CREATE OR REPLACE FUNCTION policy_jp.verify_ticket_election_seconds(p_verify_task_id TEXT) RETURNS BIGINT
+CREATE OR REPLACE FUNCTION policy_jp.verify_ticket_election_seconds(p_verify_task_id TEXT) RETURNS INTEGER
 LANGUAGE sql STABLE AS $$
   SELECT policy_jp.election_month_seconds(x.eid, x.tgt)
     FROM (SELECT 1) s
@@ -120,7 +115,6 @@ $$;
 COMMENT ON FUNCTION policy_jp.verify_ticket_election_seconds IS '一張驗證票（task_id＝verify:<貢獻 id>）那份交件的選舉月基準秒數：交件 payload.election_id，沒有就看母任務列的 target.election_id（連同 target 日期）；都沒有＝最近一場未來選舉的月。只給 verify_ticket_base 的「沒有母任務位置可沿用」分支與一次性重算用。2026-11-22';
 
 -- 以下是正見現行定義的複本（逐字比對在 policy-jp-dispatch-drift.test.ts，登記在 PAIRS／KEY_FOLLOWED）：
---   task_queue_key／verify_inherited_priority_seconds／verify_ticket_priority_seconds 的 INTEGER 換成 BIGINT（日本站的優先秒數放得下選舉月基準）；
 --   task_dispatches_queue_key 拿掉 verify_follows_task 那一段（日本站沒有這一欄）；其餘逐字。
 --   取正見 20261104120000／20261112005000 當時的版本（之後正見又加了「驗證先於任務」（20261119100000）與層級×種類帶狀（20261121193000），日本站暫不跟）。
 
@@ -142,18 +136,7 @@ LANGUAGE sql STABLE AS $$
                     FROM policy_jp.contributions b WHERE b.id = policy_jp.uuid_or_null(substr(p_verify_task_id, 8))) x) c
 $$;
 
-CREATE OR REPLACE FUNCTION policy_jp.verify_inherited_priority_seconds(p_verify_task_id TEXT) RETURNS BIGINT
-LANGUAGE sql STABLE AS $$
-  SELECT COALESCE((
-    SELECT CASE WHEN q.verify_inherit_negative THEN d.priority_seconds ELSE GREATEST(d.priority_seconds, 0) END
-      FROM policy_jp.contributions c
-      JOIN policy_jp.task_dispatches d ON d.task_id = COALESCE(c.task_id, c.payload->>'task_id')
-      CROSS JOIN policy_jp.queue_settings q
-     WHERE 'verify:' || c.id = p_verify_task_id AND q.id = 1
-     LIMIT 1), 0)
-$$;
-
-CREATE OR REPLACE FUNCTION policy_jp.verify_ticket_priority_seconds(p_verify_task_id TEXT) RETURNS BIGINT
+CREATE OR REPLACE FUNCTION policy_jp.verify_ticket_priority_seconds(p_verify_task_id TEXT) RETURNS INTEGER
 LANGUAGE sql STABLE AS $$
   SELECT CASE WHEN COALESCE((SELECT t.is_new FROM policy_jp.verify_ticket_parent(p_verify_task_id) t), false) THEN 0
               ELSE policy_jp.verify_inherited_priority_seconds(p_verify_task_id) END
@@ -255,20 +238,12 @@ BEGIN
   RETURN NEW;
 END $$;
 
-CREATE OR REPLACE FUNCTION policy_jp.task_queue_key(p_entered TIMESTAMPTZ, p_priority_seconds BIGINT, p_cool_until TIMESTAMPTZ, p_boost_seconds BIGINT)
-RETURNS TIMESTAMPTZ
-LANGUAGE sql STABLE AS $$
-  SELECT GREATEST(p_entered - make_interval(secs => COALESCE(p_priority_seconds, 0)), p_cool_until)
-         - make_interval(secs => COALESCE(p_boost_seconds, 0))
-$$;
-
 COMMENT ON FUNCTION policy_jp.verify_ticket_step_seconds IS '驗證票每被領走一次往後排的秒數（2026-11-22）：no_change 14 天、其餘 7 天（queue_settings 兩個參數）';
 COMMENT ON FUNCTION policy_jp.verify_ticket_key IS '驗證票的排序鍵（2026-11-22）：基準 − verify_priority_seconds − 自己的 boost_seconds ＋ 步長 × dispatch_count（步長見 verify_ticket_step_seconds）。不看母任務、不看派出時間';
 COMMENT ON FUNCTION policy_jp.verify_ticket_freeze_base IS '用 verify_ticket_key 的反運算把基準凍結成「新公式在這一刻剛好等於現在的 queue_at」的值（2026-11-22 過渡）';
 COMMENT ON FUNCTION policy_jp.verify_ticket_base IS '驗證票入列時的基準 B（2026-11-22）：新增型＝交件建立時間 − 選舉月基準；一般任務＝母任務列的 dispatch_base_at（交件之後才又被派出的不採用）；沒有基準＝交件建立時間 − 選舉月基準；找不到貢獻回 NULL（觸發器改用 now()）';
 COMMENT ON FUNCTION policy_jp.task_dispatches_queue_key IS 'task_dispatches 的 BEFORE INSERT／UPDATE 觸發器：queue_at 一律照排序鍵重算（任務列 task_queue_key；驗證列 verify_ticket_key＝入列時凍結的基準 − 14 天 − 自己的插隊秒數 ＋ 步長 × 領走次數，步長 7 天、no_change 14 天）。任務列派出時記下派出前的位置（dispatch_base_at）、插隊歸零回隊尾；驗證列的插隊不因派出歸零。2026-11-22（正見 20261104120000 的日本版）';
 COMMENT ON FUNCTION policy_jp.refresh_verify_ticket_keys IS '驗證票的 queue_at 依列上凍結的基準與設定重算（不看母任務，母任務被插隊不會讓已存在的票移位）；回傳換了位置的張數。2026-11-22';
-COMMENT ON FUNCTION policy_jp.task_queue_key IS '排序鍵：GREATEST(進隊時間 − 優先秒數, 冷卻結束時間) − 插隊秒數。2026-11-22 優先秒數參數改 BIGINT（放得下選舉月基準）';
 
 -- ── 3. 手動任務進隊、seed、插隊（日本站的差異都標在函式內） ─────────────────────────
 -- contribution_tasks_insert_dispatch：以正見 20261112005000 的現行定義為底，選舉年優先換成選舉月基準（日本專屬，標記那一行）
@@ -290,9 +265,9 @@ BEGIN
 END;
 $$;
 
--- seed_auto_task_queue：以日本站 20261019040100 的現行定義為底（＝正見 20261112005000 版去掉流量提層），機械式替換四處：
---   ① _gaps.priority_seconds 改 BIGINT ② 拿掉「日本版：選舉發現的層」（日期定層）換成「選舉月基準」一行（取代舊的選舉鏈排序）
---   ③ 補驗證列不再呼叫 contribution_queue_at（位置由觸發器算）④ 最後多 refresh_verify_ticket_keys（③④ 同正見 20261017010000）
+-- seed_auto_task_queue：以日本站 20261019040100 的現行定義為底（＝正見 20261112005000 版去掉流量提層），機械式替換三處：
+--   ① 拿掉「日本版：選舉發現的層」（日期定層）換成「選舉月基準」一行（取代舊的選舉鏈排序）
+--   ② 補驗證列不再呼叫 contribution_queue_at（位置由觸發器算）③ 最後多 refresh_verify_ticket_keys（②③ 同正見 20261017010000）
 CREATE OR REPLACE FUNCTION policy_jp.seed_auto_task_queue()
 RETURNS INTEGER
 LANGUAGE plpgsql SET search_path = policy_jp, pg_temp AS $$
@@ -309,7 +284,7 @@ BEGIN
   CREATE TEMP TABLE _gaps ON COMMIT DROP AS SELECT DISTINCT ON (g.task_id) g.* FROM _gaps_all g WHERE g.opened_by IS NOT NULL ORDER BY g.task_id;
 
   -- >>> 優先秒數（20261011320000）：每個缺口的優先秒數（每組「臂×選舉×職位」問一次；多條規則相符取最小；20261011350000 起相符的規則 id 也從這裡記，不再另算層）
-  ALTER TABLE _gaps ADD COLUMN priority_seconds BIGINT, ADD COLUMN priority_rule_id BIGINT;
+  ALTER TABLE _gaps ADD COLUMN priority_seconds INTEGER, ADD COLUMN priority_rule_id BIGINT;
   UPDATE _gaps g SET priority_seconds = p.seconds, priority_rule_id = p.rule_id
     FROM (SELECT k.arm, k.eid, k.etype, x.seconds, x.rule_id
             FROM (SELECT DISTINCT y.arm, policy_jp.election_id_or_null(y.target->>'election_id') AS eid, NULLIF(y.target->>'election_type', '') AS etype FROM _gaps y) k
@@ -319,7 +294,7 @@ BEGIN
      AND p.etype IS NOT DISTINCT FROM NULLIF(g.target->>'election_type', '');
   -- <<< 優先秒數
 
-  -- >>> 選舉月基準（20261122，日本站；取代台灣的選舉年優先）：優先秒數再加「選舉月基準」（election_month_seconds）：未來的選舉 (1200 − M) × 200 天（越近越大、越先派）、已投完的 M × 200 − 300,000 天（一律排在所有未來選舉之後）；M＝(選舉年 % 100) × 12 + 月。
+  -- >>> 選舉月基準（20261122，日本站；取代台灣的選舉年優先）：優先秒數再加「選舉月基準」（election_month_seconds）：未來的選舉 (360 − M) × 200 天（越近越大、越先派，M 大於 360 夾成 0）、已投完的 (M − 361) × 200 天（一律是負的、排在所有未來選舉之後）；M＝(選舉年 % 100) × 12 + 月。
   --     缺口 target 沒有選舉的（網站請求、名冊、基本資料…）當最近一場未來選舉的月。取代舊的「選舉鏈排序」（規則的前段 +3 天／後段 −30 天與選舉發現的日期定層），疊在規則秒數之後，所以排序鍵、冷卻判斷、驗證票沿用母任務的位置都自動吃到
   UPDATE _gaps g SET priority_seconds = COALESCE(g.priority_seconds, 0) + policy_jp.election_month_seconds(policy_jp.election_id_or_null(g.target->>'election_id'), g.target);
   -- <<< 選舉月基準
@@ -468,16 +443,16 @@ $$;
 
 -- ── 4. 權限：日本站的函式只給 service_role（同 20261009130000） ─────────────────────────────
 REVOKE EXECUTE ON FUNCTION
-  policy_jp.uuid_or_null(TEXT), policy_jp.verify_ticket_is_new(TEXT, TEXT), policy_jp.verify_ticket_parent(TEXT), policy_jp.verify_inherited_priority_seconds(TEXT),
+  policy_jp.uuid_or_null(TEXT), policy_jp.verify_ticket_is_new(TEXT, TEXT), policy_jp.verify_ticket_parent(TEXT),
   policy_jp.verify_ticket_priority_seconds(TEXT), policy_jp.verify_ticket_step_seconds(TEXT), policy_jp.verify_ticket_key(TIMESTAMPTZ, INTEGER, BIGINT, INTEGER),
   policy_jp.verify_ticket_freeze_base(TIMESTAMPTZ, INTEGER, BIGINT, INTEGER), policy_jp.verify_ticket_base(TEXT), policy_jp.verify_ticket_election_seconds(TEXT),
-  policy_jp.election_month_seconds(TEXT, JSONB), policy_jp.refresh_verify_ticket_keys(), policy_jp.task_queue_key(TIMESTAMPTZ, BIGINT, TIMESTAMPTZ, BIGINT)
+  policy_jp.election_month_seconds(TEXT, JSONB), policy_jp.refresh_verify_ticket_keys()
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION
-  policy_jp.uuid_or_null(TEXT), policy_jp.verify_ticket_is_new(TEXT, TEXT), policy_jp.verify_ticket_parent(TEXT), policy_jp.verify_inherited_priority_seconds(TEXT),
+  policy_jp.uuid_or_null(TEXT), policy_jp.verify_ticket_is_new(TEXT, TEXT), policy_jp.verify_ticket_parent(TEXT),
   policy_jp.verify_ticket_priority_seconds(TEXT), policy_jp.verify_ticket_step_seconds(TEXT), policy_jp.verify_ticket_key(TIMESTAMPTZ, INTEGER, BIGINT, INTEGER),
   policy_jp.verify_ticket_freeze_base(TIMESTAMPTZ, INTEGER, BIGINT, INTEGER), policy_jp.verify_ticket_base(TEXT), policy_jp.verify_ticket_election_seconds(TEXT),
-  policy_jp.election_month_seconds(TEXT, JSONB), policy_jp.refresh_verify_ticket_keys(), policy_jp.task_queue_key(TIMESTAMPTZ, BIGINT, TIMESTAMPTZ, BIGINT)
+  policy_jp.election_month_seconds(TEXT, JSONB), policy_jp.refresh_verify_ticket_keys()
   TO service_role;
 
 -- ── 5. 既有的驗證票：凍結基準，位置不動（自我檢查：任何一張變了就整支失敗） ──────────────────

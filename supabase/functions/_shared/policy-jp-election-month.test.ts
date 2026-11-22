@@ -4,7 +4,7 @@
  *
  * 只要 --allow-read。PGlite 上套日本站「全部」policy_jp migration（沒有任何正見 public 物件），時鐘用 `SET app.activity_today`。
  *
- *   A. 數值抽查：2026-11 的未來選舉 base＝175,400 天、2027-02＝174,800 天（相鄰月差 200 天）；已投完的 M×200−300,000 天為負、較近的較大；未來一律大於已投完
+ *   A. 數值抽查：2026-11 的未來選舉 base＝7,400 天、2027-02＝6,800 天（REF＝360 即 2029-12，相鄰月差 200 天）；M＞360 夾成 0；已投完的 (M−361)×200 天為負、較近的較大；未來一律不小於已投完
  *   B. 沒掛選舉的件＝最近一場未來選舉的月；target 帶自己日期的（選舉發現／等團體落庫）用那個日期；查無選舉 id 同沒掛
  *   C. 疊進 priority_seconds 的兩處：手動任務進隊（insert_dispatch）、seed 的缺口；排序（queue_at）近的在前、已投完的在最後；投票日過了之後 seed 改用「已投完」公式
  *   D. 取代舊的選舉鏈排序：前段／後段規則停用（manual_visitor 等不是日期定層的規則還在）、seed 不再有「日期定層」
@@ -64,7 +64,7 @@ const diffSec = (db: PGlite, a: string, b: string) => secs(db, `SELECT extract(e
 // =============================================================================================
 // A. 數值抽查
 // =============================================================================================
-Deno.test("A 數值：2026-11 的未來選舉 175,400 天、2027-02 174,800 天、相鄰月差 200 天；已投完的 M×200−300,000 天（負的、較近的較大）、未來一律大於已投完", async () => {
+Deno.test("A 數值：2026-11 的未來選舉 7,400 天、2027-02 6,800 天、相鄰月差 200 天；M＞360 夾成 0；已投完的 (M−361)×200 天（負的、較近的較大）、未來一律不小於已投完", async () => {
   const db = await freshDb();
   await clock(db, TODAY);
   const nov = await insertElection(db, 0, "2026-11-29");
@@ -72,21 +72,33 @@ Deno.test("A 數值：2026-11 的未來選舉 175,400 天、2027-02 174,800 天�
   const feb = await insertElection(db, 2, "2027-02-21");
   const oct = await insertElection(db, 3, "2026-10-25"); // 已投完
   const apr = await insertElection(db, 4, "2026-04-12"); // 已投完、更早
-  assertEquals(await days(db, nov), 175400);
-  assertEquals(await days(db, dec), 175200);
-  assertEquals(await days(db, feb), 174800);
+  assertEquals(await days(db, nov), 7400);
+  assertEquals(await days(db, dec), 7200);
+  assertEquals(await days(db, feb), 6800);
   assertEquals((await days(db, nov)) - (await days(db, dec)), 200);
-  // 已投完：M = 26×12+10 = 322 → 322×200 − 300,000 = −235,600；2026-04 → 316 → −236,800
-  assertEquals(await days(db, oct), -235600);
-  assertEquals(await days(db, apr), -236800);
+  // 已投完：M = 26×12+10 = 322 → (322−361)×200 = −7,800；2026-04 → 316 → −9,000
+  assertEquals(await days(db, oct), -7800);
+  assertEquals(await days(db, apr), -9000);
   assert((await days(db, oct)) > (await days(db, apr)), "已投完的之間，較近的較大（較先派）");
   assert((await days(db, feb)) > (await days(db, oct)), "最遠的未來選舉也比最近的已投完大");
   // 當天投票的算未來（投票日 >= 今天）
   const today = await insertElection(db, 5, TODAY);
-  assertEquals(await days(db, today), (1200 - (26 * 12 + 11)) * 200);
-  // 秒數不是 INTEGER：175,400 天 ＝ 1.5×10^10 秒，欄位與排序鍵都放得下
-  assertEquals(await secs(db, `SELECT policy_jp.election_month_seconds($1, NULL)::TEXT AS n`, [nov]), 175400 * DAY);
-  assertEquals((await one<{ t: string }>(db, `SELECT data_type AS t FROM information_schema.columns WHERE table_schema = 'policy_jp' AND table_name = 'task_dispatches' AND column_name = 'priority_seconds'`)).t, "bigint");
+  assertEquals(await days(db, today), (360 - (26 * 12 + 11)) * 200);
+  // 已投完的下限：再舊的選舉夾成 −20,000 天（INTEGER 放得下），不丟 integer out of range
+  const e1999 = await insertElection(db, 9, "1999-05-01");
+  const e2007 = await insertElection(db, 10, "2007-04-01");
+  assertEquals([await days(db, e1999), await days(db, e2007)], [-20000, -20000]);
+  assert((await days(db, e1999)) < (await days(db, apr)), "舊的排在近的已投完之後");
+  // 夾限：M＞360（2030-01 起，沒有比 2029-12 更近的月可分）的未來選舉一律 0；M＝360（2029-12）也是 0；要分得更遠得改參考月 REF（migration 的 360）
+  const e2029 = await insertElection(db, 6, "2029-12-02");
+  const e2030 = await insertElection(db, 7, "2030-01-20");
+  const e2035 = await insertElection(db, 8, "2035-06-10");
+  assertEquals([await days(db, e2029), await days(db, e2030), await days(db, e2035)], [0, 0, 0], "M＞360 夾成 0（守門標明的已知上限）");
+  assert((await days(db, feb)) > (await days(db, e2030)), "近的仍大於被夾成 0 的");
+  // 型別不動：最大 7,400 天 ＝ 6.4×10^8 秒，INTEGER 放得下；priority_seconds 欄仍是 integer
+  assertEquals(await secs(db, `SELECT policy_jp.election_month_seconds($1, NULL)::TEXT AS n`, [nov]), 7400 * DAY);
+  assertEquals((await one<{ t: string }>(db, `SELECT data_type AS t FROM information_schema.columns WHERE table_schema = 'policy_jp' AND table_name = 'task_dispatches' AND column_name = 'priority_seconds'`)).t, "integer");
+  assert(Math.abs(await days(db, oct)) * DAY < 2 ** 31 && 7400 * DAY < 2 ** 31);
 });
 
 Deno.test("B 沒掛選舉的件＝最近一場未來選舉的月；target 帶自己日期的用那個日期；查無選舉 id 同沒掛", async () => {
@@ -95,16 +107,16 @@ Deno.test("B 沒掛選舉的件＝最近一場未來選舉的月；target 帶自
   await insertElection(db, 0, "2026-12-13"); // 最近的未來選舉：2026-12（M=324）
   await insertElection(db, 1, "2027-02-21");
   await insertElection(db, 2, "2026-10-25"); // 已投完的不算「最近的未來」
-  assertEquals(await days(db, null), 175200);
-  assertEquals(await days(db, "不存在的選舉"), 175200);
-  assertEquals(await days(db, null, {}), 175200);
-  assertEquals(await days(db, null, { election_date: "2027-02-21" }), 174800, "選舉發現／等團體落庫的缺口：用 target 自己的選舉日");
-  assertEquals(await days(db, null, { vote_window_from: "2027-02-01" }), 174800);
-  assertEquals(await days(db, null, { election_date: "2026-10-25" }), -235600, "target 的日期已經過了＝已投完");
+  assertEquals(await days(db, null), 7200);
+  assertEquals(await days(db, "不存在的選舉"), 7200);
+  assertEquals(await days(db, null, {}), 7200);
+  assertEquals(await days(db, null, { election_date: "2027-02-21" }), 6800, "選舉發現／等團體落庫的缺口：用 target 自己的選舉日");
+  assertEquals(await days(db, null, { vote_window_from: "2027-02-01" }), 6800);
+  assertEquals(await days(db, null, { election_date: "2026-10-25" }), -7800, "target 的日期已經過了＝已投完");
   // 沒有任何未來選舉：當今天的月（不丟錯、不回 NULL）
   const db2 = await freshDb();
   await clock(db2, TODAY);
-  assertEquals(await days(db2, null), 175400);
+  assertEquals(await days(db2, null), 7400);
 });
 
 // =============================================================================================
@@ -121,7 +133,7 @@ Deno.test("C 手動任務進隊：priority_seconds＝規則秒數＋選舉月基
   const tOct = await mkTask(db, "suggested", { election_id: oct });
   const tNone = await mkTask(db, "suggested", {});
   const rule = await secs(db, `SELECT COALESCE((SELECT x.seconds FROM policy_jp.activity_priority_seconds('manual_open', NULL, NULL) x LIMIT 1), 0)::TEXT AS n`);
-  for (const [t, d] of [[tNov, 175400], [tFeb, 174800], [tOct, -235600], [tNone, 175400]] as Array<[string, number]>) {
+  for (const [t, d] of [[tNov, 7400], [tFeb, 6800], [tOct, -7800], [tNone, 7400]] as Array<[string, number]>) {
     assertEquals(Number((await disp(db, t)).priority_seconds), rule + d * DAY, t);
   }
   // 排序：近的先；同時進隊，差距就是月基準的差（誤差 < 1 分鐘）
@@ -152,7 +164,7 @@ Deno.test("C seed 的缺口：priority_seconds＝選舉月基準（規則停用�
   const g2 = await gaps();
   assertEquals(g2[0].eid, far, "已投完的選舉排在未來選舉之後");
   for (const g of g2.filter((x) => x.eid === near)) assertEquals(Number(g.ps), (await days(db, near)) * DAY);
-  assertEquals(await days(db, near), (26 * 12 + 12) * 200 - 300000);
+  assertEquals(await days(db, near), (26 * 12 + 12 - 361) * 200);
 });
 
 // =============================================================================================
@@ -190,7 +202,7 @@ Deno.test("E 驗證票：基準＝母任務派出前的位置；queue_at＝基�
   await db.query(`SELECT policy_jp.task_dispatched($1)`, [parent]);
   const p1 = await disp(db, parent);
   assertEquals(Number(p1.boost_seconds), 0, "任務列：派出就歸零");
-  assertEquals(p1.dispatch_base_at, (await one<{ t: string }>(db, `SELECT policy_jp.task_queue_key($1::TIMESTAMPTZ, $2::BIGINT, NULL, $3::BIGINT)::TEXT AS t`, [p0.last_dispatched_at, p0.priority_seconds, "5000"])).t);
+  assertEquals(p1.dispatch_base_at, (await one<{ t: string }>(db, `SELECT policy_jp.task_queue_key($1::TIMESTAMPTZ, $2::INTEGER, NULL, $3::BIGINT)::TEXT AS t`, [p0.last_dispatched_at, p0.priority_seconds, "5000"])).t);
   assert(p1.dispatch_base_at !== null && p1.queue_at > before.queue_at, "派出後任務回隊尾");
   // 交件（一般型別）：票的基準＝母任務列的基準；queue_at＝基準 − 14 天
   const c1 = await mkContribution(db, "correction", parent);
@@ -225,7 +237,7 @@ Deno.test("E 新增型交件與沒有基準的票：基準＝建立時間 − �
   const cFeb = await mkContribution(db, "task_suggestion", null, { election_id: feb });
   const cNone = await mkContribution(db, "task_suggestion", null, {});
   const created = async (c: string) => (await one<{ t: string }>(db, `SELECT created_at::TEXT AS t FROM policy_jp.contributions WHERE id = $1::UUID`, [c])).t;
-  for (const [c, d] of [[cNov, 175400], [cFeb, 174800], [cNone, 175400]] as Array<[string, number]>) {
+  for (const [c, d] of [[cNov, 7400], [cFeb, 6800], [cNone, 7400]] as Array<[string, number]>) {
     const v = await disp(db, `verify:${c}`);
     assertAlmostEquals(await diffSec(db, await created(c), v.dispatch_base_at!), d * DAY, 1, "基準＝建立時間 − 選舉月基準");
     assertAlmostEquals(await diffSec(db, await created(c), v.queue_at), d * DAY + 14 * DAY, 1, "queue_at＝基準 − 14 天");
@@ -233,7 +245,7 @@ Deno.test("E 新增型交件與沒有基準的票：基準＝建立時間 − �
   // 母任務沒有基準（沒經過 /next 派出就交件）：同樣退回建立時間
   const parent = await mkTask(db, "suggested", { election_id: feb });
   const c = await mkContribution(db, "correction", parent, { election_id: feb });
-  assertAlmostEquals(await diffSec(db, await created(c), (await disp(db, `verify:${c}`)).dispatch_base_at!), 174800 * DAY, 1);
+  assertAlmostEquals(await diffSec(db, await created(c), (await disp(db, `verify:${c}`)).dispatch_base_at!), 6800 * DAY, 1);
   // 凍結基準的反運算：key(freeze(q, n, b, s), n, b, s) ＝ q
   const r = await one<{ same: boolean }>(db,
     `SELECT policy_jp.verify_ticket_key(policy_jp.verify_ticket_freeze_base(t.q, 3, 123, 604800), 3, 123, 604800) = t.q AS same FROM (SELECT TIMESTAMPTZ '2026-10-30 12:00:00+00' AS q) t`);
@@ -267,9 +279,9 @@ Deno.test("F 還原驗證：手動任務進隊少加選舉月基準、未來／�
   await clock(a, TODAY);
   const e1 = await insertElection(a, 0, "2026-11-29");
   const t1 = await mkTask(a, "suggested", { election_id: e1 });
-  assertNotEquals(Number((await disp(a, t1)).priority_seconds), 175400 * DAY);
-  const b = await dbWith((s) => mutate(s, "THEN (1200 - d.m)::BIGINT * 200", "THEN (1100 - d.m)::BIGINT * 200"));
+  assertNotEquals(Number((await disp(a, t1)).priority_seconds), 7400 * DAY);
+  const b = await dbWith((s) => mutate(s, "THEN GREATEST(360 - d.m, 0)::BIGINT * 200", "THEN GREATEST(350 - d.m, 0)::BIGINT * 200"));
   await clock(b, TODAY);
   const e2 = await insertElection(b, 0, "2026-11-29");
-  assertNotEquals(await days(b, e2), 175400);
+  assertNotEquals(await days(b, e2), 7400);
 });

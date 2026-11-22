@@ -162,7 +162,7 @@ Deno.test("月界：同一個月的選舉同 base、跨月差 200 天；投票�
   assertEquals(sec[a], sec[b]);
   assertEquals(sec[a] - sec[c], 200 * 86400);
   assert(sec[past] < 0 && sec[past] < sec[c], "已投完的＝負的、排在所有未來選舉之後");
-  assertEquals(sec[past], ((27 * 12 + 2) * 200 - 300000) * 86400);
+  assertEquals(sec[past], ((27 * 12 + 2 - 361) * 200) * 86400);
   await db.close();
 });
 

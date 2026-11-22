@@ -183,7 +183,7 @@ const NOIP_FOLLOWED = ["contribution_needs_two_ips", "contribution_apply_consens
  * 驗證票排序鍵（正見 20261104120000，policy-ops#198）＋選舉月基準（正見 20261112005000 選舉年優先的日本版）：日本站 2026-11-22 補上（維護者 17:10 點頭設計），
  * 原本「日本站暫不跟」的兩項。同一支 migration（KEY_MIG）定義下面這些複本，走樣比對讀它；比對的正見版本是「那兩支當時的現行定義」（before 取之後的第一支改動），
  * 日本站暫不跟的是之後的「驗證先於任務」（20261119100000）、基準夾限（20261114070100）、層級×種類帶狀（20261121193000）。
- * 日本專屬偏離（登記在各自的 edits／note）：優先秒數 INTEGER → BIGINT（選舉月基準最大約 1.5×10^10 秒）、觸發器拿掉 verify_follows_task 一段（日本站沒有這欄）、
+ * 日本專屬偏離（登記在各自的 edits／note）：觸發器拿掉 verify_follows_task 一段（日本站沒有這欄）、
  * 選舉年優先換成選舉月基準（seed 與手動任務進隊各一行）、seed 拿掉流量提層與舊的日期定層（取代舊的選舉鏈排序）。
  */
 const KEY_MIG = "20261122190000_policy_jp_verify_ticket_key_election_month.sql";
@@ -193,18 +193,17 @@ const KEY_NEW = [
   "verify_ticket_freeze_base", "verify_ticket_base", "refresh_verify_ticket_keys",
 ];
 const KEY_FOLLOWED = [
-  ...KEY_NEW, "task_queue_key", "verify_inherited_priority_seconds", "task_dispatches_queue_key", "contribution_queue_row", "contribution_tasks_insert_dispatch", "seed_auto_task_queue",
+  ...KEY_NEW, "task_dispatches_queue_key", "contribution_queue_row", "contribution_tasks_insert_dispatch", "seed_auto_task_queue",
 ];
 /** 正見 20261119100000（驗證先於任務）之前的版本＝20261104120000 那一版 */
 const TW_VERIFY_FIRST = "20261119100000_verify_first_rank.sql";
-const SEED_MONTH_BLOCK = "  -- >>> 選舉月基準（20261122，日本站；取代台灣的選舉年優先）：優先秒數再加「選舉月基準」（election_month_seconds）：未來的選舉 (1200 − M) × 200 天（越近越大、越先派）、已投完的 M × 200 − 300,000 天（一律排在所有未來選舉之後）；M＝(選舉年 % 100) × 12 + 月。\n  --     缺口 target 沒有選舉的（網站請求、名冊、基本資料…）當最近一場未來選舉的月。取代舊的「選舉鏈排序」（規則的前段 +3 天／後段 −30 天與選舉發現的日期定層），疊在規則秒數之後，所以排序鍵、冷卻判斷、驗證票沿用母任務的位置都自動吃到\n  UPDATE _gaps g SET priority_seconds = COALESCE(g.priority_seconds, 0) + election_month_seconds(election_id_or_null(g.target->>'election_id'), g.target);\n  -- <<< 選舉月基準\n";
+const SEED_MONTH_BLOCK = "  -- >>> 選舉月基準（20261122，日本站；取代台灣的選舉年優先）：優先秒數再加「選舉月基準」（election_month_seconds）：未來的選舉 (360 − M) × 200 天（越近越大、越先派，M 大於 360 夾成 0）、已投完的 (M − 361) × 200 天（一律是負的、排在所有未來選舉之後）；M＝(選舉年 % 100) × 12 + 月。\n  --     缺口 target 沒有選舉的（網站請求、名冊、基本資料…）當最近一場未來選舉的月。取代舊的「選舉鏈排序」（規則的前段 +3 天／後段 −30 天與選舉發現的日期定層），疊在規則秒數之後，所以排序鍵、冷卻判斷、驗證票沿用母任務的位置都自動吃到\n  UPDATE _gaps g SET priority_seconds = COALESCE(g.priority_seconds, 0) + election_month_seconds(election_id_or_null(g.target->>'election_id'), g.target);\n  -- <<< 選舉月基準\n";
 const KEY_EDIT_QK: Edit[] = [{"span": ["    -- verify_follows_task：欄位保留", "      NEW.verify_follows_task := false;\n    END IF;\n"], "with": ""}];
 const KEY_EDIT_INSERT: Edit[] = [["           + election_year_priority_seconds(election_id_or_null(m.target->>'election_id')),  -- 選舉年優先（20261112005000）：沒有選舉 id 的當 2026\n", "           + election_month_seconds(election_id_or_null(m.target->>'election_id'), m.target),  -- 選舉月基準（20261122，日本站）：沒掛選舉的當最近一場未來選舉的月\n"]];
 const KEY_EDIT_SEED: Edit[] = [
   { span: ["  -- >>> 流量提層：", "  -- <<< 流量提層\n"], with: "" },
   { span: ["  -- >>> 優先秒數：流量提層的缺口", "  -- <<< 優先秒數\n"], with: "" },
   { span: ["  -- >>> 選舉年優先（20261112005000）", "  -- <<< 選舉年優先\n"], with: SEED_MONTH_BLOCK },
-  ["ALTER TABLE _gaps ADD COLUMN priority_seconds INTEGER,", "ALTER TABLE _gaps ADD COLUMN priority_seconds BIGINT,"],
 ];
 /** OV_MIG（2026-11-02）那一版 apply_consensus 對應的 public（NOIP_MIG 之前的版本）要扣掉的片段：名冊兩處 */
 const OV_AC_EDITS: Edit[] = [
@@ -280,7 +279,7 @@ const PAIRS: Pair[] = [
   {
     name: "seed_auto_task_queue",
     before: "20261112065000_bundle_vote_fanout.sql",
-    note: "取正見加 bundle 扇出（20261112065000，日本站沒有 policy_bundles，暫不跟）之前的版本＝含驗證票跟著任務（20261017010000）、換號沿用排隊位置（20261019040000）、選舉年優先（20261112005000）；拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；選舉年優先換成日本專屬的「選舉月基準」一行（KEY_MIG，取代舊的選舉鏈排序：規則的前段／後段與 seed 的日期定層）；_gaps.priority_seconds 改 BIGINT（選舉月基準放不進 INTEGER）",
+    note: "取正見加 bundle 扇出（20261112065000，日本站沒有 policy_bundles，暫不跟）之前的版本＝含驗證票跟著任務（20261017010000）、換號沿用排隊位置（20261019040000）、選舉年優先（20261112005000）；拿掉流量提層兩段（traffic_boost_apply 與提層秒數，台灣專用）；選舉年優先換成日本專屬的「選舉月基準」一行（KEY_MIG，取代舊的選舉鏈排序：規則的前段／後段與 seed 的日期定層）；（型別不動：選舉月基準最大約 7,400 天，INTEGER 放得下）",
     edits: KEY_EDIT_SEED,
   },
   // 換號沿用排隊位置（20261019040100）新增的兩支複本（REKEY_NEW）：臂清單與穩定鍵，逐字
@@ -362,18 +361,18 @@ const PAIRS: Pair[] = [
   { name: "contribution_tasks_drop_dispatch" },
   { name: "contribution_tasks_insert_dispatch", before: "20261114010000_election_type_priority_days.sql", note: "取正見加選舉職位天數（20261114010000，暫不跟）之前的版本＝含選舉年優先（20261112005000）；選舉年優先換成日本專屬的選舉月基準一行（日本站的選舉 id 是 election_key 字串、沒有年後兩碼的算法）", edits: KEY_EDIT_INSERT },
   // 20261011360000 新增的複本（SEC_NEW）
-  { name: "task_queue_key", note: "優先秒數參數 INTEGER → BIGINT（選舉月基準最大約 1.5×10^10 秒，超過 INTEGER）", edits: [["p_priority_seconds INTEGER", "p_priority_seconds BIGINT"]] },
+  { name: "task_queue_key" },
   { name: "activity_priority_seconds" },
   { name: "manual_front_seconds", before: "20261114020000_boost_days_level.sql", note: "取台灣插隊改天級（20261114020000，2026-11-14，日本站暫不跟：網站請求插隊依目標選舉階段分選前／選後，日本站沒有）之前的版本" },
   // 20261102230000 新增的複本（OV_NEW）
   ...OV_NEW.map((name) => ({ name })),
-  { name: "verify_inherited_priority_seconds", note: "回傳型別 INTEGER → BIGINT（母任務的優先秒數含選舉月基準）", edits: [["RETURNS INTEGER", "RETURNS BIGINT"]] },
+  { name: "verify_inherited_priority_seconds" },
   { name: "task_dispatches_queue_key", before: TW_VERIFY_FIRST, note: "取正見驗證先於任務（20261119100000，日本站暫不跟）之前的版本＝20261104120000 的驗證票排序鍵；拿掉 verify_follows_task 一段（日本站沒有這一欄，正見 20261104 起它也不再有作用）", edits: KEY_EDIT_QK },
   // 驗證票排序鍵（KEY_NEW，20261122）：正見 20261017010000／20261104120000 的新增函式，日本站補上
   { name: "uuid_or_null" },
   { name: "verify_ticket_is_new" },
   { name: "verify_ticket_parent" },
-  { name: "verify_ticket_priority_seconds", note: "回傳型別 INTEGER → BIGINT（沿用母任務的優先秒數，含選舉月基準）", edits: [["RETURNS INTEGER", "RETURNS BIGINT"]] },
+  { name: "verify_ticket_priority_seconds" },
   { name: "verify_ticket_step_seconds", before: TW_VERIFY_FIRST, note: "取正見驗證先於任務（20261119100000，日本站暫不跟：步長多一個「有票」參數）之前的版本" },
   { name: "verify_ticket_key" },
   { name: "verify_ticket_freeze_base" },
@@ -885,7 +884,7 @@ const JP_ONLY: Record<string, JpOnly> = {
   chain_open_elections: { mig: [T_CHAIN], why: "（視圖）選舉鏈「開著的選舉」：已上線的地方選舉＋通過驗證、只在等團體落庫的選舉交件，投票日後 chain_close_after_days（90）天內" },
   chain_step_rank: { mig: [T_PRIO, T_CAND, T_PROFILE, T_POLICY, T_A1, T_B, T_PE, T_DS, T_DUP, T_TERM, T_PROG, T_LIN, T_PARTY, T_CONS, T_AVATAR], why: "層內排序用的步驟順位（手動 0、選舉發現 1、團體 2、統計 3、其他 auto 9；之後候選人／政見／政黨在這裡多一行）；rebalance_queue 的日本專屬排序鍵" },
   chain_sort_date: { mig: [T_PRIO], why: "層內排序用的日期（target.election_date → vote_window_from → term_end；非 auto: 的列 NULL）；rebalance_queue 與 seed 共用" },
-  election_month_seconds: { mig: [T_KEY], why: "選舉月基準秒數（日本專屬，取代正見的 election_year_priority_seconds）：M＝(選舉年%100)×12＋月；未來的選舉 (1200−M)×200 天、已投完的 M×200−300,000 天；沒掛選舉的件當最近一場未來選舉的月。疊進 priority_seconds，數值抽查在 policy-jp-election-month.test.ts" },
+  election_month_seconds: { mig: [T_KEY], why: "選舉月基準秒數（日本專屬，取代正見的 election_year_priority_seconds）：M＝(選舉年%100)×12＋月；未來的選舉 (360−M)×200 天（M＞360 夾成 0）、已投完的 (M−361)×200 天；沒掛選舉的件當最近一場未來選舉的月。疊進 priority_seconds，數值抽查在 policy-jp-election-month.test.ts" },
   verify_ticket_election_seconds: { mig: [T_KEY], why: "一張驗證票那份交件的選舉月基準（正見同名函式算選舉年優先，日本版算選舉月基準；verify_ticket_base 的複本呼叫它，呼叫處逐字相同）" },
   chain_date_tier: { mig: [T_PRIO], why: "日期 → 優先層（<=60 天前段、<=180 天中段、更遠後段）；選舉發現沒有選舉列，seed 靠它定層，鏈上兩支臂靠 activity_rules 的規則（同一組天數）" },
   election_chain_progress: { mig: [T_CHAIN, T_CAND, T_PROFILE, T_POLICY, T_B], why: "（視圖）選舉鏈進度：開著的選舉×團體×步驟一列一個 done；總表的 chain_gate 在 seed 時讀它（MATERIALIZED）" },
