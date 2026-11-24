@@ -191,6 +191,7 @@ async function findOpenFollowupTwin(supabase: SupabaseLike, input: TaskInput, cr
   const t = taskTarget(input);
   const kind = typeof t.followup_kind === "string" ? t.followup_kind : null;
   if (!createdBy || !kind) return null;
+  // query-bounds: ok — 鍵（人物、政見、種類、開著）被 unique index 限制最多一筆，另有 .limit(1)
   let q = supabase.from("contribution_tasks").select("*").eq("status", "open").eq("created_by", createdBy).eq("target->>followup_kind", kind);
   q = typeof t.politician_id === "string" ? q.eq("target->>politician_id", t.politician_id) : q.is("target->>politician_id", null);
   q = typeof t.policy_id === "string" ? q.eq("target->>policy_id", t.policy_id) : q.is("target->>policy_id", null);
@@ -258,6 +259,7 @@ export async function findRecentlyHandled(
  */
 export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null; election_id?: number | null; scope?: string | null; followup_kind?: string | null }): Promise<Obj | null> {
   const base = () => {
+    // query-bounds: ok — 呼叫端接著都下 .limit(1) 或 .limit(50)
     let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at, target").eq("status", "open");
     if (target.task_type) q = q.eq("task_type", target.task_type);
     if (target.followup_kind) q = q.eq("target->>followup_kind", target.followup_kind);
