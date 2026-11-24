@@ -251,6 +251,13 @@ function namesVillage(seg: string, town: string): boolean {
   return /[一-鿿][村里](?!長)/.test(s);
 }
 
+/** 檔名結尾是「代表<數字>」（沒有「第N選區」字樣）的選區號：莿桐鄉「代表1.pdf」、口湖鄉「口湖鄉民代表3.pdf」 */
+function bareRepNumber(path: string): number | null {
+  const stem = (path.split("/").pop() ?? "").replace(/\.pdf$/i, "");
+  const m = /代表\s*(\d{1,2})$/.exec(stem);
+  return m ? Number(m[1]) : null;
+}
+
 /** 純函式：一個選舉單位對到哪幾份公報；對不到回原因 */
 export function matchBulletin(
   unit: BulletinUnit,
@@ -311,6 +318,8 @@ export function matchBulletin(
       if (hit.length === 1) return { ok: true, paths: hit, how: "鄉鎮一份" };
       if (n === null) return withHow(partsCap(hit.length <= 2 ? hit : []), "鄉鎮一份（正反面）");
       const byNo = hit.filter((f) => districtNumbers(relPath(f)).includes(n));
+      // 檔名只寫「代表1」「鄉民代表2」、不寫「第N選區」（雲林莿桐、口湖、水林；2026-11-24 逐份開啟確認第 N 份就是第 N 選舉區）
+      if (byNo.length === 0) return withHow(partsCap(hit.filter((f) => bareRepNumber(f) === n)), "選區");
       return withHow(partsCap(byNo), "選區");
     }
     case "村里長": {
