@@ -1,0 +1,55 @@
+# 定時重建（仿 policy-jp 的 rebuild.yml）。
+#
+# sitemap 是建置時從 Supabase 讀政見更新時間寫進 dist 的靜態檔（scripts/postbuild-ssg.mjs），
+# 只在 push main 才會重建，所以政見一直在更新、sitemap 的 lastmod 卻停在上次有人合併的那天。
+# 這裡改成每 6 小時由 CI 重建並部署一次 Hosting，讓 lastmod 跟上。
+#
+# 只重建並部署 Firebase Hosting（sitemap 就在 dist 裡）：
+# - 不跑測試、不動 Supabase migration 與 Edge Functions（那些只跟 push main 的程式變更有關）。
+# - 不重部 Cloudflare Worker：程式沒變，Worker 沒有要刷新的東西。
+# - 建置本身含 vue-tsc 與 postbuild 驗證（預渲染不是空殼、sitemap 規則），任何一關紅就不部署。
+#
+# 與 ci.yml 共用同一個 concurrency 群組（ci-refs/heads/main）、同樣不取消進行中的：
+# push main 的部署與定時部署排成一條，不會「舊 commit 的重建」晚完成而蓋掉較新的部署。
+# 重建一律檢出 main 最新，所以就算排隊中的 CI 被這次替換，部署出去的也是 main 最新內容。
+name: 定時重建
+
+on:
+  schedule:
+    # UTC，避開整點尖峰；data-md 在每小時 :17，這裡錯開到 :43
+    - cron: '43 */6 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-refs/heads/main
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    name: 重建並部署 Firebase Hosting
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 型別檢查、預渲染、sitemap 產生與驗證都在 pnpm build 裡
+      - name: 建置（含預渲染與 sitemap）
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: pnpm build
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_POLICY_TW }}
+          channelId: live
+          projectId: policy-tw
