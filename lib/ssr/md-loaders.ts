@@ -2,7 +2,7 @@ import { supabasePublic } from '../supabase'
 import { taipeiToday as policyStageToday } from '../policy-stage'
 import { mapPolicy, mapPolitician } from '../../composables/useSupabase'
 import type { Election, Policy, Politician, RawPolicy, RawPolitician } from '../../types'
-import { fetchAllPages } from '../fetch-all-pages'
+import { fetchAllByKeyset, fetchAllPages } from '../fetch-all-pages'
 import { positionsToLoad } from '../election-levels'
 import { SPECIAL_MUNICIPALITIES, TAIWAN_COUNTIES } from '../election-regions'
 import { isRunningCandidate } from '../candidate-status'
@@ -55,8 +55,12 @@ export async function loadCorpus(log: (s: string) => void = () => undefined): Pr
     supabasePublic.from('politicians_with_policies').select('*').order('id').range(from, to))
   const people: Politician[] = peopleRes.rows.filter((r) => !r.merged_into).map(mapPolitician)
 
-  const policyRes = await fetchAllPages<RawPolicy>('政見', (from, to) =>
-    supabasePublic.from('policies_with_logs').select('*').is('removed_at', null).order('id').range(from, to))
+  // 政見用 keyset 分頁、不用 OFFSET：policies_with_logs 每列都有相關子查詢，OFFSET 會替跳過的列也算一遍，
+  // 約 2.6 萬列之後單頁就超過 anon 的 3 秒 statement_timeout（2026-11-21 起整批失敗的原因）
+  const policyRes = await fetchAllByKeyset<RawPolicy>('政見', (after, limit) => {
+    const q = supabasePublic.from('policies_with_logs').select('*').is('removed_at', null)
+    return (after ? q.gt('id', after.id) : q).order('id').limit(limit)
+  })
   const policies: Policy[] = policyRes.rows.filter((r) => !r.removed_at).map(mapPolicy)
   log(`人物 ${people.length}、政見 ${policies.length}`)
   if (peopleRes.truncated || policyRes.truncated) throw new Error('人物或政見撈取不完整，不產生快取')

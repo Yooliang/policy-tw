@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { DEFAULT_MAX_PAGES, PAGE_SIZE, fetchAllPages, type PageResponse } from "./fetch-all-pages.ts";
+import { DEFAULT_MAX_PAGES, PAGE_SIZE, fetchAllByKeyset, fetchAllPages, type PageResponse } from "./fetch-all-pages.ts";
 
 /** 假的分頁查詢：給一份完整資料，照 from/to 切片回傳，並記下每次被要求的區間。 */
 function fakeSource<T>(all: T[], calls: Array<[number, number]>) {
@@ -109,4 +109,43 @@ Deno.test("預設值：一頁 1000 列、最多 30 頁", async () => {
   assertEquals(calls, [[0, 999]]);
   assertEquals(PAGE_SIZE, 1000);
   assertEquals(DEFAULT_MAX_PAGES, 30);
+});
+
+type Row = { id: number };
+const keysetSource = (all: Row[], afters: Array<number | null>) =>
+  (after: Row | null, limit: number): Promise<PageResponse<Row>> => {
+    afters.push(after?.id ?? null);
+    return Promise.resolve({ data: all.filter((r) => after === null || r.id > after.id).slice(0, limit), error: null });
+  };
+
+Deno.test("keyset：跨多頁撈完，鍵依序往後，不重不漏", async () => {
+  const all = Array.from({ length: 25 }, (_, i) => ({ id: (i + 1) * 3 }));
+  const afters: Array<number | null> = [];
+  const r = await fetchAllByKeyset("t", keysetSource(all, afters), { pageSize: 10 });
+  assertEquals(r.rows, all);
+  assertEquals(r.truncated, false);
+  assertEquals(afters, [null, 30, 60]);
+});
+
+Deno.test("keyset：剛好滿頁會再查一次拿空頁才停", async () => {
+  const all = Array.from({ length: 20 }, (_, i) => ({ id: i + 1 }));
+  const afters: Array<number | null> = [];
+  const r = await fetchAllByKeyset("t", keysetSource(all, afters), { pageSize: 10 });
+  assertEquals(r.rows.length, 20);
+  assertEquals(r.pages, 3);
+});
+
+Deno.test("keyset：撈到上限仍滿頁就標 truncated", async () => {
+  const all = Array.from({ length: 100 }, (_, i) => ({ id: i + 1 }));
+  const r = await fetchAllByKeyset("t", keysetSource(all, []), { pageSize: 10, maxPages: 3 });
+  assertEquals(r.rows.length, 30);
+  assertEquals(r.truncated, true);
+});
+
+Deno.test("keyset：查詢出錯要丟出並帶 label", async () => {
+  await assertRejects(
+    () => fetchAllByKeyset("政見", () => Promise.resolve({ data: null, error: { message: "canceling statement" } })),
+    Error,
+    "政見: canceling statement",
+  );
 });

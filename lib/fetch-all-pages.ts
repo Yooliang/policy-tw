@@ -84,3 +84,44 @@ export async function fetchAllPages<T>(
   console.warn(`[fetch-all-pages] ${label} 撈到上限 ${maxPages * pageSize} 列還是滿頁，名單不完整`)
   return { rows: pages.flat(), pages: pages.length, truncated: true }
 }
+
+/** keyset 分頁：給「上一頁最後一筆的鍵」，回一個查詢（呼叫端要 `.order(key)` 且鍵唯一遞增） */
+export type KeysetFetcher<T> = (after: T | null, limit: number) => PromiseLike<PageResponse<T>>
+
+export interface FetchAllByKeysetOptions {
+  pageSize?: number
+  /** 最多撈幾頁；預設 200（20 萬列），遠大於現況，只當失控時的煞車 */
+  maxPages?: number
+}
+
+/**
+ * 以「鍵大於上一頁最後一筆」往後撈，不用 OFFSET。
+ *
+ * 為什麼：對 policies_with_logs 這種每列都有相關子查詢的檢視，`.range(from, to)` 的 OFFSET
+ * 會替被跳過的每一列都算一次子查詢，頁越後面越慢（約 0.11 毫秒／列，offset 4 萬就要 4.6 秒），
+ * 超過 anon 的 3 秒 statement_timeout 就整批取消。keyset 每頁成本固定（約 0.15 秒）。
+ * 前提同 fetchAllPages：排序鍵必須唯一。
+ */
+export async function fetchAllByKeyset<T>(
+  label: string,
+  fetchPage: KeysetFetcher<T>,
+  options: FetchAllByKeysetOptions = {},
+): Promise<FetchAllPagesResult<T>> {
+  const pageSize = options.pageSize ?? PAGE_SIZE
+  const maxPages = options.maxPages ?? 200
+  if (!Number.isInteger(pageSize) || pageSize < 1) throw new Error(`fetchAllByKeyset(${label}): pageSize 必須是正整數，收到 ${pageSize}`)
+  if (!Number.isInteger(maxPages) || maxPages < 1) throw new Error(`fetchAllByKeyset(${label}): maxPages 必須是正整數，收到 ${maxPages}`)
+
+  const pages: T[][] = []
+  let last: T | null = null
+  for (let page = 0; page < maxPages; page++) {
+    const { data, error } = await fetchPage(last, pageSize)
+    if (error) throw new Error(`${label}: ${error.message}`)
+    const rows = data ?? []
+    pages.push(rows)
+    if (rows.length < pageSize) return { rows: pages.flat(), pages: pages.length, truncated: false }
+    last = rows[rows.length - 1]
+  }
+  console.warn(`[fetch-all-pages] ${label} 撈到上限 ${maxPages * pageSize} 列還是滿頁，名單不完整`)
+  return { rows: pages.flat(), pages: pages.length, truncated: true }
+}
