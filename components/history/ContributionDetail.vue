@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { Loader2 } from 'lucide-vue-next'
 import { fetchHistory, type HistoryEntry } from '../../lib/history'
 import { withTimeoutAndRetry } from '../../lib/retry'
-import { shortUrlsIn } from '../../lib/url'
+import RichText from '../RichText.vue'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import LoadError from '../LoadError.vue'
 
@@ -37,7 +37,7 @@ onMounted(load)
     <p v-if="loading" class="text-xs text-slate-400 inline-flex items-center gap-1"><Loader2 :size="12" class="animate-spin" /> 載入中…</p>
     <LoadError v-else-if="error" inline message="這筆交件暫時讀不到" @retry="load" />
     <div v-else-if="entry" class="space-y-3">
-      <p class="text-xs text-slate-700 break-words">{{ shortUrlsIn(entry.detail || entry.summary) }}</p>
+      <RichText :text="entry.detail || entry.summary" text-class="text-xs text-slate-700 leading-snug" />
       <HistoryEntryDetail :entry="entry" :agent-display="agentDisplay" />
     </div>
   </div>

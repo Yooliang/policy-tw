@@ -4,12 +4,13 @@ import { ChevronDown, ChevronUp, History, Loader2, AlertCircle, ExternalLink, Un
 import { fetchHistory, formatDate, type HistoryEntry, type HistoryOrigin, type HistoryTarget, type HistoryWebRequest } from '../../lib/history'
 import HistoryEntryDetail from './HistoryEntryDetail.vue'
 import RequestReports from './RequestReports.vue'
+import RichText from '../RichText.vue'
 import TimelineNote from '../TimelineNote.vue'
 import SourceMeta from '../SourceMeta.vue'
 import ScoreBar from '../ScoreBar.vue'
 import { scoreBarFull } from '../../lib/score-bar'
 import AgentInfo from '../AgentInfo.vue'
-import { hostOf, shortUrlsIn } from '../../lib/url'
+import { hostOf } from '../../lib/url'
 
 /**
  * 查核履歷區塊（政見頁／人物頁／分析頁共用）：預設展開、標題帶筆數；時間軸每筆可個別收合看驗證者與改動。
@@ -179,13 +180,11 @@ watch(() => props.id, () => { entries.value = []; webRequests.value = []; total.
               <!-- 已上線的不畫：中選會自動查證等不經投票的路徑是 0 分上線，條會停在中間像還在等票（維護者 2026-10-25） -->
               <ScoreBar v-if="e.status !== 'applied' && e.status !== 'withdrawn' && !scoreBarFull(e.score, e.target_score)":score="e.score" :target="e.target_score" :agree="e.agree_count" :disagree="e.disagree_count" :unsure="e.unsure_count" />
               <span v-if="e.adjudications.length" class="text-slate-500">有裁決</span>
-              <component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" class="ml-auto text-slate-400" />
+              <button type="button" class="ml-auto text-slate-400" :aria-expanded="expanded.has(e.id)" aria-label="展開或收合明細"><component :is="expanded.has(e.id) ? ChevronUp : ChevronDown" :size="14" /></button>
             </div>
             <!-- 同一級大小、不粗（2026-09-17 降級，2026-10-06 再統一成 text-xs）：這是履歷的一列，不是標題，
                  原本用預設 16px 粗體，在一堆 12px 的中繼資料裡跳得像頁面主標 -->
-          <button type="button" class="w-full text-left" :aria-expanded="expanded.has(e.id)" @click="toggleEntry(e.id)">
-            <p :class="['mt-1 text-xs text-navy-900 leading-snug break-words', e.reverted ? 'line-through decoration-slate-400 text-slate-500' : '']">{{ shortUrlsIn(e.detail || e.summary) }}</p>
-          </button>
+          <div class="mt-1 cursor-pointer" @click="toggleEntry(e.id)"><RichText :text="e.detail || e.summary" :struck="e.reverted" /></div>
           <div v-if="expanded.has(e.id)" class="mt-2 rounded-lg bg-slate-50 border border-slate-100 p-3">
             <HistoryEntryDetail :entry="e" :agent-display="agentDisplay" />
           </div>

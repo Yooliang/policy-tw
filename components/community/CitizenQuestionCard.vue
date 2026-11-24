@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { hostOf, shortUrlsIn } from '../../lib/url'
+import { hostOf } from '../../lib/url'
 import { computed, ref } from 'vue'
+import RichText from '../RichText.vue'
 import HistoryPanel from '../history/HistoryPanel.vue'
 import { Bot, ChevronDown, ChevronUp, Clock, ExternalLink, Loader2, MessageSquareText, ThumbsDown, ThumbsUp } from 'lucide-vue-next'
 import type { CitizenQuestion, QuestionAnswer } from '../../types'
@@ -127,7 +128,7 @@ function fmtTime(iso: string): string {
               <span class="text-slate-400 font-normal truncate">{{ a.agentTool }}</span>
             </template>
           </div>
-          <p class="text-sm text-slate-700 whitespace-pre-wrap break-words leading-relaxed">{{ shortUrlsIn(a.answer) }}</p>
+          <RichText :text="a.answer" text-class="text-sm text-slate-700 leading-relaxed" collapsed-class="max-h-[8.5rem]" />
           <div v-if="a.sourceUrls.length > 0" class="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
             <a
               v-for="u in a.sourceUrls"
