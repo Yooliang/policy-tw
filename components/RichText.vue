@@ -6,7 +6,7 @@ import { needsCollapse, segmentText, splitParagraphs } from '../lib/rich-text'
  * 時間軸條目的內文：依序號與換行分段、網址只顯示網域（可點）、太長預設收合。
  * 收合只用 CSS 遮住下半段，全文一直在 DOM 裡（爬蟲與讀螢幕的人都讀得到）。
  */
-const props = withDefaults(defineProps<{ text: string | null | undefined; struck?: boolean }>(), { struck: false })
+const props = withDefaults(defineProps<{ text: string | null | undefined; struck?: boolean; textClass?: string; collapsedClass?: string }>(), { struck: false, textClass: 'text-xs text-navy-900 leading-snug', collapsedClass: 'max-h-[6.25rem]' })
 
 const paragraphs = computed(() => splitParagraphs(props.text).map((p) => segmentText(p)))
 const collapsible = computed(() => needsCollapse(props.text))
@@ -16,7 +16,7 @@ const isCollapsed = computed(() => collapsible.value && collapsed.value)
 
 <template>
   <div data-testid="rich-text">
-    <div :class="['relative space-y-1.5 text-xs text-navy-900 leading-snug break-words', struck ? 'line-through decoration-slate-400 text-slate-500' : '', isCollapsed ? 'max-h-[6.25rem] overflow-hidden' : '']" :data-collapsed="isCollapsed">
+    <div :class="['relative space-y-1.5 break-words', textClass, struck ? 'line-through decoration-slate-400 text-slate-500' : '', isCollapsed ? collapsedClass + ' overflow-hidden' : '']" :data-collapsed="isCollapsed">
       <p v-for="(segs, i) in paragraphs" :key="i">
         <template v-for="(s, j) in segs" :key="j">
           <a v-if="s.type === 'link'" :href="s.href" rel="noopener nofollow" target="_blank" class="text-blue-700 underline underline-offset-2" @click.stop>{{ s.label }}</a>

@@ -37,3 +37,20 @@ Deno.test("needsCollapse：以畫面字數為準，剛好門檻不收、超過�
   assertEquals(needsCollapse("字".repeat(COLLAPSE_CHAR_THRESHOLD - 30) + " https://news.ltn.com.tw/" + "a".repeat(200)), false);
   assertEquals(needsCollapse(null), false);
 });
+
+Deno.test("含網址的答案只產生一個連結，顯示字是網域，其餘文字不含網址（不會被縮兩次）", () => {
+  const answer = "一、依中選會公告（https://eebulletin.cec.gov.tw/a/b.pdf）所載。二、另見報導。";
+  const segs = segmentText(splitParagraphs(answer)[0]);
+  const links = segs.filter((s) => s.type === "link");
+  assertEquals(links.length, 1);
+  assertEquals(links[0], { type: "link", href: "https://eebulletin.cec.gov.tw/a/b.pdf", label: "eebulletin.cec.gov.tw" });
+  assertEquals(segs.some((s) => s.type === "text" && s.text.includes("http")), false);
+});
+
+Deno.test("公民提問答案與查核履歷共用 RichText，不再自己縮網址", async () => {
+  for (const f of ["../components/community/CitizenQuestionCard.vue", "../components/history/HistoryPanel.vue", "../components/history/ContributionDetail.vue"]) {
+    const src = await Deno.readTextFile(new URL(f, import.meta.url));
+    assertEquals(src.includes("<RichText"), true, f);
+    assertEquals(/shortUrlsIn\(/.test(src), false, f);
+  }
+});
