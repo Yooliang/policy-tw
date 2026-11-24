@@ -173,9 +173,30 @@ export async function createTask(supabase: SupabaseLike, input: TaskInput, optio
     hint_sources: input.hint_sources ?? [],
     requester_ip_hash: options.requester_ip_hash ?? null,
   }).select("*").maybeSingle();
-  if (error) throw new Error(`contribution_tasks insert: ${error.message}`);
+  if (error) {
+    // 23505＝撞到 uq_contribution_tasks_jev_followup_open（jev 後續任務：同人物＋同政見＋同種類只能開一筆）。
+    // 並行的另一張票剛好先開了，當成「已存在」：回傳既有那筆並標 deduped，呼叫端不要再對它做後處理（例如重複改寫）。
+    if ((error as { code?: string }).code === "23505") {
+      const twin = await findOpenFollowupTwin(supabase, input, options.created_by ?? null);
+      if (twin) return { ...twin, deduped: true };
+    }
+    throw new Error(`contribution_tasks insert: ${error.message}`);
+  }
   if (!data) throw new Error("contribution_tasks insert 沒有回傳");
   return data as Obj;
+}
+
+/** 撞 unique 後把已存在的那筆撈回來：鍵與 uq_contribution_tasks_jev_followup_open 一致（人物、政見、種類、開著、同建立者） */
+async function findOpenFollowupTwin(supabase: SupabaseLike, input: TaskInput, createdBy: string | null): Promise<Obj | null> {
+  const t = taskTarget(input);
+  const kind = typeof t.followup_kind === "string" ? t.followup_kind : null;
+  if (!createdBy || !kind) return null;
+  let q = supabase.from("contribution_tasks").select("*").eq("status", "open").eq("created_by", createdBy).eq("target->>followup_kind", kind);
+  q = typeof t.politician_id === "string" ? q.eq("target->>politician_id", t.politician_id) : q.is("target->>politician_id", null);
+  q = typeof t.policy_id === "string" ? q.eq("target->>policy_id", t.policy_id) : q.is("target->>policy_id", null);
+  const { data, error } = await q.order("created_at", { ascending: true }).limit(1);
+  if (error) throw new Error(`contribution_tasks twin lookup: ${error.message}`);
+  return ((data ?? []) as Obj[])[0] ?? null;
 }
 
 export async function closeTask(supabase: SupabaseLike, taskId: string, closedBy: string | null): Promise<Obj | null> {
@@ -227,15 +248,34 @@ export async function findRecentlyHandled(
   return pickRecentlyHandled(taskRows, contributions, sinceMs);
 }
 
-export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null; election_id?: number | null; scope?: string | null }): Promise<Obj | null> {
-  let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at").eq("status", "open").limit(1);
-  if (target.task_type) q = q.eq("task_type", target.task_type);
-  if (target.policy_id) q = q.eq("target->>policy_id", target.policy_id);
-  else if (target.politician_id) q = q.eq("target->>politician_id", target.politician_id);
-  else return null;
-  if (target.election_id != null) q = q.eq("target->>election_id", String(target.election_id));
-  if (target.scope) q = q.eq("target->>scope", target.scope);
-  const { data, error } = await q;
+/**
+ * 查重規則（2026-11-24）：同人物＋同種類＝同一件事，政見不同才算不同。
+ *  - 要找的帶 policy_id：先找同 policy_id 的；找不到再找「同人物、且對方沒綁任何政見」的（只掛人物的同種類任務也算同一件事）。
+ *  - 要找的只有人物：同人物的都算（不管對方綁哪條政見），跟舊行為一致。
+ *  - 對方綁了「另一條」政見＝不同的事，不算重複。
+ * 之前帶政見就只用 policy_id 查，跟只帶人物的任務對不上，是 jev 後續任務重複開的漏洞之一。
+ * followup_kind 有給就多比事項種類：不同種類互不擋。
+ */
+export async function findOpenTaskForTarget(supabase: SupabaseLike, target: { politician_id?: string | null; policy_id?: string | null; task_type?: string | null; election_id?: number | null; scope?: string | null; followup_kind?: string | null }): Promise<Obj | null> {
+  const base = () => {
+    let q = supabase.from("contribution_tasks").select("id, title, source, task_type, created_at, target").eq("status", "open");
+    if (target.task_type) q = q.eq("task_type", target.task_type);
+    if (target.followup_kind) q = q.eq("target->>followup_kind", target.followup_kind);
+    if (target.election_id != null) q = q.eq("target->>election_id", String(target.election_id));
+    if (target.scope) q = q.eq("target->>scope", target.scope);
+    return q;
+  };
+  if (target.policy_id) {
+    const { data, error } = await base().eq("target->>policy_id", target.policy_id).limit(1);
+    if (error) throw new Error(`contribution_tasks lookup: ${error.message}`);
+    const hit = ((data ?? []) as Obj[])[0];
+    if (hit || !target.politician_id) return hit ?? null;
+    const { data: byPerson, error: e2 } = await base().eq("target->>politician_id", target.politician_id).limit(50);
+    if (e2) throw new Error(`contribution_tasks lookup: ${e2.message}`);
+    return ((byPerson ?? []) as Obj[]).find((r) => !((r.target as Obj | null)?.policy_id)) ?? null;
+  }
+  if (!target.politician_id) return null;
+  const { data, error } = await base().eq("target->>politician_id", target.politician_id).limit(1);
   if (error) throw new Error(`contribution_tasks lookup: ${error.message}`);
   return ((data ?? []) as Obj[])[0] ?? null;
 }
