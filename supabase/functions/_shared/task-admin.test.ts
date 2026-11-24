@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { DEFAULT_PRIORITY, describeManualTask, QUESTION_PRIORITY, taskTarget, validateTaskInput } from "./task-admin.ts";
+import { createTask, findOpenTaskForTarget, DEFAULT_PRIORITY, describeManualTask, QUESTION_PRIORITY, taskTarget, validateTaskInput } from "./task-admin.ts";
 import { buildRequestTaskText, decideRequest, KIND_TO_TASK_TYPE, pickRecentlyHandled, POLICY_KINDS, RECENT_CHECK_DAYS, REQUEST_DAILY_LIMIT_PER_IP } from "./request-task.ts";
 import { validateContributionRequest } from "./contribution-schema.ts";
 import { applyContribution } from "./apply-contribution.ts";
@@ -145,4 +145,84 @@ Deno.test("request-task 近期處理過（5 天）：任務結束或有人交了
   assertEquals(decideRequest({ usedToday: 0, recentlyHandled: recent, existingOpenTask: { id: "t1" }, autoGapTaskId: null }), { action: "recently_checked", at: day(1), outcome: "no_change" });
   assertEquals(decideRequest({ usedToday: REQUEST_DAILY_LIMIT_PER_IP, recentlyHandled: recent, existingOpenTask: null, autoGapTaskId: null }), { action: "rate_limited" });
   assertEquals(decideRequest({ usedToday: 0, recentlyHandled: null, existingOpenTask: { id: "t1" }, autoGapTaskId: null }), { action: "already_queued", task_id: "t1", reason: "open_task" });
+});
+
+// ── jev 後續任務：建立時去重（2026-11-24） ──────────────────────────────────────────────
+// 記憶體版 contribution_tasks：模擬 uq_contribution_tasks_jev_followup_open（人物＋政見＋種類，開著且 jev-followup）與 PostgREST 的 eq／is／limit。
+function fakeTasksDb() {
+  const rows: Array<Record<string, unknown>> = [];
+  let n = 0;
+  const get = (r: Record<string, unknown>, col: string): unknown => {
+    const m = col.match(/^(\w+)->>(\w+)$/);
+    return m ? ((r[m[1]] as Record<string, unknown> | null) ?? {})[m[2]] ?? null : r[col] ?? null;
+  };
+  const uniqKey = (r: Record<string, unknown>) => `${get(r, "target->>politician_id") ?? ""}|${get(r, "target->>policy_id") ?? ""}|${get(r, "target->>followup_kind")}`;
+  const isGuarded = (r: Record<string, unknown>) => r.status === "open" && r.created_by === "jev-followup" && get(r, "target->>followup_kind") != null;
+  function query() {
+    const filters: Array<(r: Record<string, unknown>) => boolean> = [];
+    let max = 1000;
+    const q: Record<string, unknown> = {
+      select: () => q,
+      eq: (col: string, v: unknown) => { filters.push((r) => get(r, col) === v); return q; },
+      is: (col: string, v: unknown) => { filters.push((r) => get(r, col) === v); return q; },
+      order: () => q,
+      limit: (k: number) => { max = k; return q; },
+      then: (res: (v: unknown) => unknown) => res({ data: rows.filter((r) => filters.every((f) => f(r))).slice(0, max), error: null }),
+    };
+    return q;
+  }
+  const supabase = {
+    from: (_t: string) => ({
+      ...query(),
+      insert: (row: Record<string, unknown>) => {
+        const full = { id: `t${++n}`, created_at: new Date(1_000_000 + n).toISOString(), ...row };
+        // 同步檢查＋寫入＝資料庫 unique 的原子性：並行呼叫裡只有一個會成功
+        const dup = isGuarded(full) && rows.some((r) => isGuarded(r) && uniqKey(r) === uniqKey(full));
+        if (!dup) rows.push(full);
+        return { select: () => ({ maybeSingle: async () => dup ? { data: null, error: { code: "23505", message: "duplicate key value violates unique constraint" } } : { data: full, error: null } }) };
+      },
+    }),
+  };
+  return { supabase, rows };
+}
+
+const PID = "bcdfd014-6bf3-49e6-aa7b-d2f42dce10e9";
+const POL = "11111111-1111-4111-8111-111111111111";
+const followup = (kind: string, withPolicy = false) => ({
+  title: `核對某人的${kind}（驗證者備註提到）`, task_type: "other",
+  target_politician_id: withPolicy ? null : PID, target_policy_id: withPolicy ? POL : null,
+  target_extra: withPolicy ? { politician_id: PID, followup_kind: kind } : { followup_kind: kind },
+});
+const OPTS = { source: "suggested" as const, created_by: "jev-followup", suggested_by: "agent" };
+
+Deno.test("jev 後續任務：同一人物同種類並行建 6 次只留 1 筆，其餘回傳既有那筆並標 deduped", async () => {
+  const { supabase, rows } = fakeTasksDb();
+  const results = await Promise.all(Array.from({ length: 6 }, () => createTask(supabase, followup("candidacy"), OPTS)));
+  assertEquals(rows.length, 1);
+  assertEquals(new Set(results.map((r) => r.id)).size, 1);
+  assertEquals(results.filter((r) => r.deduped === true).length, 5);
+});
+
+Deno.test("jev 後續任務：不同種類不互相擋（unique 與查重都是）", async () => {
+  const { supabase, rows } = fakeTasksDb();
+  await createTask(supabase, followup("candidacy"), OPTS);
+  await createTask(supabase, followup("misattributed"), OPTS);
+  assertEquals(rows.length, 2);
+  assertEquals((await findOpenTaskForTarget(supabase, { politician_id: PID, task_type: "other", followup_kind: "candidacy" }))?.id, "t1");
+  assertEquals((await findOpenTaskForTarget(supabase, { politician_id: PID, task_type: "other", followup_kind: "party" })), null);
+});
+
+Deno.test("jev 後續任務查重：帶政見與不帶政見、同人物同種類視為同一件事；不同政見才算不同", async () => {
+  const { supabase } = fakeTasksDb();
+  await createTask(supabase, followup("candidacy"), OPTS); // 只掛人物
+  const want = { politician_id: PID, policy_id: POL, task_type: "other", followup_kind: "candidacy" };
+  // 要開的帶政見，對方只掛人物：算重複（舊行為只用 policy_id 查，這裡會漏掉）
+  assertEquals((await findOpenTaskForTarget(supabase, want))?.id, "t1");
+  // 反過來：已有帶政見的，要開的只有人物：算重複
+  const b = fakeTasksDb();
+  await createTask(b.supabase, followup("candidacy", true), OPTS);
+  assertEquals((await findOpenTaskForTarget(b.supabase, { politician_id: PID, task_type: "other", followup_kind: "candidacy" }))?.id, "t1");
+  // 對方綁的是另一條政見：不算重複
+  const other = "22222222-2222-4222-8222-222222222222";
+  assertEquals(await findOpenTaskForTarget(b.supabase, { politician_id: PID, policy_id: other, task_type: "other", followup_kind: "candidacy" }), null);
 });

@@ -179,10 +179,11 @@ async function settleSubmissionFollowup(
   const pid = (c.applied_politician_id ?? (typeof p.politician_id === "string" ? p.politician_id : null)) as string | null;
   const { data: who } = pid ? await supabase.from("politicians").select("name").eq("id", pid).maybeSingle() : { data: null };
   const task = submissionFollowupTask(c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
-  const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
+  const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other", followup_kind: task.target_extra?.followup_kind as string | undefined });
   if (existing) return;
   const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: c.agent_name ?? "unknown", created_by: "jev-followup", no_signal: true });
   if (res.attached) return; // 工作卡③：同一張卡已在隊列上，已記一筆需求訊號、不另開任務
+  if (res.task.deduped) return; // 並行的另一張票剛開了同一件事（撞 unique），那筆由它自己改寫
   await clarifyNewTask(supabase, apiKey, res.task);
 }
 
@@ -270,11 +271,12 @@ async function settleFollowup(
   const task = followupTask(v, c, choice as Exclude<FollowupChoice, "none">, (who as { name?: string } | null)?.name ?? null);
   const entry: Record<string, unknown> = { vote_id: v.id, contribution_id: c.id, choice, probability: Number(prob.toFixed(2)), title: task.title, note: String(v.note).slice(0, 300) };
   if (!dry) {
-    const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other" });
+    const existing = await findOpenTaskForTarget(supabase, { politician_id: task.target_politician_id ?? (task.target_extra?.politician_id as string | undefined) ?? null, policy_id: task.target_policy_id ?? null, task_type: "other", followup_kind: task.target_extra?.followup_kind as string | undefined });
     if (existing) entry.skipped = `已有 open 任務 ${existing.id}`;
     else {
       const res = await createOrAttachTask(supabase, task, { source: "suggested", suggested_by: v.agent_name ?? "unknown", created_by: "jev-followup", no_signal: true });
       if (res.attached) { entry.task_id = res.task_id; entry.attached = true; }
+      else if (res.task.deduped) { entry.task_id = res.task.id; entry.skipped = `並行已開同一件事 ${res.task.id}`; }
       else { entry.task_id = res.task.id; await clarifyNewTask(supabase, apiKey, res.task); }
     }
   }
