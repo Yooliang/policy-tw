@@ -33,7 +33,20 @@ const loading = ref(false)
 const refreshedAt = ref<Date | null>(null)
 const groupBy = ref<'type' | 'source'>('type')
 // 強模型待辦（2026-11-09）：難題不進一般派工，只由持鑰匙的維護者 Opus 工作階段認領；清單讀 strong_lane_list()（anon 可執行、唯讀）
-type StrongItem = { task_id: string; created_at: string; reason?: string; contribution_id?: string; contribution_type?: string; status?: string; subject?: string; votes?: number; claimed_by?: string | null; claimed_tool?: string | null; claimed_at?: string | null; verdicts?: { verdict?: string; agent?: string; agent_tool?: string | null; reason?: string }[] }
+type StrongItem = { task_id: string; created_at: string; reason?: string; contribution_id?: string; contribution_type?: string; status?: string; subject?: string; votes?: number; claimed_by?: string | null; claimed_tool?: string | null; claimed_at?: string | null; verdicts?: { verdict?: string; agent?: string; agent_tool?: string | null; reason?: string }[]; stalled_reason?: string | null; job_count?: number; last_job_status?: string | null; last_job_error?: string | null }
+// 卡住的原因（strong_lane_list 的 stalled_reason／last_job_error）換成看報表的人聽得懂的話
+const STALLED: Record<string, string> = {
+  retry_cap_finalize_failed: '自動送出已失敗 2 次，不會再自動重試，需人工處理',
+  retry_cap_failed: '自動裁決已失敗 2 次，不會再自動重試，需人工處理',
+  returned_to_human: '已退回人工，不會自動重試',
+  contribution_missing: '找不到原貢獻，需人工確認',
+}
+const JOB_ERROR: Record<string, string> = { correction_invalid: '更正後的內容通不過交件驗證' }
+function stalledText(it: StrongItem): string {
+  if (!it.stalled_reason) return ''
+  const why = it.last_job_error ? JOB_ERROR[it.last_job_error] ?? '送出失敗' : ''
+  return `${STALLED[it.stalled_reason] ?? '卡住，需人工處理'}${why ? `（${why}）` : ''}`
+}
 const tab = ref<'queue' | 'strong'>('queue')
 const strong = ref<{ total: number; items: StrongItem[] } | null>(null)
 const strongIds = computed(() => new Set((strong.value?.items ?? []).map((i) => i.contribution_id).filter(Boolean) as string[]))
@@ -306,7 +319,7 @@ const parkedTotal = computed(() => state.value?.parked_total ?? parkedRows.value
               <td class="py-1 pr-2 whitespace-nowrap">{{ it.contribution_type ? overTypeLabel(it.contribution_type) : '—' }}</td>
               <td class="py-1 pr-2 max-w-[14rem] truncate" :title="it.subject">{{ it.subject || '—' }}</td>
               <td class="py-1 pr-2 text-right tabular-nums">{{ fmt(it.votes ?? 0) }}</td>
-              <td class="py-1 pr-2 max-w-[12rem] truncate" :title="it.reason">{{ it.reason || '—' }}</td>
+              <td class="py-1 pr-2 max-w-[12rem]"><div class="truncate" :title="it.reason">{{ it.reason || '—' }}</div><div v-if="stalledText(it)" class="mt-0.5 text-xs text-red-600">{{ stalledText(it) }}</div></td>
               <td class="py-1 pr-2 whitespace-nowrap text-xs">{{ it.claimed_by ? `${it.claimed_by}（${it.claimed_tool || '?'}）${it.claimed_at ? when(it.claimed_at) : ''}` : '—' }}</td>
               <td class="py-1">
                 <div v-for="(v, j) in it.verdicts ?? []" :key="j" class="flex items-center gap-1.5 py-0.5 text-xs">
