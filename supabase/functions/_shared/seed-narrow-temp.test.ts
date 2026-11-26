@@ -44,7 +44,7 @@ Deno.test("A3 這支是 seed 的最後一版，緊接著 20261114010000", async 
   const i = defining.indexOf(MIG_NAME);
   assert(i > 0);
   assertEquals(defining[i - 1], "20261114010000_election_type_priority_days.sql", "前一版變了：要以最新的為底重做");
-  assertEquals(defining.slice(i + 1), ["20261121193000_priority_bands.sql"], "這支之後只允許層級×種類帶狀優先（守門在 priority-bands.test.ts）；又有人改了 seed：後合併的以最新那版為底重做，並更新各 seed 守門測試的版本清單");
+  assertEquals(defining.slice(i + 1), ["20261121193000_priority_bands.sql", "20261126150000_seed_arm_timings.sql"], "這支之後只允許層級×種類帶狀優先（守門在 priority-bands.test.ts）與各段計時（守門在 seed-arm-timings.test.ts）；又有人改了 seed：後合併的以最新那版為底重做，並更新各 seed 守門測試的版本清單");
 });
 
 Deno.test("A4 _gaps 只帶 task_id、src_rn、arm、target、opened_by；寬欄不進 _gaps，也沒有人從 _gaps 讀寬欄", () => {
