@@ -51,8 +51,12 @@ export async function loadCorpus(log: (s: string) => void = () => undefined): Pr
   const base = await loadBase()
   const elections: Election[] = base.elections
 
-  const peopleRes = await fetchAllPages<RawPolitician>('有政見的人物', (from, to) =>
-    supabasePublic.from('politicians_with_policies').select('*').order('id').range(from, to))
+  // 人物同樣用 keyset（id 本來就是排序鍵，輸出順序不變）：politicians_with_policies 是聚合檢視，
+  // OFFSET 會替跳過的列重算，人物數成長後深頁逾 anon 的 3 秒 statement_timeout（2026-11-26 10:55 起整批失敗）
+  const peopleRes = await fetchAllByKeyset<RawPolitician>('有政見的人物', (after, limit) => {
+    const q = supabasePublic.from('politicians_with_policies').select('*')
+    return (after ? q.gt('id', after.id) : q).order('id').limit(limit)
+  })
   const people: Politician[] = peopleRes.rows.filter((r) => !r.merged_into).map(mapPolitician)
 
   // 政見用 keyset 分頁、不用 OFFSET：policies_with_logs 每列都有相關子查詢，OFFSET 會替跳過的列也算一遍，
