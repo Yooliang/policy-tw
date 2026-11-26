@@ -35,7 +35,7 @@
 -- 回滾（互不依賴，可只做一部分）：
 --   SELECT cron.unschedule('dispatch-gap-shadow-compare-hourly'); SELECT cron.unschedule('dispatch-gap-reconcile-daily');
 --   SELECT cron.unschedule('dispatch-gap-retention-daily'); SELECT cron.unschedule('seed-arm-temp-probe-daily');
---   把總表換回舊版：CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms() 的本體換成 contribution_auto_tasks_arms_v20261126() 的本體（SET work_mem 要帶）；
+--   把總表換回舊版：派工總表函式的本體換成 contribution_auto_tasks_arms_v20261126() 的本體（SET work_mem = '16MB' 要帶）；
 --   seed_auto_task_queue() 換回 20261126150000 的定義（SET statement_timeout、SET work_mem 要一起帶）；
 --   dispatch_gap_reconcile_all／dispatch_gap_on_change 換回 20261126170000 的定義；
 --   然後 DROP 新物件：函式 dispatch_gap_rows_all()、gap_arm_mode(TEXT)、dispatch_gap_set_mode(TEXT,TEXT,TEXT)、dispatch_gap_seed_drain_enabled()、
