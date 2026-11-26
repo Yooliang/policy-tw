@@ -295,6 +295,9 @@ seed 是「總表這一輪沒回這個缺口＝缺口消失」：
 
 ### 第 0 期：地基（約 4 到 5 個工作天，2 到 3 個 PR）
 
+> **PR-1 已上（2026-11-26，`20261126170000_dispatch_gaps_phase0.sql`，守門 `dispatch-gaps-phase0.test.ts`）**：建了 `dispatch_gaps`、`dispatch_gap_events`（附錄的 dirty 表，改名並保留處理歷史）、`dispatch_gap_reconcile_runs`（附錄的 gap_reconcile_log）、`dispatch_gap_arm_keys`（臂登記與缺口鍵規則，三支第 1 期臂已登記）、`dispatch_gap_settings`；函式 `dispatch_gap_enqueue`、`dispatch_gap_drain`（保底實作＝整表跑一次只取該批鍵的缺口；登記了按鍵版函式就自動改走它）、`dispatch_gap_reconcile_all`、`dispatch_gap_shadow_compare`、觸發器函式 `dispatch_gap_on_change`（不掛正式表）。**只建不派**：沒掛觸發器、沒排 cron、seed 與總表未動。
+> **留給 PR-2**：`dispatch_gap_arms`（off／shadow／live 模式）、`gap_arm_mode()`、`dispatch_gaps_open(arm)`、總表二段式分支與 seed 開頭 `gap_drain()`、`activity_health` 五個巡檢項、pg_cron 排程、事件與對帳紀錄的保留清理、外層整理步驟的量測（第 6.7 節）、`arms-parity` 同款快照比對。
+
 | 項目 | 內容 |
 |---|---|
 | 新增 | `dispatch_gaps`、`dispatch_gap_dirty`、`dispatch_gap_arms`、`dispatch_gap_settings`、`gap_reconcile_log`；`gap_enqueue()`、`gap_drain()`、`gap_reconcile_all()`、`gap_arm_mode()`、`dispatch_gaps_open(arm)` |
