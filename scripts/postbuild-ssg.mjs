@@ -4,7 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadEnv } from 'vite'
 import { REGION_DIR, regionFilePath, regionPublicPathOfFile, townshipFilePath } from '../cloudflare/region-path.js'
-import { newestLastmod, sitemapIndexXml, urlsetXml } from '../cloudflare/sitemap-xml.js'
+import { newestLastmod, SITEMAP_MAX_BYTES, SITEMAP_MAX_URLS, sitemapIndexXml, splitSitemap, urlsetXml } from '../cloudflare/sitemap-xml.js'
 import { graphUrlsIn, lineageSitemapMatch } from './sitemap-graph-guard.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -293,13 +293,26 @@ for (const r of allRoutes) {
   if (sitemapSkip.has(r)) { skippedByRule.push(r); continue }
   grouped.get(SITEMAP_GROUPS.find((g) => g.match(r)).file).push(r)
 }
+// 每類網址切成每檔 40,000 筆：第一檔沿用原檔名，第二檔起 -2、-3…（政見 2026-11-26 破 5 萬，見 cloudflare/sitemap-xml.js）。
+// groupEntries／sitemapFiles 都是「實際寫出去的檔」，後面的索引、/graph 檢查、統計都吃它。
 const groupEntries = new Map()
+const sitemapSplitSummary = {}
 for (const [file, list] of grouped) {
   if (list.length === 0) fail(`${file} 是空的`)
-  if (list.length > 50000) fail(`${file} 超過 50,000 個網址（${list.length}），要再拆`)
   const entries = list.map((r) => ({ loc: `${SITE_URL}${r}`, lastmod: sitemapMeta.lastmod[r] ?? null }))
-  groupEntries.set(file, entries)
-  fs.writeFileSync(path.join(DIST, file), urlsetXml(entries), 'utf8')
+  const parts = splitSitemap(file, entries)
+  sitemapSplitSummary[file] = parts.map((p) => p.items.length)
+  for (const part of parts) {
+    const xml = urlsetXml(part.items)
+    const bytes = Buffer.byteLength(xml, 'utf8')
+    if (part.items.length > SITEMAP_MAX_URLS) fail(`${part.file} 超過 ${SITEMAP_MAX_URLS} 個網址（${part.items.length}）`)
+    if (bytes > SITEMAP_MAX_BYTES) fail(`${part.file} 超過 50 MB（${bytes} bytes）`)
+    groupEntries.set(part.file, part.items)
+    fs.writeFileSync(path.join(DIST, part.file), xml, 'utf8')
+  }
+}
+for (const [file, counts] of Object.entries(sitemapSplitSummary)) {
+  if (counts.length > 1) console.log(`[postbuild-ssg] ${file.replace(/\.xml$/, '')} 共 ${counts.length} 檔，各檔筆數：${counts.join('、')}`)
 }
 // 脈絡完整關係圖（/lineage/<id>/graph，#675 第四期）只在瀏覽器端畫、noindex：任何一份網站地圖出現以 /graph 結尾的網址就讓 build 紅
 // （群組比對已排除 /graph，網址會落進 sitemap-pages；這道檢查看的是寫出去的網址，不是群組）
@@ -307,7 +320,7 @@ for (const [file, entries] of groupEntries) {
   const bad = graphUrlsIn(entries.map((e) => e.loc))
   if (bad.length > 0) fail(`${file} 收了 ${bad.length} 個關係圖網址（/graph 不收錄、不進網站地圖）：${bad.slice(0, 3).join(', ')}`)
 }
-const indexXml = sitemapIndexXml([...grouped.keys()].map((file) => ({ loc: `${SITE_URL}/${file}`, lastmod: newestLastmod(groupEntries.get(file)) })))
+const indexXml = sitemapIndexXml([...groupEntries.keys()].map((file) => ({ loc: `${SITE_URL}/${file}`, lastmod: newestLastmod(groupEntries.get(file)) })))
 fs.writeFileSync(path.join(DIST, 'sitemap.xml'), indexXml, 'utf8')
 
 const byPrefix = routes.reduce((acc, r) => {
@@ -323,7 +336,7 @@ const summary = {
   sitemapSkippedPeople: skippedByRule.length,
   sitemapUrlsWithLastmod: [...groupEntries.values()].reduce((n, es) => n + es.filter((e) => e.lastmod).length, 0),
   edgeRendered: edgeRoutes.length,
-  sitemaps: Object.fromEntries([...grouped].map(([f, l]) => [f, l.length])),
+  sitemaps: Object.fromEntries([...groupEntries].map(([f, l]) => [f, l.length])),
   byPrefix,
   pagesWithoutInitialState: noStatePages.length,
   relocatedRegionPages,
