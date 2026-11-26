@@ -324,6 +324,12 @@ seed 是「總表這一輪沒回這個缺口＝缺口消失」：
 | issue_too_broad | 3,377 | （縣市，議題） | 先確認 `issues_scoped()` 能否反推鍵；不能則以縣市為單位重算 |
 | legacy | 2,379 | 政見 id | #1044 已收窄過；改按鍵後單鍵成本接近零 |
 
+> **PR-1 已上（2026-11-26，`20261126193000_dispatch_gaps_phase1a.sql`，守門 `dispatch-gaps-phase1.test.ts`；派工輸出不變）**：三支臂的按鍵重算 `dispatch_gap_recompute_legacy／_mismatch／_issue_too_broad(p_keys)`（本體與現行臂函式逐字相同，只加鍵過濾，測試逐行比對）、`dispatch_gap_on_change()` 對得更細、觸發器掛上 policies、politician_elections、politicians、jev_decisions、edit_history、source_refs、contributions、policy_subtopics、elections、activity_rules 共 12 支（UPDATE 一律 OF 欄位，高頻表加 WHEN）、新增投票日翻轉排程 `dispatch-gap-date-flip-daily`（台北 00:04）、三支臂切 **shadow**、`events_enabled` 與 seed 開頭 drain 總開關打開、遷移內對三支臂各做一次初始灌入。
+> - **shadow 起算日 2026-11-26**（連跑 7 天，最早 2026-12-03 評估切 live）。
+> - **切 live 條件**：①每小時雙軌比對（`dispatch_gap_reconcile_runs`，mode＝shadow）連續 7 天 missing＝extra＝changed＝0；②每日對帳（mode＝reconcile）沒有補開補關；③切換前後各 24 小時 `gap_events` 的 opened／closed 數與 `task_dispatches` 派出分佈臂別差距在容許範圍；④seed 開頭 drain 耗時在三支臂都有按鍵版的情況下穩定在秒以內（整臂事件〔issue_too_broad 的政見變動、mismatch 的設定變動〕仍會觸發整表保底，要看佔比）。逐臂切：`SELECT dispatch_gap_set_mode('legacy', 'live', '…')`，回滾 `'shadow'`。
+> - **鍵怎麼來**：legacy、mismatch 事件入 `policy:<政見 id>`；mismatch 在參選紀錄變動時只入「同一個人同一屆」的政見；issue_too_broad 的政見／參選紀錄變動反推不出（縣市，議題），入整臂 `*`（但只在 2026 競選承諾相關時入），在途細項貢獻能從 payload 組出 `issue:<選舉>:<縣市>:<議題>` 就入單一鍵。**mismatch 的投票日翻轉不是資料變更**，由 `dispatch_gap_date_flip()` 在投票日當天補一筆整臂事件。
+> - **已知限制**：issue_too_broad 沒有（縣市，議題）級的事件來源，政見或 2026 參選紀錄一動就整臂重算約 3.5 秒（shadow 期 seed 開頭的 drain 會多這一段）；之後若切 live 前要壓低，可把 issues_scoped 的縣市拆開入列。`politicians.name` 變動對 issues_scoped 的「不是議題的名字」過濾有極小影響，這期不入列，靠每日對帳補。
+
 - 三支合計 **14,142 ms，佔探針總和 56%**。預估單輪 53 秒 → 約 **39 秒**。
 - 做法：每支臂函式加 `p_keys` 參數；註冊 `dispatch_gap_arms`；shadow 7 天；零差異後切 `live`。
 - 驗證不漏派不重派：①shadow 每小時比對差異＝0 連續 7 天；②切換前後各抓 24 小時的 `gap_events`（opened／closed 數）與 `task_dispatches` 派出分佈，臂別數量差距在容許範圍；③切換後對帳 `only_old／only_new／changed` 皆 0。
