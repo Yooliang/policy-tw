@@ -307,6 +307,7 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 - 網站請求併入缺口：`20261111010000_web_request_merge_gap.sql`（視圖 `web_request_coverage`、函式 `web_request_gap_sync()`／`web_request_gap_boost()`／`web_request_close_filled()`、pg_cron `web-request-gap-sync-10min`；決策 `docs/decisions/2026-11-11-網站請求併入既有缺口.md`）
 - 對帳提速：`20261119180000_web_request_has_pledges_use_index.sql`（`web_request_has_pledges` 改以 uuid 比對人物、走 `policies_visible_idx`；`web_request_gap_sync` 每輪約 5 秒花在這，改後結案那一步約 0.26 秒，語意不變）
 - `/next`：`supabase/functions/next/index.ts`、`supabase/functions/_shared/dispatch.ts`（`pickQueueHead`）
+- 事件驅動化的治本規劃（常駐缺口表、事件入列、每日全量對帳、分期與雙軌比對；2026-11-26 規劃文件，尚未實作）：`docs/dispatch-arms-event-driven-plan.md`
 - 規則與決策的來源：`CLAUDE.md`「派工佇列」條目、`docs/DECISIONS.md`、`docs/PIPELINE.md`（自動缺口任務一覽）、`docs/PLAN-tasks-as-rows.md`（歷史設計）
 
 ## 7. 任務分類（Jev 估難度／時間／模型強度，2026-11-08，階段 1）
