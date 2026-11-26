@@ -312,7 +312,7 @@ const PAIRS: Pair[] = [
     before: "20261017000301_queue_tasks_eligibility_before_limit.sql",
     note: "取合格條件搬進 SQL（20261017000301，日本站暫不跟）之前的版本",
   },
-  { name: "contribution_queue_task_counts" },
+  { name: "contribution_queue_task_counts", before: "20261126160000_queue_task_counts_cache.sql", note: "取台灣改讀小表 queue_task_counts_cache（20261126160000，日本站佇列小、暫不跟）之前的版本" },
   { name: "contribution_auto_tasks", before: TW_VERIFY_TICKET, note: "取驗證票跟著任務（20261017010000，日本站暫不跟：多一段合格：任務停放）之前的版本" },
   {
     name: "contribution_verify_pool",
