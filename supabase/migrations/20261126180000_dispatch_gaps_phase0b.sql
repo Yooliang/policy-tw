@@ -262,8 +262,6 @@ LANGUAGE sql STABLE SET work_mem = '16MB' AS $$
       OR NOT (EXISTS (SELECT 1 FROM ph WHERE strpos(g.target::TEXT, ph.pid) > 0)
               OR EXISTS (SELECT 1 FROM phe WHERE g.target->'politician_election_ids' @> to_jsonb(phe.peid) OR g.target->>'politician_election_id' = phe.peid::TEXT)))
 $$;
-COMMENT ON FUNCTION contribution_auto_tasks_arms_v20261126 IS '派工總表的前一版（20261120170000 的定義，逐字保留；20261126180000 起總表改二段式）。雙軌比對（全 off 時兩版輸出必須逐列相同）與回滾用，沒有任何排程或程式呼叫它。';
-REVOKE ALL ON FUNCTION contribution_auto_tasks_arms_v20261126() FROM PUBLIC, anon, authenticated;
 
 CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()
 RETURNS TABLE (task_id TEXT, task_type TEXT, target JSONB, what_we_need TEXT, hint_sources TEXT[], reward INTEGER, region TEXT, arm TEXT, opened_by JSONB)
@@ -430,6 +428,10 @@ LANGUAGE sql STABLE SET work_mem = '16MB' AS $$
               OR EXISTS (SELECT 1 FROM phe WHERE g.target->'politician_election_ids' @> to_jsonb(phe.peid) OR g.target->>'politician_election_id' = phe.peid::TEXT)))
 $$;
 COMMENT ON FUNCTION contribution_auto_tasks_arms IS '派工總表。20261126180000：二段式——臂模式（dispatch_gap_arms）是 live 的臂改讀 dispatch_gaps 開著的列，其餘（預設全部）照舊即時算；前一版保留在 contribution_auto_tasks_arms_v20261126()。20261101020000：名冊類差異併進 roster_check（原臂在 roster_unify_settings.enabled 為真時停用；單位清查掛 target.items）';
+
+-- 前一版的註解與權限放在新版之後（既有守門測試用 indexOf 找總表本體的結尾，前一版的 COMMENT 不能排在新版定義之前）
+COMMENT ON FUNCTION contribution_auto_tasks_arms_v20261126 IS '派工總表的前一版（20261120170000 的定義，逐字保留；20261126180000 起總表改二段式）。雙軌比對（全 off 時兩版輸出必須逐列相同）與回滾用，沒有任何排程或程式呼叫它。';
+REVOKE ALL ON FUNCTION contribution_auto_tasks_arms_v20261126() FROM PUBLIC, anon, authenticated;
 
 -- ------------------------------------------------------------
 -- 5. seed 本體：以 20261126150000 的現行定義為底，只在開頭多一個標記區塊（缺口表 drain，總開關預設關）
