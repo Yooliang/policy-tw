@@ -296,7 +296,15 @@ seed 是「總表這一輪沒回這個缺口＝缺口消失」：
 ### 第 0 期：地基（約 4 到 5 個工作天，2 到 3 個 PR）
 
 > **PR-1 已上（2026-11-26，`20261126170000_dispatch_gaps_phase0.sql`，守門 `dispatch-gaps-phase0.test.ts`）**：建了 `dispatch_gaps`、`dispatch_gap_events`（附錄的 dirty 表，改名並保留處理歷史）、`dispatch_gap_reconcile_runs`（附錄的 gap_reconcile_log）、`dispatch_gap_arm_keys`（臂登記與缺口鍵規則，三支第 1 期臂已登記）、`dispatch_gap_settings`；函式 `dispatch_gap_enqueue`、`dispatch_gap_drain`（保底實作＝整表跑一次只取該批鍵的缺口；登記了按鍵版函式就自動改走它）、`dispatch_gap_reconcile_all`、`dispatch_gap_shadow_compare`、觸發器函式 `dispatch_gap_on_change`（不掛正式表）。**只建不派**：沒掛觸發器、沒排 cron、seed 與總表未動。
-> **留給 PR-2**：`dispatch_gap_arms`（off／shadow／live 模式）、`gap_arm_mode()`、`dispatch_gaps_open(arm)`、總表二段式分支與 seed 開頭 `gap_drain()`、`activity_health` 五個巡檢項、pg_cron 排程、事件與對帳紀錄的保留清理、外層整理步驟的量測（第 6.7 節）、`arms-parity` 同款快照比對。
+> **PR-2 已上（2026-11-26，`20261126180000_dispatch_gaps_phase0b.sql`，守門 `dispatch-gaps-phase0b.test.ts`；預設狀態下派工行為一字不變）**：
+> - **臂模式表** `dispatch_gap_arms`（off／shadow／live，查不到＝off；總表所有臂含 raw 八型與七支停用臂都登記成 off，`traffic:*` 不是獨立臂不登記）、`gap_arm_mode()`、切換用 `dispatch_gap_set_mode(臂, 模式, 備註)`（shadow／live 要求臂已登記在 `dispatch_gap_arm_keys`）。
+> - **總表二段式**：新版 `contribution_auto_tasks_arms()` 開頭多一個 `live_arms` CTE（模式是 live 的臂；全 off 時是空集合），每支臂分支多一個「沒被切成 live」條件，並有一個共用的 live 分支改讀 `dispatch_gaps` 開著的列（`dispatch_gap_rows_all()`，還原成臂函式輸出的形狀）；raw 與 deadline_due 因為是 CTE，在 CTE 裡二選一。**前一版整支保留成 `contribution_auto_tasks_arms_v20261126()`**。全 off 等價的證明：PGlite 同一組假資料新舊兩版 EXCEPT 雙向 0（含旗標 `gap.arms_all`、名單清查收斂開關兩種情況），另有文字層守門：前一版與 20261120170000 逐字相同、新版拿掉二段式標記後與前一版逐字相同。
+> - **seed 開頭 drain**：`seed_auto_task_queue()` 開頭受 `dispatch_gap_settings.seed_drain_enabled`（預設 false）控制呼叫 `dispatch_gap_drain()`，失敗只丟 WARNING；拿掉標記區塊後與 20261126150000 逐字相同。
+> - **排程**（pg_cron 以 UTC 計時，分鐘都避開整十、:29、:35 與奇數分鐘）：`dispatch-gap-shadow-compare-hourly`（:48，只比模式不是 off 的臂，全 off 空轉）、`dispatch-gap-reconcile-daily`（UTC 19:32＝台北 03:32，mode＝off 的臂只記差異不改常駐表）、`dispatch-gap-retention-daily`（UTC 20:26＝台北 04:26，events 處理完 >7 天、reconcile_runs >30 天）、`seed-arm-temp-probe-daily`（UTC 20:44＝台北 04:44，見下）。
+> - **觸發器函式補齊**（仍不掛正式表）：`dispatch_gap_on_change` 多 politician_elections、politicians、contributions、tracking_logs 四個分支；只對已登記在 `dispatch_gap_arm_keys` 的臂入列。
+> - **外層整理量測（第 6.7 節兩個未知數）——結論：seed 內各段量不到**。正式庫 PG 17.6 唯讀實測：同一交易內 `pg_stat_database.temp_bytes` 不會更新（前後值相同，`pg_stat_force_next_flush()` 也一樣）；`pg_stat_statements` 只追蹤頂層語句（`track=top`），seed 函式內的語句看不到。所以改成程序 `seed_arm_temp_probe()`：每支臂與整張總表各自一個交易（段間 COMMIT），交易前後比 `temp_bytes`，寫進 `seed_arm_timings.temp_bytes`（`arm` 欄為 `temp:<臂名>`，整張總表為 `temp:arms_all`）。「總表後半 CTE 鏈」的暫存 ≈ `temp:arms_all` 減各臂加總；seed 本體其餘各段（建 `_gaps`、更新、插入…）的暫存仍量不到，要另案（例如讓 seed 拆成多個交易，或開 `pg_stat_statements.track=all`）。數字含同時段其他連線的暫存，排在清晨低流量時段每天一次，看量級不看精確值。
+> - **尚未做**：`activity_health` 五個巡檢項改由私人 repo policy-ops 的 ops-check「派工缺口」段觀測（policy-ops 另一支 PR）；`arms-parity` 同款正式庫快照比對留到第 1 期切 shadow 時一起做。
+> - **回滾**：取消四個 cron、總表與 seed 換回前一版定義、`reconcile_all`／`on_change` 換回 20261126170000 版，新物件清單見 migration 檔頭。
 
 | 項目 | 內容 |
 |---|---|

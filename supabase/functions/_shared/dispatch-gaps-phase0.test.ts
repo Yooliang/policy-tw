@@ -333,8 +333,12 @@ Deno.test("⑧ 守門：本支沒改現行派工函式、沒掛觸發器、沒�
     return last;
   };
   for (const fn of ["seed_auto_task_queue", "contribution_auto_tasks_arms"]) {
-    const last = await lastDefiner(fn);
-    assert(last !== "" && last < MIG_NAME, `${fn} 最新定義必須在本支之前（現在是 ${last}）`);
+    // 第 0 期 PR-2（20261126180000，守門在 dispatch-gaps-phase0b.test.ts）起總表與 seed 才換新定義；PR-1 自己不准動
+    const defs = [];
+    for (const n of names) if ((await read(n)).includes(`FUNCTION ${fn}(`) && n !== MIG_NAME) defs.push(n);
+    const last = defs.filter((n) => n < MIG_NAME).pop() ?? "";
+    assert(last !== "", `${fn} 在本支之前沒有定義`);
+    assert(defs.every((n) => n < MIG_NAME || n === "20261126180000_dispatch_gaps_phase0b.sql"), `${fn} 在本支之後只允許 PR-2 重新定義（現在有 ${defs.join("、")}）`);
     assert(!mig.includes(`FUNCTION ${fn}(`), `本支不准定義 ${fn}`);
     assert(!noComments(mig).includes(fn), `本支的 SQL 不准引用 ${fn}`);
   }
