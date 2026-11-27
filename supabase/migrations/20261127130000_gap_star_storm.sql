@@ -1,0 +1,43 @@
+-- 派工缺口事件風暴：regions 的「只改統計欄」也入了六支臂的整臂 '*'，每輪 seed 之後整臂重算（2026-11-27）。
+--
+-- 背景（正式庫實測 2026-11-27 20:20，近 100 分鐘）：
+--   dispatch_gap_events 幾乎每輪 seed（每 10 分鐘整點起跑、跑 50～110 秒）結束後 1 分鐘內，同一秒寫入一批 scope_key='*'：
+--     issue_too_broad kind='insert'；ballot_numbers／roster_gap_units／roster_unit_findings／roster_villages／raw:roster_check／roster_cec_gap 都是 kind='update'。
+--   後果：gap_drain 每輪對這些臂整臂重算，stage:gap_drain 從 5～12 秒升到 17～37 秒，整輪 seed 65～110 秒。
+--
+-- 源頭（讀碼結論）：
+--   表：regions。
+--   觸發器：trg_dispatch_gap_regions_stmt（20261127093000_dispatch_gaps_phase2b.sql 第 1565 行）＝ AFTER UPDATE OR DELETE ON regions FOR EACH STATEMENT，
+--     函式 dispatch_gap_on_stmt() 對 regions 一律入六支名單族臂的 '*'（kind＝lower(TG_OP)＝'update'）。這六支臂與實測的「kind='update' 的六支臂」逐一相同。
+--     這個觸發器的本意是「縣市、鄉鎮、村里改名」（影響參選紀錄的單位歸屬），但它沒有限定欄位，連只改統計欄的 UPDATE 也觸發。
+--   寫入者（只動統計欄的 UPDATE，沒有一句動到 region／sub_region／village）：
+--     · update_policy_stats()（trg_region_policy_stats，每筆 policies 新增／刪除／換人）：INSERT … ON CONFLICT DO UPDATE SET policy_count、updated_at
+--       （ON CONFLICT DO UPDATE 會讓 UPDATE 語句層級觸發器照樣觸發），以及 UPDATE regions SET policy_count、updated_at；
+--     · update_region_stats()（trg_region_politician_stats，每筆 politicians 變動）：UPDATE regions SET total_politicians、各職位數、updated_at；
+--     · regions_elected_policy_count_refresh()（cron，每 10 分鐘）：UPDATE regions SET elected_policy_count；語句沒影響到列也會觸發（語句層級）。
+--     每輪 seed 之後的批次（約 :x1 起跑的 apply-verified 等，把已驗證的貢獻寫成政見與人物）一寫 policies／politicians 就走到上面，
+--     所以 issue_too_broad kind='insert' 與六支臂 kind='update' 會在同一秒出現：前者是 policies INSERT 本身（見下方「沒改的」），後者就是這支觸發器。
+--
+-- 這支 migration 改了什麼：
+--   regions 的語句層級觸發器改成 AFTER UPDATE OF region, sub_region, village OR DELETE。
+--   PostgreSQL 的欄位清單只看 UPDATE 的 SET 子句：SET 裡沒有這三欄（policy_count、total_politicians、各職位數、elected_policy_count、updated_at）就不觸發。
+--   仍會觸發的：改名／搬選區（SET region、sub_region、village 的任何 UPDATE，例如 20260921000023 那種對調）、DELETE。
+--   admin_code 由 BEFORE 列觸發器 regions_fill_admin_code 在改名時順帶補，名冊臂只看縣市名稱，不另列。
+--   函式 dispatch_gap_on_stmt() 本體不動（其他表 parties／party_aliases／electoral_district_areas 照舊）。
+--
+-- 沒改的（刻意）：
+--   policies 新增競選承諾（那一屆）對 issue_too_broad 入 '*'：臂函式要靠 issues_scoped 把政見歸到「縣市×議題」，觸發器內反推不出鍵，
+--   強行有界化（例如跨輪擋掉 '*'）會讓新承諾的議題統計延到整點對帳才更新，是行為變更，不在這支範圍。這一筆是真實的政見新增，不是自己打自己；
+--   實測每輪一筆 issue_too_broad 整臂，成本遠小於其餘六支。若之後仍嫌貴，下一步是在觸發器內算出該政見的（縣市、議題）改入單位鍵。
+--
+-- 成本影響：gap_drain 每輪少掉六支臂（ballot_numbers、roster_gap_units、roster_unit_findings、roster_villages、raw:roster_check、roster_cec_gap）的整臂重算，
+--   事件驅動回到「只重算變動單位」。每日呼叫量變化：0（排程不變，只是事件變少）。
+--
+-- 回滾：把觸發器改回 20261127093000_dispatch_gaps_phase2b.sql 的定義：
+--   DROP TRIGGER IF EXISTS trg_dispatch_gap_regions_stmt ON regions;
+--   CREATE TRIGGER trg_dispatch_gap_regions_stmt AFTER UPDATE OR DELETE ON regions FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_stmt();
+-- 引用到的既有物件：regions、dispatch_gap_on_stmt()（20261127093000）。
+
+DROP TRIGGER IF EXISTS trg_dispatch_gap_regions_stmt ON regions;
+CREATE TRIGGER trg_dispatch_gap_regions_stmt
+  AFTER UPDATE OF region, sub_region, village OR DELETE ON regions FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_stmt();
