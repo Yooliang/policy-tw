@@ -15,7 +15,9 @@
 --      p_params：contribution_id, quota_column（actor_id｜verifier_ip_hash）, quota_value, window_start,
 --                want_original（貢獻是裁決時 TS 端不知道型別，所以 SQL 端自己判斷，這個旗標固定 true）,
 --                binding（{ip_hash, since}，null＝不查）, prev（{column: actor_id｜agent_name, value}，null＝不查）
---      回傳：used, contribution（null＝查無）, original, dispatched（0 或 1 列）, existing（這筆的全部票）, prev（最近一張票的 note 或 null）
+--      回傳：used, contribution（null＝查無）, original, dispatched（0 或 1 列）,
+--            existing（這筆的全部票：id, agent_name, actor_id, verifier_ip_hash, note, verdict, resolved_politician_id；
+--            verdict 與 resolved_politician_id 給 identity-pick-gate 的「已有人指認」用）, prev（最近一張票的 note 或 null）
 --    p_kind＝verify_post：投票後重讀（貢獻最新狀態與分數、目標分數 contribution_effective_agree）
 --      p_params：contribution_id；回傳：after（null＝查無）, effective（int 或 null）
 --    p_kind＝contribute_pre：交件前要讀的（額度計數、這批任務的型別與多人任務內容、同 IP 在排隊的貢獻）
@@ -241,7 +243,7 @@ BEGIN
     END IF;
 
     SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) INTO v_existing FROM (
-      SELECT cv.id, cv.agent_name, cv.actor_id, cv.verifier_ip_hash, cv.note
+      SELECT cv.id, cv.agent_name, cv.actor_id, cv.verifier_ip_hash, cv.note, cv.verdict, cv.resolved_politician_id
         FROM contribution_votes cv WHERE cv.contribution_id = v_cid ORDER BY cv.created_at, cv.id LIMIT 1000) r;
 
     IF p_params->'prev' IS NOT NULL AND jsonb_typeof(p_params->'prev') = 'object' THEN
@@ -288,7 +290,7 @@ BEGIN
       FROM (SELECT DISTINCT t.x FROM jsonb_array_elements_text(COALESCE(p_params->'task_ids', '[]'::jsonb)) t(x)
              WHERE t.x ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' LIMIT 400) q;
     SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) INTO v_tasks FROM (
-      SELECT ct.id, ct.task_type, (ct.target->>'multi_person' = 'true') AS multi_person,
+      SELECT ct.id, ct.task_type, COALESCE(ct.target->>'multi_person' = 'true', false) AS multi_person,
              CASE WHEN ct.target->>'multi_person' = 'true' THEN ct.target END AS target
         FROM contribution_tasks ct WHERE ct.id = ANY (v_task_ids)) r;
 

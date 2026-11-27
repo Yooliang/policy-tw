@@ -363,7 +363,7 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   }
   // 必須指認的件（1.129.0）：同意票沒帶指認在收票當下退回，不等落庫才整筆退件。判定與落庫端同一份（identity-pick-gate.ts）；不算退件、不扣分、不記為已投
   // 已有一張同意票帶了指認（落庫採用）→ 後來的同意票不必再帶；修訂自己那張時排除自己
-  if (via !== "merge" && input.verdict === "agree" && !input.resolved_politician_id && !(await hasExistingPick(supabase, contribution.id, revising?.id))) {
+  if (via !== "merge" && input.verdict === "agree" && !input.resolved_politician_id && !(await hasExistingPick(supabase, contribution.id, revising?.id, pre ? existing : null))) {
     const pick = await checkIdentityPick(supabase, contribution.contribution_type, contribution.payload ?? {}, contribution.task_id);
     if (pick.error) {
       // 閘門放行但要看得出來：記一筆 gate_rejections（gate=identity_gate_error），不然閘門悄悄失效沒人知道

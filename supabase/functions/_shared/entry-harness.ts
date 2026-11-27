@@ -13,10 +13,12 @@ export interface RestCall {
   url: URL;
   /** 寫入（POST／PATCH）的 JSON body */
   body: unknown;
+  /** 請求標頭（小寫鍵），例如 prefer: count=exact */
+  headers?: Record<string, string>;
 }
 
 /** 回 undefined＝預設（空陣列）。maybeSingle 的呼叫會自動取第一列。 */
-export type RestRouter = (call: RestCall) => unknown | undefined;
+export type RestRouter = (call: RestCall) => unknown | undefined | Promise<unknown | undefined>;
 
 export interface LoadedEntry {
   call(req: Request): Promise<Response>;
@@ -52,14 +54,16 @@ export async function loadEntry(path: string, env: Record<string, string | undef
       const text = req.method === "GET" || req.method === "HEAD" ? "" : await req.text();
       let body: unknown = null;
       try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-      const call: RestCall = { method: req.method, target, url, body };
+      const call: RestCall = { method: req.method, target, url, body, headers: Object.fromEntries(req.headers) };
       calls.push(call);
-      const routed = router(call);
+      const routed = await router(call);
       // HEAD（count: exact）預設 0；router 回 { __count: n } 就把總數設成 n（額度之類靠 count 的路徑）
       const headCount = routed && typeof routed === "object" && "__count" in (routed as object) ? Number((routed as { __count: number }).__count) : 0;
       const headers = { "content-type": "application/json", "content-range": `*/${headCount}` };
       if (req.method === "HEAD") return new Response(null, { headers });
-      let data: unknown = routed === undefined ? ((req.method === "POST" && !target.startsWith("rpc/")) ? [] : []) : routed;
+      // router 回 { __count: n, __rows: [...] }＝帶 count=exact 的 GET：資料是 __rows、總數是 n（Content-Range）
+      const rowsWithCount = routed && typeof routed === "object" && "__rows" in (routed as object);
+      let data: unknown = routed === undefined ? ((req.method === "POST" && !target.startsWith("rpc/")) ? [] : []) : rowsWithCount ? (routed as { __rows: unknown }).__rows : routed;
       const accept = req.headers.get("accept") ?? "";
       if (accept.includes("pgrst.object")) {
         const arr = Array.isArray(data) ? data : [data];

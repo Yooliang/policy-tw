@@ -23,7 +23,8 @@ async function callBundle(supabase: SupabaseLike, kind: string, params: Record<s
   try {
     const res = await supabase.rpc("report_context_bundle", { p_kind: kind, p_params: params });
     if (res.error) throw new Error(res.error.message ?? String(res.error));
-    return res.data ?? null;
+    if (res.data === null || res.data === undefined) throw new Error("empty response");
+    return res.data;
   } catch (e) {
     console.warn(`report_context_bundle(${kind}) 失敗，退回逐項查詢：${e instanceof Error ? e.message : String(e)}`);
     return null;

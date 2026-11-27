@@ -42,9 +42,12 @@ export interface IdentityPickCheck {
  * 這一筆已經有一張同意票帶了指認（consensus／auto-apply 目前一票指認即採用）：之後的同意票不必再帶（過嚴，主線裁示）。
  * 修訂自己那張票時排除自己（自己改掉指認就不算數）。查不到不當作有（照常檢查）。
  */
-export async function hasExistingPick(supabase: SupabaseLike, contributionId: string, excludeVoteId?: string | null): Promise<boolean> {
+export async function hasExistingPick(supabase: SupabaseLike, contributionId: string, excludeVoteId?: string | null, prefetched?: ReadonlyArray<Obj> | null): Promise<boolean> {
   try {
-    const { data } = await supabase.from("contribution_votes").select("id, verdict, resolved_politician_id").eq("contribution_id", contributionId).limit(200);
+    // prefetched：呼叫端已經把這一筆的票讀回來了（report_context_bundle，2026-11-27），不再另查；跟下面查詢一樣只看前 200 張
+    const data = prefetched
+      ? prefetched.slice(0, 200)
+      : (await supabase.from("contribution_votes").select("id, verdict, resolved_politician_id").eq("contribution_id", contributionId).limit(200)).data;
     return ((data ?? []) as Obj[]).some((v) => v.verdict === "agree" && str(v.resolved_politician_id) !== null && v.id !== excludeVoteId);
   } catch (e) {
     console.error("identity pick gate existing votes:", e instanceof Error ? e.message : String(e));
