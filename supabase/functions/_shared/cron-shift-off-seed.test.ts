@@ -128,7 +128,7 @@ Deno.test("C7 整體：除 seed 外，任何 cron 工作的分鐘欄都不含整
   }
 });
 
-// ── 2026-11-27 追加：重 job 不與 seed 同分鐘（20261127063000_cron_stagger_heavy_off_seed.sql）──
+// ── 2026-11-27 追加：重 job 不與 seed 同分鐘（20261127090000_cron_stagger_heavy_off_seed.sql；原 063000 因晚於 073000 合併被 db push 拒收而改名）──
 // 13:56 資料庫記憶體撞頂重啟：整表重算類的 job 與 seed（:x0 起跑約 60～120 秒）疊在同一分鐘。
 // 重 job 名單常數；之後新增整表重算類排程，請加進來。
 const HEAVY_JOBS = ["regions-elected-policy-count-10min", "candidacy-map-stats-10min", "queue-task-counts-refresh"];
@@ -173,8 +173,8 @@ Deno.test("C9 重 job 的起跑分鐘：兩支重 job 不同分鐘、該分鐘�
   }
 });
 
-Deno.test("C10 20261127063000 只用 alter_job 換三支重 job 的排程分鐘欄，後四欄不動", () => {
-  const MIG3 = "20261127063000_cron_stagger_heavy_off_seed.sql";
+Deno.test("C10 20261127090000 只用 alter_job 換三支重 job 的排程分鐘欄，後四欄不動", () => {
+  const MIG3 = "20261127090000_cron_stagger_heavy_off_seed.sql";
   const body = Deno.readTextFileSync(new URL(MIG3, MIGRATIONS)).replace(/\r\n/g, "\n").replace(/^--.*$/gm, "");
   assert(!/cron\.(schedule|unschedule)\(/.test(body), "只能 alter_job，command 不重抄");
   const rows = [...body.matchAll(/\('([a-z0-9-]+)',\s*'([^']+)'\)/g)].map((m) => [m[1], m[2]] as const);

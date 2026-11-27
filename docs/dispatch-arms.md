@@ -358,7 +358,7 @@ SELECT * FROM lease_outcomes_7d ORDER BY expired DESC LIMIT 30;
 
 **11-21 補一支（`20261121111500_vote_baseline_hourly.sql`）**：`vote-baseline-hourly`，每小時 :49，重算台灣站 `vote_baseline`（原掛在已停的 `overvoted-tick-10min`，10-17 起凍住）；回滾＝`cron.unschedule('vote-baseline-hourly')`。
 
-**2026-11-27 重 job 錯開 seed 分鐘（`20261127063000_cron_stagger_heavy_off_seed.sql`，13:56 資料庫記憶體撞頂重啟的對策）**：05:49～05:50 UTC 同一分鐘內 `regions-elected-policy-count-10min`、`candidacy-map-stats-10min`、`queue-task-counts-refresh` 與 seed（:x0 起跑約 60～120 秒）疊加，記憶體撞頂。三支整表重算類 job 搬離 :x9、:x0、:x1：regions 改 `8,18,28,38,47,58`、candidacy 改 `6,16,26,36,46,56`、queue-task-counts-refresh 改 `2,3,5,7,12,13,15,17,22,23,25,27,32,33,37,42,43,45,52,53,57`（一小時 28 次降到 21 次，最長間隔 7 分鐘，小表保底門檻是 10 分鐘）。只用 `cron.alter_job` 換排程，command 不動。守門 `_shared/cron-shift-off-seed.test.ts` C8～C10 的重 job 名單常數（新增整表重算類排程要加進去）。
+**2026-11-27 重 job 錯開 seed 分鐘（`20261127090000_cron_stagger_heavy_off_seed.sql`，原檔名 063000 因比已套用的 073000 早、被 `db push` 拒收而改名，13:56 資料庫記憶體撞頂重啟的對策）**：05:49～05:50 UTC 同一分鐘內 `regions-elected-policy-count-10min`、`candidacy-map-stats-10min`、`queue-task-counts-refresh` 與 seed（:x0 起跑約 60～120 秒）疊加，記憶體撞頂。三支整表重算類 job 搬離 :x9、:x0、:x1：regions 改 `8,18,28,38,47,58`、candidacy 改 `6,16,26,36,46,56`、queue-task-counts-refresh 改 `2,3,5,7,12,13,15,17,22,23,25,27,32,33,37,42,43,45,52,53,57`（一小時 28 次降到 21 次，最長間隔 7 分鐘，小表保底門檻是 10 分鐘）。只用 `cron.alter_job` 換排程，command 不動。守門 `_shared/cron-shift-off-seed.test.ts` C8～C10 的重 job 名單常數（新增整表重算類排程要加進去）。
 
 （10 分鐘級「N 起」＝每小時第 N、N+10、…分。）新增週期性 job 前先看目前每分鐘的啟動數，別又疊回同一分鐘；守門 `_shared/db-tuning.test.ts` 把錯開後的分佈釘在每分鐘 ≤ 4。回滾＝新 migration 把上表改回。
 
