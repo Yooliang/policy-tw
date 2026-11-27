@@ -40,6 +40,47 @@ jobs:
             [ "$code" = 200 ] || { echo "{\"http_status\": $code, \"body\": $(head -c 300 "usage/$e.json" | node -p 'JSON.stringify(require("fs").readFileSync(0,"utf8"))')}" > "usage/$e.json"; }
           done
           exit 0
+      - name: 抓 Edge Function 與閘道 24h 用量
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set +e
+          mkdir -p usage
+          : > usage/status.tsv
+          REF=$(node -p "require('./.github/usage-watch.json').project_ref")
+          ORG=vkowjozlxtfochqomlga
+          API="https://api.supabase.com/v1"
+          START=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # get <名稱> <網址> [額外 curl 參數...]：回應存 usage/<名稱>.json，HTTP 狀態記進 status.tsv；不印權杖
+          get() {
+            local name="$1" url="$2"; shift 2
+            local code
+            code=$(curl -sS -m 60 -o "usage/$name.json" -w '%{http_code}' -G -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" "$@" "$url")
+            printf '%s\t%s\n' "$name" "$code" >> usage/status.tsv
+            echo "$name HTTP $code"
+            [ "$code" = 200 ] || { head -c 300 "usage/$name.json"; echo; }
+          }
+          logs() { # logs <名稱> <sql>
+            get "$1" "$API/projects/$REF/analytics/endpoints/logs.all" \
+              --data-urlencode "sql=$2" --data-urlencode "iso_timestamp_start=$START" --data-urlencode "iso_timestamp_end=$END"
+          }
+          E="$API/projects/$REF/analytics/endpoints"
+          # 路徑 A：現成的函式統計端點
+          get functions.inv-stats "$E/functions.inv-stats" --data-urlencode "interval=1d"
+          get functions.combined-stats "$E/functions.combined-stats" --data-urlencode "interval=1d"
+          get functions.req-stats "$E/functions.req-stats" --data-urlencode "interval=1d"
+          # 路徑 B：Logs 端點（unified logs 語法）＋函式 id 對照
+          get functions-list "$API/projects/$REF/functions"
+          logs functions-logs "select log_attributes['function_id'] as function_id, count(*) as c from logs where source = 'function_edge_logs' group by function_id order by c desc limit 30"
+          # 閘道 24h 總請求與前 15 路徑
+          logs gateway-paths "select log_attributes['request.path'] as p, count(*) as c from logs where source = 'edge_logs' group by p order by c desc limit 15"
+          logs gateway-total "select count(*) as c from logs where source = 'edge_logs'"
+          # 組織本週期用量
+          get org-usage "$API/organizations/$ORG/usage"
+          get org-billing-usage "$API/organizations/$ORG/billing/usage"
+          get project-billing-addons "$API/projects/$REF/billing/addons"
+          exit 0
       - name: 摘要與門檻
         run: node scripts/usage-watch.mjs usage .github/usage-watch.json
       - uses: actions/upload-artifact@v4
