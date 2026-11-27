@@ -23,6 +23,7 @@ import { isSelfCitationUrl, SELF_CITATION_MESSAGE } from "./self-hosts.ts";
 import { disputeNoUnsureMessage, disputeVotesNow } from "./dispute-verify.ts";
 import { candNoItems } from "./cand-numbers.ts";
 import { adjustedVerifyUsed, BUNDLE_VOTE_REQUIRED_MESSAGE, handleBundleVerify } from "./bundle-verify.ts";
+import { readVerifyPost, readVerifyPre } from "./report-bundle.ts";
 
 // deno-lint-ignore no-explicit-any
 type SupabaseLike = any;
@@ -119,22 +120,46 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
 
   const windowStart = quotaWindowStart();
   const vq = verifyQuotaFor(actor, ipHash, await loadQuotaLimits(supabase, "tw", QUOTA_DEFAULTS));
-  const { count: used, error: countError } = await supabase
-    .from("contribution_votes").select("id", { count: "exact", head: true })
-    .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
-  if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
+  // 內部 REST 瘦身第 1 期 PR-2（2026-11-27）：投票前要讀的（額度計數、被驗貢獻、裁決的原貢獻、派工綁定、既有票、自己上一票的備註）
+  // 先用一支 RPC 一次撈齊（report_context_bundle，原本 4～6 次 REST）；RPC 回錯（pre 為 null）就退回下面原本的逐項查詢。
+  // 只合併讀取：判斷順序、回應文字與寫入都沒動。派工綁定的時限與下面查詢同一個算法。
+  const bindingSince = new Date(Date.now() - VERIFY_BINDING_DAYS * 86_400_000).toISOString();
+  const pre = await readVerifyPre(supabase, {
+    contribution_id: input.contribution_id,
+    quota_column: vq.column,
+    quota_value: vq.value,
+    window_start: windowStart.toISOString(),
+    binding: !tokenBinding && via !== "merge" ? { ip_hash: ipHash, since: bindingSince } : null,
+    prev: input.verdict === "agree" && input.note
+      ? (actor.level === "ditrust" ? { column: "actor_id", value: actor.actor_id } : { column: "agent_name", value: input.agent_name })
+      : null,
+  });
+  let used: number | null;
+  if (pre) used = pre.used;
+  else {
+    const { count, error: countError } = await supabase
+      .from("contribution_votes").select("id", { count: "exact", head: true })
+      .eq(vq.column, vq.value).gte("created_at", windowStart.toISOString());
+    if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
+    used = count;
+  }
   // 一人一包：包票一包算一次額度（一包 N 條票不是 N 次）；只在到上限時重算
   const usedNow = (used ?? 0) >= vq.limit ? await adjustedVerifyUsed(supabase, vq, windowStart.toISOString(), used ?? 0) : (used ?? 0);
   if (usedNow >= vq.limit) {
     return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每個時段最多驗 ${vq.limit} 筆`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() } };
   }
 
-  const { data: contribution, error: cError } = await supabase
-    .from("contributions")
-    .select("id, status, task_id, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score, bundle_id, bundle_released_at")
-    .eq("id", input.contribution_id)
-    .maybeSingle();
-  if (cError) throw new Error(`contributions lookup: ${cError.message}`);
+  let contribution;
+  if (pre) contribution = pre.contribution;
+  else {
+    const { data, error: cError } = await supabase
+      .from("contributions")
+      .select("id, status, task_id, contribution_type, payload, source_urls, agent_name, contributor_ip_hash, actor_id, agree_count, disagree_count, unsure_count, score, bundle_id, bundle_released_at")
+      .eq("id", input.contribution_id)
+      .maybeSingle();
+    if (cError) throw new Error(`contributions lookup: ${cError.message}`);
+    contribution = data;
+  }
   if (!contribution) return { status: 404, body: { success: false, error: "not_found", message: "沒有這筆貢獻" } };
   if (!["pending", "verified", "disputed"].includes(contribution.status)) {
     return { status: 409, body: { success: false, error: "closed", message: `這筆已是 ${contribution.status}，不再收驗證` } };
@@ -147,7 +172,9 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   // 裁決的驗證：原貢獻的提交者也不能投（利益相關）
   if (contribution.contribution_type === "adjudication") {
     const originalId = typeof contribution.payload?.contribution_id === "string" ? contribution.payload.contribution_id : null;
-    const { data: original } = originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash, actor_id").eq("id", originalId).maybeSingle() : { data: null };
+    const original = pre
+      ? pre.original
+      : (originalId ? await supabase.from("contributions").select("agent_name, contributor_ip_hash, actor_id").eq("id", originalId).maybeSingle() : { data: null }).data;
     if (original && isSelfVote(original, voter)) {
       return { status: 403, body: { success: false, error: "self_vote", message: "這是對你自己那筆貢獻的裁決，不能投票，請跳過" } };
     }
@@ -174,10 +201,15 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     });
   } else if (via !== "merge") {
     // 只認派出後 VERIFY_BINDING_DAYS 天內的紀錄（派工紀錄會定時清掉更舊的，#485；時限明寫，清理前後結果才一樣）
-    const bindingSince = new Date(Date.now() - VERIFY_BINDING_DAYS * 86_400_000).toISOString();
-    const { data: dispatched, error: dErr } = await supabase.from("verify_dispatches")
-      .select("contribution_id, agent_name").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).gte("dispatched_at", bindingSince).maybeSingle();
-    if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);
+    // （bindingSince 在上面算過；RPC 已把這一筆的綁定紀錄一起帶回來，（貢獻 id、來源網段）是主鍵、最多一列）
+    let dispatched;
+    if (pre) dispatched = pre.dispatched[0] ?? null;
+    else {
+      const { data, error: dErr } = await supabase.from("verify_dispatches")
+        .select("contribution_id, agent_name").eq("contribution_id", contribution.id).eq("ip_hash", ipHash).gte("dispatched_at", bindingSince).maybeSingle();
+      if (dErr) throw new Error(`verify dispatch lookup: ${dErr.message}`);
+      dispatched = data;
+    }
     // 派工紀錄記了領的代號：別的代號不能拿這筆網段綁定來投（記錄上沒代號的舊列放行）
     const dispatchedTo = (dispatched as { agent_name?: string | null } | null)?.agent_name;
     if (!dispatched || (dispatchedTo && dispatchedTo.toLowerCase() !== input.agent_name.toLowerCase())) {
@@ -219,9 +251,14 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     }
   }
 
-  const { data: existing, error: eError } = await supabase
-    .from("contribution_votes").select("id, agent_name, actor_id, verifier_ip_hash, note").eq("contribution_id", contribution.id);
-  if (eError) throw new Error(`votes lookup: ${eError.message}`);
+  let existing;
+  if (pre) existing = pre.existing;
+  else {
+    const { data, error: eError } = await supabase
+      .from("contribution_votes").select("id, agent_name, actor_id, verifier_ip_hash, note").eq("contribution_id", contribution.id);
+    if (eError) throw new Error(`votes lookup: ${eError.message}`);
+    existing = data;
+  }
   let revising: { id: string } | null = null;
   const myKey = voterKey(voter);
   type ExistingVote = { id: string; agent_name: string; actor_id?: string | null; verifier_ip_hash: string | null };
@@ -272,9 +309,11 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   // 訊號乾淨，而且不要求代理多做任何事——兩次查證本來就不會產生一模一樣的描述。
   if (input.verdict === "agree" && input.note && !revising) {
     // 「自己上一票」＝同一個投票人的上一票（DiTrust 按 actor_id、匿名按代號）；同網段別的代理的票不算（2026-11-04）
-    const { data: prev } = await supabase.from("contribution_votes")
-      .select("note").eq(...(actor.level === "ditrust" ? ["actor_id", actor.actor_id] as const : ["agent_name", input.agent_name] as const))
-      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const prev = pre
+      ? pre.prev
+      : (await supabase.from("contribution_votes")
+        .select("note").eq(...(actor.level === "ditrust" ? ["actor_id", actor.actor_id] as const : ["agent_name", input.agent_name] as const))
+        .order("created_at", { ascending: false }).limit(1).maybeSingle()).data;
     if (prev && isRepeatedNote(input.note, (prev as { note?: string }).note)) {
       return {
         status: 400,
@@ -393,15 +432,24 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
     throw new Error(`votes insert: ${insertError.message}`);
   }
 
-  const { data: after, error: aError } = await supabase
-    .from("contributions").select("status, agree_count, disagree_count, unsure_count, score").eq("id", contribution.id).maybeSingle();
-  if (aError) throw new Error(`contributions reread: ${aError.message}`);
+  // 投票後的重讀（貢獻最新狀態與分數、有效門檻）也合成一次 RPC（原本 2 次 REST）；RPC 回錯就退回原本的兩次查詢
+  const post = await readVerifyPost(supabase, contribution.id);
+  let after;
   // 回給代理的「還要幾票」用有效門檻（系統票折進去；2026-09-20），拿不到就退回原門檻
   let effectiveRequired: number | null = null;
-  try {
-    const { data: eff } = await supabase.rpc("contribution_effective_agree", { p_contribution_id: contribution.id });
-    if (typeof eff === "number") effectiveRequired = eff;
-  } catch { /* 舊 DB 沒這支函式：退回原門檻 */ }
+  if (post) {
+    after = post.after;
+    effectiveRequired = post.effective;
+  } else {
+    const { data, error: aError } = await supabase
+      .from("contributions").select("status, agree_count, disagree_count, unsure_count, score").eq("id", contribution.id).maybeSingle();
+    if (aError) throw new Error(`contributions reread: ${aError.message}`);
+    after = data;
+    try {
+      const { data: eff } = await supabase.rpc("contribution_effective_agree", { p_contribution_id: contribution.id });
+      if (typeof eff === "number") effectiveRequired = eff;
+    } catch { /* 舊 DB 沒這支函式：退回原門檻 */ }
+  }
 
   // 同儕驗證通過 → 同一請求內自動落庫（失敗不影響投票成功，狀態會變 apply_failed 由掃地機重試）
   const autoApply = shouldAutoApply(after?.status) ? await autoApplyContribution(supabase, contribution.id, applyFn) : { triggered: false };
