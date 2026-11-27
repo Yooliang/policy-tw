@@ -25,6 +25,10 @@
 --      時間造成的翻轉沒有資料變更：投票日前後（roster 的 voted、補號次的窗口）新增 pg_cron dispatch-gap-date-flip-roster（UTC 00:06 與 16:06）補整臂事件；
 --      官方名冊鏡像「3 天內抓成功」的過期不是事件，靠每小時雙軌比對與每日對帳補。
 --   ④ 三支臂切 shadow；初始灌入（整臂對帳一次，約 7 秒）；最後對三支補一筆整臂事件（灌入與掛觸發器之間漏掉的變更）。
+--   ⑤ dispatch_gap_set_mode() 以 20261126180000 為底多一條：不在 activity_arm_names()（不是總表 UNION 分支）的臂不能切 live（roster_unit_findings、roster_gap_units 是輔助函式，
+--      總表不讀它們的常駐表）；shadow 與 off 照舊。
+--   ⑥ 觸發器順序：低頻表先掛，politician_elections、politicians、contributions 三張熱表最後一組；自我檢查除觸發器計數外都在觸發器之前。
+--   ⑦ contributions 分支的名單族新段包了例外處理（payload 的 election_id 只收 1～9 位數字，其餘怪值只丟 WARNING，不讓那筆交件寫入失敗）。
 --
 -- 與現行觸發器的關係：
 --   politician_elections、politicians、contributions 三支觸發器各重建一次（欄位清單與 WHEN 變寬，其餘不變）；dispatch_gap_on_change() 以 20261126193000 版為底重定義，
@@ -39,7 +43,24 @@
 --     cec_candidates、cec_registrations 各三支：trg_dispatch_gap_<表名>_ins／_upd／_del。
 --   三支被重建的觸發器換回 20261126193000 的欄位清單與 WHEN；dispatch_gap_on_change() 換回 20261126193000 的定義。
 --   按鍵版改回整表保底：UPDATE dispatch_gap_arm_keys SET recompute_fn = NULL WHERE arm IN ('roster_unit_findings','roster_gap_units','ballot_numbers');
---   登記與物件：DELETE FROM dispatch_gap_arm_keys WHERE arm IN (上面三支)；DROP FUNCTION 本檔新增的函式（清單見自我檢查之前的 COMMENT）；dispatch_gap_scope_key() 換回 20261126170000 的定義。
+--   徹底退出（順序要照）：
+--     ① 先清未處理事件，否則 drain 取到沒登記的臂會拋錯、attempts 累到 5：
+--        DELETE FROM dispatch_gap_events WHERE arm IN ('roster_unit_findings','roster_gap_units','ballot_numbers') AND processed_at IS NULL;
+--     ② 先把 dispatch_gap_on_change() 換回 20261126193000 的定義、dispatch_gap_set_mode() 換回 20261126180000 的定義、dispatch_gap_scope_key() 換回 20261126170000 的定義，
+--        再 DROP 被它們呼叫的函式（反過來 DROP 會讓還掛著的觸發器下一次寫入就失敗）；
+--     ③ DELETE FROM dispatch_gap_arm_keys WHERE arm IN ('roster_unit_findings','roster_gap_units','ballot_numbers');
+--        DELETE FROM dispatch_gap_arms WHERE arm IN ('roster_unit_findings','roster_gap_units'); ballot_numbers 的模式改回 off；
+--        DELETE FROM dispatch_gaps WHERE arm IN ('roster_unit_findings','roster_gap_units','ballot_numbers');
+--     ④ DROP FUNCTION dispatch_gap_enqueue_units(INTEGER, TEXT, TEXT, TEXT, TEXT), dispatch_gap_enqueue_roster_units(INTEGER, TEXT, TEXT, TEXT, TEXT),
+--        dispatch_gap_roster_keys(INTEGER, TEXT, TEXT, TEXT), dispatch_gap_ballot_keys(INTEGER, TEXT, TEXT, TEXT), dispatch_gap_roster_unit_key(INTEGER, TEXT, TEXT),
+--        dispatch_gap_ballot_unit_key(INTEGER, TEXT, TEXT, TEXT), dispatch_gap_ballot_scope(TEXT), dispatch_gap_roster_scope(TEXT), dispatch_gap_date_flip_roster(),
+--        dispatch_gap_on_batch_new(), dispatch_gap_on_batch_old(), dispatch_gap_recompute_roster_unit_findings(TEXT[]), dispatch_gap_recompute_roster_gap_units(TEXT[]),
+--        dispatch_gap_recompute_ballot_numbers(TEXT[]);（dispatch_gap_scope_key 的新分支依賴 roster_scope／ballot_scope，所以它要先換回舊定義，見 ②）
+--
+-- 事件盲區（目前沒有觸發器，靠每小時雙軌比對與每日對帳補；shadow 期間這些來源變動會讓雙軌短暫出現差異，不是漏接錯誤）：
+--   regions（縣市、鄉鎮、村里改名）、election_districts（議員、代表的選區名額）、task_checks（查無冷卻）、edit_history（region_gap 看的欄位修改紀錄）、
+--   verification_sources、cec_registration_sources、cec_results_auto_plan（系統自動寫入的計畫快取）、parties／party_aliases（政黨對照）、politician_pair_resolutions。
+--   這些表影響 roster_diff_findings() 的七支臂函式與 cec_roster_diff()，而後兩者的鍵過濾在單位彙總層（見風險段），PR-2 把鍵推進它們時一併補觸發器。
 --
 -- 風險：部署時多跑約 7 秒（初始灌入）；第一輪 seed 開頭的 drain 再補整臂約 7 秒；shadow 期間每小時比對多約 7 秒（三支整表函式各一次）。
 --   按鍵重算的成本：ballot_numbers 在單位層級過濾（window 函式的分區就是單位）；roster_unit_findings、roster_gap_units 的鍵過濾在「單位彙總」那一層，
@@ -681,22 +702,27 @@ BEGIN
         PERFORM dispatch_gap_enqueue('issue_too_broad', '*', v_kind);
       END IF;
     ELSIF v_ctype IN ('cand_numbers', 'candidacy', 'election_results', 'reassign_candidacy') THEN
-      v_pl := COALESCE(v_row -> 'payload', '{}'::JSONB);
-      v_ceid := CASE WHEN v_pl ->> 'election_id' ~ '^[0-9]+$' THEN (v_pl ->> 'election_id')::INTEGER END;
-      v_cet := NULLIF(v_pl ->> 'election_type', '');
-      v_county := NULLIF(v_pl ->> 'region', '');
-      v_sub := NULLIF(v_pl ->> 'sub_region', '');
-      IF v_ceid IS NOT NULL AND v_cet IS NOT NULL AND v_county IS NOT NULL THEN
-        PERFORM dispatch_gap_enqueue_units(v_ceid, v_cet, v_county, v_sub, v_kind);
-        -- 補號次的派工單位在鄉鎮層級的職位，payload 沒帶鄉鎮就對不到單位：整臂
-        IF v_sub IS NULL AND v_cet NOT IN ('縣市長', '縣市議員') THEN
+      -- 名單族的新段包例外：payload 是使用者交的內容，任何怪值（超大整數、型別不對）都不能讓這筆 contributions 寫入失敗
+      BEGIN
+        v_pl := COALESCE(v_row -> 'payload', '{}'::JSONB);
+        v_ceid := CASE WHEN v_pl ->> 'election_id' ~ '^[0-9]{1,9}$' THEN (v_pl ->> 'election_id')::INTEGER END;
+        v_cet := NULLIF(v_pl ->> 'election_type', '');
+        v_county := NULLIF(v_pl ->> 'region', '');
+        v_sub := NULLIF(v_pl ->> 'sub_region', '');
+        IF v_ceid IS NOT NULL AND v_cet IS NOT NULL AND v_county IS NOT NULL THEN
+          PERFORM dispatch_gap_enqueue_units(v_ceid, v_cet, v_county, v_sub, v_kind);
+          -- 補號次的派工單位在鄉鎮層級的職位，payload 沒帶鄉鎮就對不到單位：整臂
+          IF v_sub IS NULL AND v_cet NOT IN ('縣市長', '縣市議員') THEN
+            PERFORM dispatch_gap_enqueue_reg('ballot_numbers', '*', v_kind);
+          END IF;
+        ELSE
+          PERFORM dispatch_gap_enqueue_reg('roster_unit_findings', '*', v_kind);
+          PERFORM dispatch_gap_enqueue_reg('roster_gap_units', '*', v_kind);
           PERFORM dispatch_gap_enqueue_reg('ballot_numbers', '*', v_kind);
         END IF;
-      ELSE
-        PERFORM dispatch_gap_enqueue_reg('roster_unit_findings', '*', v_kind);
-        PERFORM dispatch_gap_enqueue_reg('roster_gap_units', '*', v_kind);
-        PERFORM dispatch_gap_enqueue_reg('ballot_numbers', '*', v_kind);
-      END IF;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'dispatch_gap_on_change（contributions 名單族）：%', SQLERRM;
+      END;
     END IF;
 
   ELSIF TG_TABLE_NAME = 'policy_subtopics' THEN
@@ -716,7 +742,13 @@ BEGIN
   ELSIF TG_TABLE_NAME = 'cec_roster_units' THEN
     -- 官方名冊鏡像的批次寫入點（cec_roster_replace_unit 每個單位最後一步 UPDATE 這一列）：入該單位；
     -- 補號次的「不在官方名冊」排除是縣市層級，單位內成員一變所有鄉鎮的號次件都可能變，所以補號次入整臂
-    PERFORM dispatch_gap_enqueue_roster_units(2026, v_row ->> 'election_type', v_row ->> 'county', NULLIF(v_row ->> 'town', ''), v_kind);
+    -- 鄉鎮市民代表、直轄市山地原住民區民代表：這張表的 town 是空的，但投票後（roster_unify_town）名冊差異的單位是縣市＋鄉鎮，鍵對不上，所以這兩個職位改入整臂
+    IF v_row ->> 'election_type' IN ('鄉鎮市民代表', '直轄市山地原住民區民代表') THEN
+      PERFORM dispatch_gap_enqueue_reg('roster_unit_findings', '*', v_kind);
+      PERFORM dispatch_gap_enqueue_reg('roster_gap_units', '*', v_kind);
+    ELSE
+      PERFORM dispatch_gap_enqueue_roster_units(2026, v_row ->> 'election_type', v_row ->> 'county', NULLIF(v_row ->> 'town', ''), v_kind);
+    END IF;
     PERFORM dispatch_gap_enqueue_reg('ballot_numbers', '*', v_kind);
 
   ELSIF TG_TABLE_NAME = 'contribution_tasks' THEN
@@ -827,6 +859,29 @@ ON CONFLICT (arm) DO UPDATE SET full_fn = EXCLUDED.full_fn, recompute_fn = EXCLU
   key_expr_desc = EXCLUDED.key_expr_desc, key_example = EXCLUDED.key_example;
 
 -- ------------------------------------------------------------
+-- 5b. 切模式：以 20261126180000 為底，只多一條——不是總表 UNION 分支的臂（activity_arm_names() 沒有它：roster_unit_findings、roster_gap_units
+--     是輔助函式）不能切 live，因為總表不會讀它們的常駐表，切了只會讓人以為生效；shadow 與 off 照舊
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION dispatch_gap_set_mode(p_arm TEXT, p_mode TEXT, p_note TEXT DEFAULT NULL) RETURNS TEXT
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF p_mode NOT IN ('off', 'shadow', 'live') THEN
+    RAISE EXCEPTION 'dispatch_gap_set_mode：模式只能是 off／shadow／live，收到 %', p_mode;
+  END IF;
+  IF p_mode <> 'off' AND NOT EXISTS (SELECT 1 FROM dispatch_gap_arm_keys k WHERE k.arm = p_arm) THEN
+    RAISE EXCEPTION 'dispatch_gap_set_mode：臂 % 還沒登記在 dispatch_gap_arm_keys，不能切成 %', p_arm, p_mode;
+  END IF;
+  IF p_mode = 'live' AND NOT (p_arm = ANY (activity_arm_names())) THEN
+    RAISE EXCEPTION 'dispatch_gap_set_mode：% 不是派工總表的 UNION 分支（總表輔助函式），總表不會讀它的常駐表，不能切成 live；只能 shadow 或 off', p_arm;
+  END IF;
+  INSERT INTO dispatch_gap_arms (arm, mode, updated_at, note) VALUES (p_arm, p_mode, now(), p_note)
+  ON CONFLICT (arm) DO UPDATE SET mode = EXCLUDED.mode, updated_at = now(), note = COALESCE(EXCLUDED.note, dispatch_gap_arms.note);
+  RETURN p_mode;
+END;
+$$;
+REVOKE ALL ON FUNCTION dispatch_gap_set_mode(TEXT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+
+-- ------------------------------------------------------------
 -- 6. 切 shadow ＋ 初始灌入（觸發器之前做，不讓 CREATE TRIGGER 的表鎖等著它）
 -- ------------------------------------------------------------
 SELECT dispatch_gap_set_mode('roster_unit_findings', 'shadow', '第 2 期 PR-1：雙軌開始（輔助函式，總表不讀常駐表）');
@@ -840,29 +895,51 @@ BEGIN
 END $$;
 
 -- ------------------------------------------------------------
--- 7. 觸發器（最後才掛；表鎖到交易結束，所以只留短短一段）
+-- 7. 自我檢查（觸發器之前；DDL 的表鎖到交易結束才放，所以能先做的檢查都先做完）：
+--    六支臂是 shadow（第 1 期三支加本期三支）、沒有 live、按鍵版都在且已登記、兩個開關開著
+-- ------------------------------------------------------------
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM dispatch_gap_arms WHERE mode = 'shadow') <> 6
+     OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'shadow'
+                 AND arm NOT IN ('legacy', 'mismatch', 'issue_too_broad', 'roster_unit_findings', 'roster_gap_units', 'ballot_numbers'))
+     OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'live') THEN
+    RAISE EXCEPTION '第 2 期 PR-1：只有第 1 期三支加 roster_unit_findings、roster_gap_units、ballot_numbers 可以是 shadow，不能有 live';
+  END IF;
+  IF EXISTS (SELECT 1 FROM dispatch_gap_arm_keys k WHERE k.arm IN ('roster_unit_findings', 'roster_gap_units', 'ballot_numbers')
+              AND (k.recompute_fn IS NULL OR to_regprocedure(k.recompute_fn) IS NULL)) THEN
+    RAISE EXCEPTION '第 2 期 PR-1：三支名單族臂的按鍵版沒有登記或函式不存在';
+  END IF;
+  IF NOT dispatch_gap_events_enabled() OR NOT dispatch_gap_seed_drain_enabled() THEN
+    RAISE EXCEPTION '第 2 期 PR-1：事件與 seed drain 兩個開關都要是開';
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------
+-- 8. 補整臂事件（灌入到掛上觸發器之間漏掉的變更，第一輪 seed 的 drain 一次補齊）
+-- ------------------------------------------------------------
+SELECT dispatch_gap_enqueue('roster_unit_findings', '*', 'migration');
+SELECT dispatch_gap_enqueue('roster_gap_units', '*', 'migration');
+SELECT dispatch_gap_enqueue('ballot_numbers', '*', 'migration');
+
+-- ------------------------------------------------------------
+-- 9. 排程：投票日前後的時間翻轉（UTC 00:06 與 16:06；分鐘避開整十、:29、:35 與奇數分鐘）
+-- ------------------------------------------------------------
+DO $$
+BEGIN
+  IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
+    EXECUTE $q$SELECT cron.unschedule('dispatch-gap-date-flip-roster') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'dispatch-gap-date-flip-roster')$q$;
+    EXECUTE $q$SELECT cron.schedule('dispatch-gap-date-flip-roster', '6 0,16 * * *', 'SELECT dispatch_gap_date_flip_roster();')$q$;
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------
+-- 10. 觸發器（最後才掛；表鎖到交易結束）：低頻表先掛，politician_elections、politicians、contributions 三張熱表最後一組、緊接結尾，
+--     這樣熱表的鎖只持有到交易結束前的那一小段
 -- ------------------------------------------------------------
 SET LOCAL lock_timeout = '30s';
 
--- 三支重建：欄位清單與 WHEN 變寬
-DROP TRIGGER IF EXISTS trg_dispatch_gap_politician_elections ON politician_elections;
-CREATE TRIGGER trg_dispatch_gap_politician_elections
-  AFTER INSERT OR UPDATE OF candidacy_status, election_id, politician_id, region_id, election_type, cand_no, party_id, party_basis, withdrawn_after_filing OR DELETE
-  ON politician_elections FOR EACH ROW EXECUTE FUNCTION dispatch_gap_on_change();
-
-DROP TRIGGER IF EXISTS trg_dispatch_gap_politicians ON politicians;
-CREATE TRIGGER trg_dispatch_gap_politicians
-  AFTER UPDATE OF name, region, merged_into, birth_year, party
-  ON politicians FOR EACH ROW EXECUTE FUNCTION dispatch_gap_on_change();
-
-DROP TRIGGER IF EXISTS trg_dispatch_gap_contributions ON contributions;
-CREATE TRIGGER trg_dispatch_gap_contributions
-  AFTER INSERT OR UPDATE OF status, applied_policy_id
-  ON contributions FOR EACH ROW
-  WHEN (NEW.contribution_type IN ('policy', 'policy_subtopics', 'cand_numbers', 'candidacy', 'election_results', 'reassign_candidacy'))
-  EXECUTE FUNCTION dispatch_gap_on_change();
-
--- 新增
+-- 低頻表
 DROP TRIGGER IF EXISTS trg_dispatch_gap_election_milestones ON election_milestones;
 CREATE TRIGGER trg_dispatch_gap_election_milestones
   AFTER INSERT OR UPDATE OR DELETE
@@ -904,47 +981,32 @@ DROP TRIGGER IF EXISTS trg_dispatch_gap_cec_registrations_del ON cec_registratio
 CREATE TRIGGER trg_dispatch_gap_cec_registrations_del
   AFTER DELETE ON cec_registrations REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_batch_old();
 
--- ------------------------------------------------------------
--- 8. 補整臂事件（灌入到掛上觸發器之間漏掉的變更，第一輪 seed 的 drain 一次補齊）
--- ------------------------------------------------------------
-SELECT dispatch_gap_enqueue('roster_unit_findings', '*', 'migration');
-SELECT dispatch_gap_enqueue('roster_gap_units', '*', 'migration');
-SELECT dispatch_gap_enqueue('ballot_numbers', '*', 'migration');
+-- 三張熱表（重建：欄位清單與 WHEN 變寬）放最後一組
+DROP TRIGGER IF EXISTS trg_dispatch_gap_politician_elections ON politician_elections;
+CREATE TRIGGER trg_dispatch_gap_politician_elections
+  AFTER INSERT OR UPDATE OF candidacy_status, election_id, politician_id, region_id, election_type, cand_no, party_id, party_basis, withdrawn_after_filing OR DELETE
+  ON politician_elections FOR EACH ROW EXECUTE FUNCTION dispatch_gap_on_change();
 
--- ------------------------------------------------------------
--- 9. 排程：投票日前後的時間翻轉（UTC 00:06 與 16:06；分鐘避開整十、:29、:35 與奇數分鐘）
--- ------------------------------------------------------------
-DO $$
-BEGIN
-  IF to_regnamespace('cron') IS NOT NULL AND to_regprocedure('cron.schedule(text,text,text)') IS NOT NULL THEN
-    EXECUTE $q$SELECT cron.unschedule('dispatch-gap-date-flip-roster') WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'dispatch-gap-date-flip-roster')$q$;
-    EXECUTE $q$SELECT cron.schedule('dispatch-gap-date-flip-roster', '6 0,16 * * *', 'SELECT dispatch_gap_date_flip_roster();')$q$;
-  END IF;
-END $$;
+DROP TRIGGER IF EXISTS trg_dispatch_gap_politicians ON politicians;
+CREATE TRIGGER trg_dispatch_gap_politicians
+  AFTER UPDATE OF name, region, merged_into, birth_year, party
+  ON politicians FOR EACH ROW EXECUTE FUNCTION dispatch_gap_on_change();
 
--- ------------------------------------------------------------
--- 10. 自我檢查：六支臂是 shadow（第 1 期三支加本期三支）、按鍵版都在且已登記、觸發器都掛上、沒有 live
--- ------------------------------------------------------------
+DROP TRIGGER IF EXISTS trg_dispatch_gap_contributions ON contributions;
+CREATE TRIGGER trg_dispatch_gap_contributions
+  AFTER INSERT OR UPDATE OF status, applied_policy_id
+  ON contributions FOR EACH ROW
+  WHEN (NEW.contribution_type IN ('policy', 'policy_subtopics', 'cand_numbers', 'candidacy', 'election_results', 'reassign_candidacy'))
+  EXECUTE FUNCTION dispatch_gap_on_change();
+
+-- 觸發器計數（只讀 pg_catalog，不取任何表鎖）：第 1 期 12 支＋本期新增 10 支，三支重建不增加
 DO $$
 DECLARE
   v_n INTEGER;
 BEGIN
-  IF (SELECT count(*) FROM dispatch_gap_arms WHERE mode = 'shadow') <> 6
-     OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'shadow'
-                 AND arm NOT IN ('legacy', 'mismatch', 'issue_too_broad', 'roster_unit_findings', 'roster_gap_units', 'ballot_numbers'))
-     OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'live') THEN
-    RAISE EXCEPTION '第 2 期 PR-1：只有第 1 期三支加 roster_unit_findings、roster_gap_units、ballot_numbers 可以是 shadow，不能有 live';
-  END IF;
-  IF EXISTS (SELECT 1 FROM dispatch_gap_arm_keys k WHERE k.arm IN ('roster_unit_findings', 'roster_gap_units', 'ballot_numbers')
-              AND (k.recompute_fn IS NULL OR to_regprocedure(k.recompute_fn) IS NULL)) THEN
-    RAISE EXCEPTION '第 2 期 PR-1：三支名單族臂的按鍵版沒有登記或函式不存在';
-  END IF;
   SELECT count(*) INTO v_n FROM pg_trigger WHERE tgname LIKE 'trg\_dispatch\_gap\_%' AND NOT tgisinternal;
   IF v_n <> 22 THEN
     RAISE EXCEPTION '第 2 期 PR-1：預期共掛 22 支觸發器（第 1 期 12 支＋本期新增 10 支，三支重建不增加），實際 %', v_n;
-  END IF;
-  IF NOT dispatch_gap_events_enabled() OR NOT dispatch_gap_seed_drain_enabled() THEN
-    RAISE EXCEPTION '第 2 期 PR-1：事件與 seed drain 兩個開關都要是開';
   END IF;
 END $$;
 
