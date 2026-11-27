@@ -125,8 +125,10 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   // 只合併讀取：判斷順序、回應文字與寫入都沒動。派工綁定的時限：SQL 端寫死 7 天，與這裡的 VERIFY_BINDING_DAYS 同一個值（守門：dispatch-records-purge.test.ts）。
   // 只認派出後 VERIFY_BINDING_DAYS 天內的紀錄（派工紀錄會定時清掉更舊的，#485；時限明寫，清理前後結果才一樣）
   const bindingSince = new Date(Date.now() - VERIFY_BINDING_DAYS * 86_400_000).toISOString();
-  const pre = await readVerifyPre(supabase, {
+  // quota_limit：額度已滿時 RPC 只回計數（partial），不再讀被驗貢獻與最多 1000 張票，429 路徑不放大讀取（舊流程也是額度超限先回 429）
+  let pre = await readVerifyPre(supabase, {
     contribution_id: input.contribution_id,
+    quota_limit: vq.limit,
     quota_column: vq.column,
     quota_value: vq.value,
     window_start: windowStart.toISOString(),
@@ -149,6 +151,8 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   if (usedNow >= vq.limit) {
     return { status: 429, body: { success: false, error: "rate_limited", message: `${vq.scope}每個時段最多驗 ${vq.limit} 筆`, retry_after: quotaWindowEnd().toISOString(), ...quotaWindowFields() } };
   }
+  // 額度數到上限、但一人一包重算後沒滿：RPC 只回了計數（partial），其餘讀取退回原本的逐項查詢
+  if (pre?.partial) pre = null;
 
   let contribution;
   if (pre) contribution = pre.contribution;

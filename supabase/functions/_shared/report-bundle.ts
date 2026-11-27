@@ -35,6 +35,8 @@ async function callBundle(supabase: SupabaseLike, kind: string, params: Record<s
 
 export interface VerifyPreParams {
   contribution_id: string;
+  /** 額度上限：計數 ≥ 上限時 RPC 只回計數（partial），不再讀貢獻與票，429 路徑不放大讀取 */
+  quota_limit: number;
   quota_column: "actor_id" | "verifier_ip_hash";
   quota_value: string;
   window_start: string;
@@ -46,6 +48,8 @@ export interface VerifyPreParams {
 
 export interface VerifyPre {
   used: number;
+  /** true＝額度已滿，只有 used 可信，其餘欄位是空值 */
+  partial?: boolean;
   contribution: Row | null;
   original: Row | null;
   dispatched: Row[];
@@ -101,10 +105,15 @@ export interface ContributePreParams {
   /** 這批的 task_id（含 auto:），用來查同 IP 排隊中的貢獻 */
   inflight_task_ids: string[];
   ip_hash: string;
+  /** 額度上限與這批件數：計數 ＋ 件數 > 上限時 RPC 只回計數（partial），不再讀任務與排隊中的貢獻 */
+  quota_limit: number;
+  batch_size: number;
 }
 
 export interface ContributePre {
   used: number;
+  /** true＝額度放不下這批，只有 used 可信 */
+  partial?: boolean;
   tasks: Array<{ id: string; task_type: string; multi_person: boolean; target: unknown }>;
   in_flight: string[];
 }

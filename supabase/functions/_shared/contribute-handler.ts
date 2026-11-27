@@ -352,6 +352,8 @@ export async function handleContribute(
     task_ids: taskUuidsOf(validation.items),
     inflight_task_ids: [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))],
     ip_hash: ipHash,
+    quota_limit: sq.limit,
+    batch_size: validation.items.length,
   });
   let usedToday: number | null;
   if (pre) usedToday = pre.used;

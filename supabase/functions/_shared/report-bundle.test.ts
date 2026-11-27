@@ -155,6 +155,40 @@ Deno.test("verify 計數守門：典型成功路徑新路徑的 REST 次數 ≤ 
   assertEquals(rep.calls.filter((x) => x.target === "contribution_votes" && x.method === "GET").length, 0, "自己上一票的備註跟著 RPC 一起回，不再另查");
 });
 
+Deno.test("額度已滿：429 路徑不放大讀取——RPC 只回計數，不讀被驗貢獻與票；verify、contribute 都一樣，回應與落庫與舊路徑逐 byte 相同", async () => {
+  const quotaFull = VERIFY_CASES.find((x) => x.name.includes("額度用完"))!;
+  const v = await run(await freshDb(quotaFull.setup), "new", quotaFull.body);
+  const vl = await run(await freshDb(quotaFull.setup), "legacy", quotaFull.body);
+  assertEquals(v.status, 429);
+  assertEquals(v.text, vl.text);
+  const heavy = (r: Outcome) => r.calls.filter((x) => ["contributions", "verify_dispatches"].includes(x.target));
+  assertEquals(heavy(v).length, 0, `verify 429：不讀被驗貢獻與派工紀錄（${v.calls.map((x) => x.target).join(",")}）`);
+  // contribution_votes 只剩額度到上限時「一人一包」重算（adjustedVerifyUsed，原本就有）的那一次
+  assertEquals(v.calls.filter((x) => x.target === "contribution_votes").length, 1, "只有一人一包的重算，沒有 1000 張票的讀取");
+  assertEquals(v.calls.filter((x) => x.target === "rpc/report_context_bundle").length, 1, "只呼叫一次 RPC");
+  // RPC 本身：額度滿時回 partial 與空值
+  const db = await freshDb();
+  const ws = new Date(Date.now() - 2 * 3600_000).toISOString();
+  const pre = (await db.query<{ r: Record<string, unknown> }>(`SELECT report_context_bundle('verify_pre', $1::jsonb) AS r`,
+    [JSON.stringify({ contribution_id: ID(2), quota_limit: 1, quota_column: "verifier_ip_hash", quota_value: "ip-bob", window_start: ws, binding: null, prev: null })])).rows[0].r;
+  assertEquals(pre.partial, true);
+  assertEquals([pre.contribution, pre.existing], [null, []]);
+  const notFull = (await db.query<{ r: Record<string, unknown> }>(`SELECT report_context_bundle('verify_pre', $1::jsonb) AS r`,
+    [JSON.stringify({ contribution_id: ID(2), quota_limit: 2, quota_column: "verifier_ip_hash", quota_value: "ip-bob", window_start: ws, binding: null, prev: null })])).rows[0].r;
+  assertEquals(notFull.partial, undefined, "沒滿就照常讀");
+  assert(notFull.contribution !== null);
+  const cFull = CONTRIBUTE_CASES.find((x) => x.name.includes("額度用完"))!;
+  const c = await run(await freshDb(cFull.setup), "new", cFull.body);
+  const cl = await run(await freshDb(cFull.setup), "legacy", cFull.body);
+  assertEquals(c.status, 429);
+  assertEquals(c.text, cl.text);
+  assertEquals(c.contributions, cl.contributions);
+  assertEquals(c.calls.filter((x) => x.target === "contribution_tasks").length, 0);
+  const cpre = (await db.query<{ r: Record<string, unknown> }>(`SELECT report_context_bundle('contribute_pre', $1::jsonb) AS r`,
+    [JSON.stringify({ quota_limit: 3, batch_size: 1, quota_column: "contributor_ip_hash", quota_value: "ip-alice", window_start: new Date(Date.now() - 10 * 86400_000).toISOString(), task_ids: [TASK_Q], inflight_task_ids: [], ip_hash: "ip-alice" })])).rows[0].r;
+  assertEquals([cpre.partial, cpre.tasks], [true, []], "3 筆＋這批 1 筆 > 3：只回計數");
+});
+
 Deno.test("verify：RPC 失敗就退回舊路徑（函式不存在、形狀不對、回 null、缺欄位），輸出與落庫相同並 console.warn", async () => {
   const c = VERIFY_CASES[0];
   const legacy = await run(await freshDb(c.setup), "legacy", c.body);

@@ -12,7 +12,8 @@
 --
 -- 2. report_context_bundle(p_kind text, p_params jsonb)：report 的讀取端。只合併「讀」，寫入一個字沒動。
 --    p_kind＝verify_pre：驗證投票前要讀的（額度計數、被驗貢獻、裁決的原貢獻、派工綁定、既有票、自己上一票的備註）
---      p_params：contribution_id, quota_column（actor_id｜verifier_ip_hash）, quota_value, window_start,
+--      額度已滿（quota_limit 有給、計數 ≥ 上限）時只回 {used, partial:true} 加空值，不讀被驗貢獻與票；contribute_pre 同理（計數＋batch_size > quota_limit）
+--      p_params：contribution_id, quota_limit, quota_column（actor_id｜verifier_ip_hash）, quota_value, window_start,
 --                want_original（貢獻是裁決時 TS 端不知道型別，所以 SQL 端自己判斷，這個旗標固定 true）,
 --                binding（{ip_hash}，null＝不查；時限寫死 7 天＝VERIFY_BINDING_DAYS）, prev（{column: actor_id｜agent_name, value}，null＝不查）
 --      回傳：used, contribution（null＝查無）, original, dispatched（0 或 1 列）,
@@ -219,6 +220,11 @@ BEGIN
     ELSE
       RAISE EXCEPTION 'report_context_bundle: bad quota_column %', v_col USING ERRCODE = '22023';
     END IF;
+    -- 額度已滿：只回計數，不讀被驗貢獻與最多 1000 張票（舊流程也是額度超限先回 429；TS 端 partial 時若一人一包重算後沒滿，會退回逐項查詢）
+    IF (p_params->>'quota_limit') IS NOT NULL AND v_used >= (p_params->>'quota_limit')::bigint THEN
+      RETURN jsonb_build_object('used', v_used, 'partial', true, 'contribution', 'null'::jsonb, 'original', 'null'::jsonb,
+        'dispatched', '[]'::jsonb, 'existing', '[]'::jsonb, 'prev', 'null'::jsonb);
+    END IF;
 
     SELECT to_jsonb(r) INTO v_contribution FROM (
       SELECT c.id, c.status, c.task_id, c.contribution_type, c.payload, c.source_urls, c.agent_name, c.contributor_ip_hash, c.actor_id,
@@ -286,6 +292,10 @@ BEGIN
       SELECT count(*) INTO v_used FROM contributions c WHERE c.contributor_ip_hash = v_val AND c.created_at >= v_ws;
     ELSE
       RAISE EXCEPTION 'report_context_bundle: bad quota_column %', v_col USING ERRCODE = '22023';
+    END IF;
+    -- 這批放不下：只回計數（呼叫端必定回 429，不會用到任務與排隊中的資料）
+    IF (p_params->>'quota_limit') IS NOT NULL AND v_used + COALESCE((p_params->>'batch_size')::bigint, 0) > (p_params->>'quota_limit')::bigint THEN
+      RETURN jsonb_build_object('used', v_used, 'partial', true, 'tasks', '[]'::jsonb, 'in_flight', '[]'::jsonb);
     END IF;
 
     SELECT COALESCE(array_agg(x::uuid), '{}'::uuid[]) INTO v_task_ids
