@@ -64,6 +64,8 @@ pnpm deploy:functions next tasks report   # 版本順序不對會直接擋下
 
 **刪欄位、改欄位名、改 SQL 函式簽名的 migration 要分兩次上**：CI 是先 `db push` 再部署函式，中間那幾分鐘舊函式碰到新 schema 會炸。第一次只加新的（新欄位、新函式），函式改用新的並上線後，第二次才刪舊的。（H-主線 09-21 在 PR #142 登記的未解風險，09-25 補進這裡。）
 
+**CI 的 `db push` 避開 seed 窗口並在鎖超時時重試（2026-11-27，`scripts/ci-db-push.sh`，測試 `bash scripts/ci-db-push.spec.sh`）**：pg_cron 的 `seed-auto-task-queue-10min` 每逢 UTC :x0 分跑 60～120 秒、對多張表持有 AccessShare 鎖，migration 的 DROP／CREATE TRIGGER 等不到 AccessExclusive 會被 lock_timeout 砍掉（11-27 13:40 部署第 53 句 `55P03`，整支 migration 回滾）。腳本在 UTC 分鐘數 % 10 為 0～2 時先等到第 3 分鐘；`db push` 失敗且輸出含 `55P03` 或 `lock timeout` 時最多重試 3 次（每次再避窗、至少等 20 秒），其他錯誤不重試。要改 seed 的排程分鐘或單輪時長，要連這支腳本的窗口一起看。
+
 **手動跑 `db push`／`functions deploy` 時，不要接 `| tail`／`| grep` 來判斷成功**——管線的結束碼是最後一個指令的，失敗會被吃掉、印出來像成功。先把輸出寫檔、看結束碼（`$?`，或 `set -o pipefail`），再打端點或查 `supabase_migrations.schema_migrations` 驗一個可觀察值才說上線。2026-09-21 晚因此把一支沒套上的 migration 對外說成已上線；這條教訓當時只記在一條 session 的暫存筆記裡，兩任之後的接班者又用了同一個寫法。CI 的步驟失敗會紅，不受影響。
 
 ## 主線工作守則（2026-10，接手先讀）
