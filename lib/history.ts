@@ -88,15 +88,12 @@ export function tableLabel(name: string | null | undefined): string {
 
 export const ADJ_VERDICT_LABEL: Record<string, string> = { uphold: '維持原貢獻', reject: '原貢獻有誤' }
 
-function headers(): Record<string, string> {
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
-  return key ? { apikey: key, Authorization: `Bearer ${key}` } : {}
-}
-
+// 刻意不帶 apikey／Authorization／Content-Type：history 是公開唯讀函式（verify_jwt=false、不讀這些標頭），
+// 只用簡單標頭的 GET 瀏覽器不會先發 OPTIONS 預檢，呼叫數減半。加任何自訂標頭都會讓預檢回來。
 export async function fetchHistory(target: HistoryTarget, id: string, opts: { limit?: number; cursor?: string | null; signal?: AbortSignal } = {}): Promise<HistoryResponse> {
   const params = new URLSearchParams({ target, id, limit: String(opts.limit ?? 20) })
   if (opts.cursor) params.set('cursor', opts.cursor)
-  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/history?${params}`, { headers: headers(), signal: opts.signal })
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/history?${params}`, { signal: opts.signal })
   const body = await res.json().catch(() => null)
   if (!res.ok || !body?.success) throw new Error(body?.message || body?.error || `HTTP ${res.status}`)
   return body as HistoryResponse
