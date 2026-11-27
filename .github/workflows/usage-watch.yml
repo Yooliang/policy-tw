@@ -48,7 +48,6 @@ jobs:
           mkdir -p usage
           : > usage/status.tsv
           REF=$(node -p "require('./.github/usage-watch.json').project_ref")
-          ORG=vkowjozlxtfochqomlga
           API="https://api.supabase.com/v1"
           START=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           END=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -61,24 +60,25 @@ jobs:
             echo "$name HTTP $code"
             [ "$code" = 200 ] || { head -c 300 "usage/$name.json"; echo; }
           }
-          logs() { # logs <名稱> <sql>
-            get "$1" "$API/projects/$REF/analytics/endpoints/logs.all" \
+          logs() { # logs <名稱> <sql>（logs.all 已下線，改打 analytics/endpoints/logs）
+            get "$1" "$API/projects/$REF/analytics/endpoints/logs" \
               --data-urlencode "sql=$2" --data-urlencode "iso_timestamp_start=$START" --data-urlencode "iso_timestamp_end=$END"
           }
           E="$API/projects/$REF/analytics/endpoints"
-          # 路徑 A：現成的函式統計端點
-          get functions.inv-stats "$E/functions.inv-stats" --data-urlencode "interval=1d"
-          get functions.combined-stats "$E/functions.combined-stats" --data-urlencode "interval=1d"
-          get functions.req-stats "$E/functions.req-stats" --data-urlencode "interval=1d"
-          # 路徑 B：Logs 端點（unified logs 語法）＋函式 id 對照
+          # 函式 id 對照（也是備援逐函式查詢的清單）
           get functions-list "$API/projects/$REF/functions"
+          # 主要來源：Logs 端點（unified logs 語法）。回 4xx 時 body 前 300 字會進 job summary
           logs functions-logs "select log_attributes['function_id'] as function_id, count(*) as c from logs where source = 'function_edge_logs' group by function_id order by c desc limit 30"
           # 閘道 24h 總請求與前 15 路徑
           logs gateway-paths "select log_attributes['request.path'] as p, count(*) as c from logs where source = 'edge_logs' group by p order by c desc limit 15"
           logs gateway-total "select count(*) as c from logs where source = 'edge_logs'"
-          # 組織本週期用量
-          get org-usage "$API/organizations/$ORG/usage"
-          get org-billing-usage "$API/organizations/$ORG/billing/usage"
+          # 備援來源：combined-stats 逐函式（interval 與 function_id 都必填），存 usage/fn-<slug>.json
+          node -p "const j=require('./usage/functions-list.json'); (Array.isArray(j)?j:[]).filter(f=>f&&f.id&&f.slug).map(f=>f.id+' '+f.slug).join('\n')" > usage/fn-list.txt || true
+          while read -r fid fslug; do
+            [ -n "$fid" ] || continue
+            safe=$(printf '%s' "$fslug" | tr -c 'A-Za-z0-9_\n-' '_')
+            get "fn-$safe" "$E/functions.combined-stats" --data-urlencode "interval=1day" --data-urlencode "function_id=$fid"
+          done < usage/fn-list.txt
           get project-billing-addons "$API/projects/$REF/billing/addons"
           exit 0
       - name: 摘要與門檻

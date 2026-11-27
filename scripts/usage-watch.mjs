@@ -6,6 +6,9 @@ import { fileURLToPath } from 'node:url'
 
 const COUNT_KEYS = ['count', 'c', 'invocations', 'total_invocations', 'request_count', 'total', 'total_count']
 const NAME_KEYS = ['function_name', 'slug', 'name', 'function_id', 'id']
+const LOGS_NAMES = ['functions-logs', 'gateway-paths', 'gateway-total']
+const BODY_LIMIT = 300 // 錯誤體放進 errors[] 的字數上限
+const DETAIL_LIMIT = 3 // 逐函式檔的錯誤最多各列幾筆，其餘只記數量
 
 const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null)
 const rowsOf = (j) => {
@@ -18,6 +21,8 @@ const pickCount = (row) => {
   for (const k of COUNT_KEYS) if (row?.[k] != null && num(row[k]) != null) return num(row[k])
   return null
 }
+// 與 workflow 的 tr 一致：檔名只留 英數 _ -
+export const safeName = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, '_')
 
 // 把「函式 id → 名稱」對照表（/functions 清單）做成 Map
 export function functionIdMap(list) {
@@ -44,6 +49,21 @@ export function functionCounts(rows, idMap = new Map()) {
   return [...acc].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
 }
 
+// combined-stats 單一函式的回應 → 24h 呼叫數。形狀不確定，所以寬鬆：
+// 結果陣列各列取第一個像呼叫數的數值欄位後加總；陣列是空的算 0；找不到任何數值欄位回 null
+export function combinedStatsCount(json) {
+  const rows = rowsOf(json)
+  if (!rows) return null
+  if (rows.length === 0) return 0
+  let sum = 0
+  let found = false
+  for (const r of rows) {
+    const c = pickCount(r)
+    if (c != null) { sum += c; found = true }
+  }
+  return found ? sum : null
+}
+
 export function gatewayPaths(rows) {
   if (!Array.isArray(rows)) return null
   const out = []
@@ -55,30 +75,56 @@ export function gatewayPaths(rows) {
   return out.length ? out.sort((a, b) => b.count - a.count) : null
 }
 
-// dir 內的檔：status.tsv（每行「名稱<TAB>HTTP 狀態」）與各探測回應 <名稱>.json
-export function buildSummary(read, statuses, nowIso) {
+// 清單前幾筆列出細節，其餘合併成一句數量
+function limitedLines(items, more) {
+  const head = items.slice(0, DETAIL_LIMIT)
+  return items.length > DETAIL_LIMIT ? [...head, more(items.length - DETAIL_LIMIT)] : head
+}
+
+// read(檔名)：讀 JSON（失敗回 null）；readText(檔名)：讀原文（失敗回 null），只用來把錯誤體放進 errors
+export function buildSummary(read, statuses, nowIso, readText = () => null) {
   const errors = []
-  for (const [name, code] of Object.entries(statuses)) if (code !== '200') errors.push(`${name} HTTP ${code}`)
+  const bodyOf = (file) => (readText(file) ?? '').replace(/\s+/g, ' ').trim().slice(0, BODY_LIMIT)
+  const fnFailed = []
+  for (const [name, code] of Object.entries(statuses)) {
+    if (code === '200') continue
+    const body = bodyOf(`${name}.json`)
+    const line = `${name} HTTP ${code}${body && (LOGS_NAMES.includes(name) || name.startsWith('fn-')) ? `：${body}` : ''}`
+    if (name.startsWith('fn-')) fnFailed.push(line)
+    else errors.push(line)
+  }
+  errors.push(...limitedLines(fnFailed, (n) => `另有 ${n} 支函式的 combined-stats 非 200`))
 
   const idMap = functionIdMap(read('functions-list.json'))
   let functions = null
   let functionsSource = null
-  for (const n of ['functions.inv-stats', 'functions.combined-stats', 'functions.req-stats', 'functions-logs']) {
-    if (statuses[n] !== '200') continue
-    const got = functionCounts(rowsOf(read(`${n}.json`)), idMap)
-    if (got) { functions = got; functionsSource = n; break }
+
+  // 優先：Logs 的 function_id 排行
+  if (statuses['functions-logs'] === '200') {
+    const got = functionCounts(rowsOf(read('functions-logs.json')), idMap)
+    if (got) { functions = got; functionsSource = 'logs' }
+  }
+
+  // 備援：combined-stats 逐函式（interval=1day、function_id）
+  if (!functions) {
+    const list = rowsOf(read('functions-list.json')) ?? []
+    const acc = []
+    const unknown = []
+    for (const f of list) {
+      if (!f?.id || !f?.slug) continue
+      const file = `fn-${safeName(f.slug)}.json`
+      if (statuses[file.slice(0, -5)] !== '200') continue
+      const count = combinedStatsCount(read(file))
+      if (count == null) unknown.push(`${file.slice(0, -5)} 回應格式不明：${bodyOf(file)}`)
+      else acc.push({ name: String(f.slug), count })
+    }
+    errors.push(...limitedLines(unknown, (n) => `另有 ${n} 支函式的 combined-stats 回應格式不明`))
+    if (acc.length) { functions = acc.sort((a, b) => b.count - a.count); functionsSource = 'combined-stats' }
   }
 
   const gwRows = rowsOf(read('gateway-total.json'))
   const gwTotal = gwRows?.[0] ? pickCount(gwRows[0]) : null
   const paths = gatewayPaths(rowsOf(read('gateway-paths.json')))
-
-  let orgCycle = null
-  for (const n of ['org-usage', 'org-billing-usage', 'project-billing-addons']) {
-    if (statuses[n] !== '200') continue
-    const data = read(`${n}.json`)
-    if (data) { orgCycle = { source: n, data }; break }
-  }
 
   return {
     at: nowIso,
@@ -87,7 +133,7 @@ export function buildSummary(read, statuses, nowIso) {
     functions_24h_total: functions ? functions.reduce((a, f) => a + f.count, 0) : null,
     gateway_24h_total: gwTotal,
     gateway_top_paths: (paths ?? []).slice(0, 15),
-    org_cycle: orgCycle,
+    org_cycle: null, // 組織週期用量沒有可用端點，固定 null，由巡檢到後台看
     errors,
   }
 }
@@ -109,6 +155,7 @@ function main() {
   const out = []
   const log = (s) => { console.log(s); out.push(s) }
   const read = (f) => { try { return JSON.parse(readFileSync(join(dir, f), 'utf8')) } catch { return null } }
+  const readText = (f) => { try { return readFileSync(join(dir, f), 'utf8') } catch { return null } }
 
   const breaches = []
 
@@ -130,8 +177,8 @@ function main() {
   const total = read('usage.api-requests-count.json')
   log(`usage.api-requests-count（只記錄，時間窗不明）：${total?.result?.[0]?.count ?? JSON.stringify(total)?.slice(0, 200)}`)
 
-  // Edge Function 24h 呼叫、閘道請求、組織週期用量
-  const summary = buildSummary(read, readStatuses(dir), new Date().toISOString())
+  // Edge Function 24h 呼叫、閘道請求
+  const summary = buildSummary(read, readStatuses(dir), new Date().toISOString(), readText)
   writeFileSync(join(dir, 'summary.json'), JSON.stringify(summary, null, 2))
   out.push('')
   if (summary.functions_24h_total == null) {
@@ -144,7 +191,7 @@ function main() {
   }
   log(summary.gateway_24h_total == null ? '閘道 24h 請求：這次沒有取得' : `閘道 24h 總請求 ${summary.gateway_24h_total}`)
   for (const p of summary.gateway_top_paths.slice(0, 5)) log(`  ${p.path}  ${p.count}`)
-  log(summary.org_cycle ? `組織本週期用量：已取得（${summary.org_cycle.source}），見 summary.json` : '組織本週期用量：需到後台看')
+  log('組織本週期用量：需到後台看')
   if (summary.errors.length) log(`端點狀況：${summary.errors.join('；')}`)
 
   log(`門檻檢查：${breaches.length ? breaches.join('；') : '未超過'}（alert=${cfg.alert}）`)
