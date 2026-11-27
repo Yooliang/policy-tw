@@ -1,5 +1,5 @@
 /**
- * cec-sync 結尾的派工缺口入列（第 2 期 PR-2，migration 20261127053900）守門。
+ * cec-sync 結尾的派工缺口入列（第 2 期 PR-2，migration 20261127080000）守門。
  * 純函式與接線：去重、分批、失敗不丟錯；cec-sync 在「先刪後寫」之後收集單位、迴圈結束後只呼叫一次；rpc 名稱與遷移裡的 SQL 函式同名。
  */
 import { assert, assertEquals } from "jsr:@std/assert@1";
@@ -56,7 +56,7 @@ Deno.test("失敗不丟錯（名單已經寫好了）：rpc 回錯誤、或連�
 });
 
 Deno.test("接線：rpc 名稱與遷移裡的 SQL 函式同名、只給 service_role；cec-sync 先刪後寫之後收集單位、迴圈結束後只呼叫一次、失敗只警告", async () => {
-  const mig = await Deno.readTextFile(new URL("../../migrations/20261127053900_dispatch_gaps_phase2b.sql", import.meta.url));
+  const mig = await Deno.readTextFile(new URL("../../migrations/20261127080000_dispatch_gaps_phase2b.sql", import.meta.url));
   assert(mig.includes(`CREATE OR REPLACE FUNCTION ${GAP_RPC_NAME}(p_units JSONB)`));
   assert(mig.includes(`GRANT EXECUTE ON FUNCTION ${GAP_RPC_NAME}(JSONB) TO service_role;`));
   assert(mig.includes(`REVOKE ALL ON FUNCTION ${GAP_RPC_NAME}(JSONB) FROM PUBLIC, anon, authenticated;`));
