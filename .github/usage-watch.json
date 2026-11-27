@@ -4,6 +4,7 @@
   "project_ref": "wiiqoaytpqvegtknlbue",
   "hourly_rest_requests_max": 120000,
   "minute_rest_requests_max": 6000,
+  "daily_function_invocations_max": 60000,
   "alert_repo": "Yooliang/policy-tw",
   "alert_label": "ops"
 }

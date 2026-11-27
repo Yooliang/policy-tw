@@ -48,3 +48,6 @@ deno.lock
 
 # 參選地圖座標產生器的邊界資料暫存（scripts/build-tw-tile-grid.ts）
 scripts/.cache/
+
+# 用量監看 artifact 的本機下載
+.tmp-usage/
