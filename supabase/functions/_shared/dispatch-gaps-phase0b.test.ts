@@ -604,3 +604,62 @@ Deno.test("J5 遷移檔：新增欄位可 NULL、檔頭有回滾、時間戳大�
   assert(SAMPLE_MIG > "20261126193000_dispatch_gaps_phase1a.sql");
   assertEquals([...Deno.readDirSync(MIGRATIONS)].filter((e) => e.name.startsWith("20261127044115")).length, 1);
 });
+
+// ───────────────────────── K 每小時比對對 live 臂比對並修正（20261127061500）─────────────────────────
+const HOURLY_MIG = "20261127061500_dispatch_gap_hourly_apply_live.sql";
+const hourlyMig = await read(HOURLY_MIG);
+
+async function hourlyDb(): Promise<PGlite> {
+  const db = await freshDb();
+  await db.exec(sampleMig);
+  await db.exec(hourlyMig);
+  await db.exec(SEED_ROWS);
+  await db.query("SELECT dispatch_gap_set_mode('legacy', 'shadow')");
+  await db.query("SELECT dispatch_gap_set_mode('mismatch', 'shadow')");
+  await db.query("SELECT * FROM dispatch_gap_reconcile_all(ARRAY['legacy','mismatch'])"); // 常駐表補成與即時輸出一致
+  await db.query("SELECT dispatch_gap_set_mode('legacy', 'live')");
+  await db.exec("DELETE FROM dispatch_gap_reconcile_runs");
+  return db;
+}
+
+Deno.test("K1 live 臂每小時比對補開漏列（mode＝hourly、applied）；shadow 臂只記錄不補（mode＝shadow）", async () => {
+  const db = await hourlyDb();
+  await db.exec(`DELETE FROM dispatch_gaps WHERE gap_key = '${LEGACY_1}'`); // live 臂少一列
+  await db.exec(`DELETE FROM dispatch_gaps WHERE arm = 'mismatch'`);          // shadow 臂少一列
+  const before = await ints(db, "SELECT count(*)::int AS n FROM task_dispatches").catch(() => 0);
+  const rs = await rows(db, "SELECT * FROM dispatch_gap_shadow_compare(ARRAY['legacy','mismatch'], '0 seconds') ORDER BY arm");
+  const legacy = rs.find((r) => r.arm === "legacy")!;
+  const mismatch = rs.find((r) => r.arm === "mismatch")!;
+  assertEquals([legacy.mode, legacy.applied, Number(legacy.missing)], ["hourly", true, 1]);
+  assertEquals([mismatch.mode, mismatch.applied, Number(mismatch.missing)], ["shadow", false, 1]);
+  assertEquals(await ints(db, "SELECT count(*)::int AS n FROM dispatch_gaps WHERE arm = 'legacy' AND closed_at IS NULL"), 2, "live 臂已補回");
+  assertEquals(await ints(db, "SELECT count(*)::int AS n FROM dispatch_gaps WHERE arm = 'mismatch'"), 0, "shadow 臂不補");
+  assertEquals((await rows(db, "SELECT mode, applied FROM dispatch_gap_reconcile_runs ORDER BY arm")).map((r) => [r.mode, r.applied]), [["hourly", true], ["shadow", false]]);
+  // 再比一次：live 臂已一致，不再 apply
+  const again = (await rows(db, "SELECT * FROM dispatch_gap_shadow_compare(ARRAY['legacy'], '0 seconds')"))[0];
+  assertEquals([again.mode, again.applied, Number(again.missing)], ["hourly", false, 0]);
+  assertEquals(await ints(db, "SELECT count(*)::int AS n FROM task_dispatches").catch(() => 0), before, "不碰派工佇列");
+});
+
+Deno.test("K2 live 臂漏關也修正（extra）", async () => {
+  const db = await hourlyDb();
+  await db.exec(`DELETE FROM fake_rows WHERE task_id = '${LEGACY_2}'`); // 即時輸出少一列＝常駐表多一列
+  const run = (await rows(db, "SELECT * FROM dispatch_gap_shadow_compare(ARRAY['legacy'], '0 seconds')"))[0];
+  assertEquals([Number(run.extra), run.applied], [1, true]);
+  assertEquals(await ints(db, `SELECT count(*)::int AS n FROM dispatch_gaps WHERE gap_key = '${LEGACY_2}' AND closed_at IS NULL`), 0);
+});
+
+Deno.test("K3 文字層：最新 shadow_compare 定義含 = 'live'，mode 約束收 hourly，檔頭有理由與回滾，檔名唯一且時間戳最新", async () => {
+  const names = [...Deno.readDirSync(MIGRATIONS)].map((e) => e.name).filter((n) => n.endsWith(".sql")).sort();
+  let latest = "";
+  for (const n of names) {
+    if (/FUNCTION\s+dispatch_gap_shadow_compare\s*\(/i.test(noComments(await read(n)))) latest = n;
+  }
+  assertEquals(latest, HOURLY_MIG, "最新的 shadow_compare 定義要是這支");
+  const code = noComments(hourlyMig);
+  assert(/gap_arm_mode\(v_arm\)\s*=\s*'live'/.test(code));
+  assert(/'hourly'/.test(code) && /CHECK \(mode IN \('reconcile', 'shadow', 'hourly'\)\)/.test(code));
+  assert(/回滾/.test(hourlyMig) && /漏事件/.test(hourlyMig));
+  assert(HOURLY_MIG > "20261127052000_agy_login_realtime_broadcast.sql");
+  assertEquals(names.filter((n) => n.startsWith("20261127061500")).length, 1);
+});
