@@ -376,6 +376,26 @@ Deno.test("F2 cron 呼叫的函式存在；雙軌比對走 shadow_run（全 off 
   for (const n of cronJobs().keys()) assert(code.includes(`cron.unschedule('${n}')`), `${n} 缺 unschedule`);
 });
 
+Deno.test("F3 shadow-compare 最新排程是 :42（11-27 由 :48 搬走，:48 與四支 10 分鐘 job 同分鐘撞 startup timeout）", async () => {
+  const MOVE = "20261127060000_dispatch_gap_shadow_compare_minute.sql";
+  const move = noComments(await read(MOVE));
+  const m = move.match(/cron\.schedule\('dispatch-gap-shadow-compare-hourly', '([^']+)', '([^']+)'/);
+  assert(m, "新 migration 要重新排程 shadow-compare");
+  assertEquals(m[1], "42 * * * *");
+  assert(move.includes("cron.unschedule('dispatch-gap-shadow-compare-hourly')"), "要先解除舊排程");
+  // command 與原本一字不差
+  const old = noComments(mig).match(/cron\.schedule\('dispatch-gap-shadow-compare-hourly', '[^']+', '([^']+)'/);
+  assertEquals(m[2], old![1]);
+  // 目前已知的 shadow-compare 排程以時間戳最後一支為準
+  const files: string[] = [];
+  for await (const f of Deno.readDir(MIGRATIONS)) if (f.name.endsWith(".sql")) files.push(f.name);
+  let latest = "";
+  for (const f of files.sort()) {
+    if ((await read(f)).includes("cron.schedule('dispatch-gap-shadow-compare-hourly'")) latest = f;
+  }
+  assertEquals(latest, MOVE);
+});
+
 // ───────────────────────── G 暫存量測 ─────────────────────────
 Deno.test("G1 seed_arm_timings 多 temp_bytes 欄；程序每支臂與整張總表各寫一列 temp:<臂>", async () => {
   const db = await freshDb();
