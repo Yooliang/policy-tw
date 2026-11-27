@@ -370,9 +370,12 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PROJECT_REF: wiiqoaytpqvegtknlbue
+        # db push 交給 scripts/ci-db-push.sh：避開 pg_cron seed 排程的 :x0～:x2 窗口，
+        # 遇到鎖超時（55P03）自動重試 3 次。起因是 2026-11-27 13:40 UTC 的部署撞上 seed
+        # 持有的鎖，DROP TRIGGER 被 lock_timeout 砍掉、migration 整支回滾。
         run: |
           npx -y supabase@2 link --project-ref "$PROJECT_REF"
-          npx -y supabase@2 db push --linked
+          bash scripts/ci-db-push.sh
 
       # 重用 scripts/deploy-functions.mjs，不要在這裡另外寫一份部署邏輯：
       # 它原本就會在部署前比對線上 skill.md 版號跟 PROTOCOL_VERSION，這裡當多一層
