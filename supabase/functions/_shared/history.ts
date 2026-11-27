@@ -10,6 +10,7 @@ import { partyDisplayName } from "./party-alias.ts";
 import { loadSummaryLookup } from "./summary-lookup.ts";
 import { contributionScore, SCORE_COLUMNS } from "./contribution-score.ts";
 import { fetchSourceBriefs, primaryUrlOf, type SourceBrief, type SourceView, viewFromList, viewSources } from "./source-read.ts";
+import { BUNDLE_TARGETS, collectedFromBundle, type HistoryBundle, isHistoryBundle } from "./history-bundle.ts";
 
 // 代理交的 payload 可能把 id 寫成 "null"、"unknown"；不是 uuid 的不拿去查，否則整份履歷 400
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -393,8 +394,40 @@ async function contributionIdsFromEdits(supabase: SupabaseLike, target: HistoryT
   return { ids: [...new Set(edits.map((e) => e.contribution_id).filter((v): v is string => typeof v === "string"))], edits };
 }
 
-/** 碰 DB：把某對象的履歷資料全撈回來（分頁在 buildHistory 之後做） */
+/**
+ * 單一 RPC 帶回來的網站請求資料：collectHistory 拿到後記在這裡，同一個請求稍後的 collectWebRequests 直接取用，
+ * 不必再打一輪（history/index.ts 先後呼叫兩個函式、不傳資料，日本站複本有逐行比對，所以入口檔不動）。
+ * 以 client 物件為鍵、取用一次就刪，不會跨請求殘留。
+ */
+const pendingWebRequests = new WeakMap<object, Map<string, HistoryBundle["web_requests"]>>();
+
+/**
+ * 碰 DB：把某對象的履歷資料全撈回來（分頁在 buildHistory 之後做）。
+ * 先用 RPC history_bundle 一次撈齊（約 20 次內部 REST 降為 1 次）；RPC 回錯（例如 migration 還沒上、PGRST202）
+ * 或回的形狀不對，就退回原本的多次查詢，並 console.warn 一行。question 沒有做進 RPC。
+ */
 export async function collectHistory(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<HistoryData & { origin_row: Obj | null; election_notes: string[] }> {
+  if (BUNDLE_TARGETS.includes(target)) {
+    try {
+      const res = await supabase.rpc("history_bundle", { p_target: target, p_id: id, p_limit: HISTORY_MAX_LIMIT });
+      if (res.error) throw new Error(res.error.message ?? String(res.error));
+      if (!isHistoryBundle(res.data)) throw new Error("unexpected history_bundle shape");
+      const bundle = res.data;
+      if (supabase && typeof supabase === "object") {
+        const m = pendingWebRequests.get(supabase) ?? new Map<string, HistoryBundle["web_requests"]>();
+        m.set(`${target}:${id}`, bundle.web_requests);
+        pendingWebRequests.set(supabase, m);
+      }
+      return collectedFromBundle(bundle);
+    } catch (e) {
+      console.warn(`history_bundle 失敗，退回多次查詢：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  return await collectHistoryLegacy(supabase, target, id);
+}
+
+/** 舊路徑：多次查詢（約 20 次內部 REST）。RPC 退路與比對測試用 */
+export async function collectHistoryLegacy(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<HistoryData & { origin_row: Obj | null; election_notes: string[] }> {
   const direct = await contributionsForTarget(supabase, target, id);
   const viaEdits = await contributionIdsFromEdits(supabase, target, id);
   const known = new Set(direct.map((c) => c.id));
@@ -527,8 +560,20 @@ export function buildWebRequests(
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
-/** 碰 DB：某人物（或政見）被網站訪客請求查過的紀錄；其他對象（貢獻、提問）沒有 */
+/** 碰 DB：某人物（或政見）被網站訪客請求查過的紀錄；其他對象（貢獻、提問）沒有。單一 RPC 已帶回來的就直接用（不再打 REST） */
 export async function collectWebRequests(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<HistoryWebRequest[]> {
+  if (target !== "politician" && target !== "policy") return [];
+  const stash = supabase && typeof supabase === "object" ? pendingWebRequests.get(supabase) : undefined;
+  const hit = stash?.get(`${target}:${id}`);
+  if (hit) {
+    stash!.delete(`${target}:${id}`);
+    return buildWebRequests(hit.rows, new Set(hit.parked.map(String)), hit.reports as never);
+  }
+  return await collectWebRequestsLegacy(supabase, target, id);
+}
+
+/** 舊路徑：任務列、停放判斷（每個開著的任務一次 RPC）、掛在任務上的貢獻兩條查詢 */
+export async function collectWebRequestsLegacy(supabase: SupabaseLike, target: HistoryTarget, id: string): Promise<HistoryWebRequest[]> {
   if (target !== "politician" && target !== "policy") return [];
   const key = target === "policy" ? "target->>policy_id" : "target->>politician_id";
   const rows = ok<Array<{ id: string; task_type: string; status: string; created_at: string; closed_at: string | null }>>(

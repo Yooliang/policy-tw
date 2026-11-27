@@ -222,6 +222,14 @@
   3. **日本站複本。** `_shared/jp/history.ts` 沒有跟著改、`jp-history.test.ts` 逐行比對正見版，要連同處理（附錄 C）。
 - **守門測試：** ①`history-collect.test.ts`：同一份假資料（PGlite 建表）跑「舊的多次查詢路徑」與「RPC」，輸出 jsonb 逐欄相等，涵蓋 policy、politician、contribution、question 四種 target、無貢獻、有裁決、有還原的修改紀錄、有 correction。②查詢預算測試：`createFakeSupabase` 計數，`collectHistory` 在典型路徑 ≤ 3 次，加一次就紅（樣板見附錄 D）。
 
+**PR-1 已上（2026-11-27，migration `20261127073000_history_bundle_rpc.sql`，守門 `_shared/history-bundle.test.ts`）。** 與上面的設計不同的地方：
+- **一支 RPC，不拆兩支。** `history_bundle(p_target text, p_id text, p_limit int)` 回 jsonb，名稱對照也在 SQL 裡一次做完（規則同 `summary-lookup.ts`），所以政見／人物／單筆貢獻每次請求只打 1 次 REST（含網站請求）。回傳形狀：`contributions`、`votes`、`edits`、`adjudications`、`tasks`、`summary`（名稱對照原料）、`source_briefs`、`origin_row`、`election_notes`、`web_requests`（`rows`、`parked`、`reports`），各自對應原本各查詢的結果；組裝的純函式不動。
+- **question 對象不做進 RPC**，仍走多次查詢（量小）。`p_limit` 只夾 0～100 後原樣帶回，不影響撈取範圍（分頁在 `buildHistory` 之後，`total` 要看全部）。
+- **權限：`SECURITY INVOKER`，只給 `service_role`**（history 用 service role 讀；不開給 anon，避免繞過函式前的快取與參數檢查直接打資料庫）；Supabase 預設會把新函式開給 anon／authenticated，migration 明寫 `REVOKE`。
+- **舊路徑留著當退路。** RPC 回錯（`PGRST202`、例外、形狀不對）就退回多次查詢並 `console.warn`；舊函式 `collectHistoryLegacy`／`collectWebRequestsLegacy` 保留。**一週後另一支 PR 拆掉退路**（連同守門測試裡的「新舊逐 byte 相同」改成只測新路徑）。`history/index.ts` 沒動（日本站複本逐行比對）；網站請求的資料由 `collectHistory` 帶回後暫存在 client 上、`collectWebRequests` 取用一次。
+- **守門：** 三種 target 與無貢獻、找不到、分頁的整份回應 JSON 新舊逐 byte 相同；limit 邊界；RPC 失敗退回舊路徑；權限（PUBLIC／anon／authenticated 不行）；計數（新路徑 ≤ 2 次、舊路徑 ≥ 10 次；測試資料上舊路徑人物 26 次、政見 19 次，新路徑 1 次）。
+- **待上線後量：** 單次 RPC 耗時與 `statement_timeout`（8 秒）餘裕，用 `PREPARE` 加 `force_generic_plan` 在正式庫唯讀實測；欄位型別（`politician_elections.id`、`tracking_logs.policy_id` 等）依 migration 推得，沒在正式庫核對過，型別不符時 RPC 會回錯、自動退回舊路徑，不會壞頁面。
+
 ### 5.2 M2：contributions-feed 對應處理（第 1 期，量小）
 
 `contributions-feed/index.ts` 每次 2 次查詢加 `loadSummaryLookup`（第一輪加第二輪，3 到 7 次）加 `fetchSourceBriefs`（1 次），共約 6 到 10 次。把「名稱對照」與「出處摘要」併入 M1 的 `history_summary_lookup`／出處 RPC 共用。
