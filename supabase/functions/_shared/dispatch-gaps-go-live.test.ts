@@ -232,10 +232,16 @@ Deno.test("F1 遷移檔名唯一、時間戳大於 main 上最後一支（agy �
 
 Deno.test("F2 遷移：四支臂都先 reconcile（apply）再 set_mode live；沒有建立或取代任何函式、沒有排程與觸發器", () => {
   const code = noComments(mig);
-  assert(/ARRAY\['legacy', 'mismatch', 'issue_too_broad', 'ballot_numbers'\]/.test(code));
-  const rec = code.indexOf("dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds')");
-  const set = code.indexOf("dispatch_gap_set_mode(v_arm, 'live'");
-  assert(rec > 0 && set > rec, "要先對帳再切 live");
+  assert(/SET LOCAL work_mem = '16MB'/.test(code), "要放寬 work_mem");
+  // 四支臂各自一個 DO 段，每段先對帳（apply）再切 live
+  const blocks = code.split(/^DO \$\$/m).slice(1).filter((b) => b.includes("dispatch_gap_reconcile_arm"));
+  assertEquals(blocks.length, 4, "四支臂各一段");
+  assertEquals(blocks.map((b) => /v_arm\s+CONSTANT TEXT := '(\w+)'/.exec(b)?.[1]), FOUR);
+  for (const b of blocks) {
+    const rec = b.indexOf("dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds')");
+    const set = b.indexOf("dispatch_gap_set_mode(v_arm, 'live'");
+    assert(rec > 0 && set > rec, "每段要先對帳再切 live");
+  }
   assert(!/CREATE\s+(OR\s+REPLACE\s+)?FUNCTION/i.test(code), "只切模式，不動函式");
   assert(!/CREATE\s+TRIGGER|cron\.schedule|net\.http/i.test(code));
   assert(/statement_timeout/.test(code));

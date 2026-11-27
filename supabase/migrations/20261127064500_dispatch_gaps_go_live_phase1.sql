@@ -27,29 +27,73 @@
 --     所以交易內放寬逾時。
 
 SET LOCAL statement_timeout = '300s';
+SET LOCAL work_mem = '16MB';   -- 13:56 資料庫重啟疑似 migration 初始灌入吃記憶體：每支臂各自一段、各自一個語句，不堆成一個大查詢
 
+-- ── 一、legacy：先對齊、再切 live、再檢查開著的列數＝對帳當下即時筆數 ──
 DO $$
 DECLARE
-  v_arm  TEXT;
+  v_arm  CONSTANT TEXT := 'legacy';
   v_run  dispatch_gap_reconcile_runs;
   v_open BIGINT;
-  v_note TEXT;
 BEGIN
-  FOREACH v_arm IN ARRAY ARRAY['legacy', 'mismatch', 'issue_too_broad', 'ballot_numbers'] LOOP
-    -- ① 切之前先對齊（apply＝true，寬限 0 秒）
-    v_run := dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds');
+  v_run := dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds');
+  PERFORM dispatch_gap_set_mode(v_arm, 'live', '2026-11-27 老闆裁示直接切；回滾：dispatch_gap_set_mode(''legacy'',''shadow'')');
+  SELECT count(*) INTO v_open FROM dispatch_gaps g WHERE g.arm = v_arm AND g.closed_at IS NULL;
+  IF v_open <> v_run.live_count THEN
+    RAISE EXCEPTION '切 live 前對齊失敗：臂 % 常駐表開著 % 列，即時輸出 % 列', v_arm, v_open, v_run.live_count;
+  END IF;
+  RAISE NOTICE '切 live：臂 % 對齊前 missing=% extra=% changed=%，切換後開著 % 列', v_arm, v_run.missing, v_run.extra, v_run.changed, v_open;
+END
+$$;
 
-    -- ② 切 live
-    v_note := '2026-11-27 老闆裁示直接切；回滾：dispatch_gap_set_mode(''' || v_arm || ''',''shadow'')';
-    PERFORM dispatch_gap_set_mode(v_arm, 'live', v_note);
+-- ── 二、mismatch（最貴，約 8 秒）──
+DO $$
+DECLARE
+  v_arm  CONSTANT TEXT := 'mismatch';
+  v_run  dispatch_gap_reconcile_runs;
+  v_open BIGINT;
+BEGIN
+  v_run := dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds');
+  PERFORM dispatch_gap_set_mode(v_arm, 'live', '2026-11-27 老闆裁示直接切；回滾：dispatch_gap_set_mode(''mismatch'',''shadow'')');
+  SELECT count(*) INTO v_open FROM dispatch_gaps g WHERE g.arm = v_arm AND g.closed_at IS NULL;
+  IF v_open <> v_run.live_count THEN
+    RAISE EXCEPTION '切 live 前對齊失敗：臂 % 常駐表開著 % 列，即時輸出 % 列', v_arm, v_open, v_run.live_count;
+  END IF;
+  RAISE NOTICE '切 live：臂 % 對齊前 missing=% extra=% changed=%，切換後開著 % 列', v_arm, v_run.missing, v_run.extra, v_run.changed, v_open;
+END
+$$;
 
-    -- ③ 對齊結果：開著的列數必須等於對帳當下的即時筆數
-    SELECT count(*) INTO v_open FROM dispatch_gaps g WHERE g.arm = v_arm AND g.closed_at IS NULL;
-    IF v_open <> v_run.live_count THEN
-      RAISE EXCEPTION '切 live 前對齊失敗：臂 % 常駐表開著 % 列，即時輸出 % 列', v_arm, v_open, v_run.live_count;
-    END IF;
-    RAISE NOTICE '切 live：臂 % 對齊前 missing=% extra=% changed=%，切換後開著 % 列', v_arm, v_run.missing, v_run.extra, v_run.changed, v_open;
-  END LOOP;
+-- ── 三、issue_too_broad ──
+DO $$
+DECLARE
+  v_arm  CONSTANT TEXT := 'issue_too_broad';
+  v_run  dispatch_gap_reconcile_runs;
+  v_open BIGINT;
+BEGIN
+  v_run := dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds');
+  PERFORM dispatch_gap_set_mode(v_arm, 'live', '2026-11-27 老闆裁示直接切；回滾：dispatch_gap_set_mode(''issue_too_broad'',''shadow'')');
+  SELECT count(*) INTO v_open FROM dispatch_gaps g WHERE g.arm = v_arm AND g.closed_at IS NULL;
+  IF v_open <> v_run.live_count THEN
+    RAISE EXCEPTION '切 live 前對齊失敗：臂 % 常駐表開著 % 列，即時輸出 % 列', v_arm, v_open, v_run.live_count;
+  END IF;
+  RAISE NOTICE '切 live：臂 % 對齊前 missing=% extra=% changed=%，切換後開著 % 列', v_arm, v_run.missing, v_run.extra, v_run.changed, v_open;
+END
+$$;
+
+-- ── 四、ballot_numbers ──
+DO $$
+DECLARE
+  v_arm  CONSTANT TEXT := 'ballot_numbers';
+  v_run  dispatch_gap_reconcile_runs;
+  v_open BIGINT;
+BEGIN
+  v_run := dispatch_gap_reconcile_arm(v_arm, true, 'reconcile', '0 seconds');
+  PERFORM dispatch_gap_set_mode(v_arm, 'live', '2026-11-27 老闆裁示直接切；回滾：dispatch_gap_set_mode(''ballot_numbers'',''shadow'')');
+  SELECT count(*) INTO v_open FROM dispatch_gaps g WHERE g.arm = v_arm AND g.closed_at IS NULL;
+  IF v_open <> v_run.live_count THEN
+    RAISE EXCEPTION '切 live 前對齊失敗：臂 % 常駐表開著 % 列，即時輸出 % 列', v_arm, v_open, v_run.live_count;
+  END IF;
+  RAISE NOTICE '切 live：臂 % 對齊前 missing=% extra=% changed=%，切換後開著 % 列', v_arm, v_run.missing, v_run.extra, v_run.changed, v_open;
 END
 $$;
 
