@@ -20,7 +20,8 @@ import { fnText } from "./arms-pglite.ts";
 const readMig = async (n: string) => (await Deno.readTextFile(new URL(`../../migrations/${n}`, import.meta.url))).replace(/\r\n/g, "\n");
 const ISSUES_MIG = await readMig("20261031130000_issues_summary_page.sql");
 const SUBTOPICS_MIG = await readMig("20261102010000_issue_subtopics.sql");
-const MIG_NAME = "20261127170000_issue_tags_fast.sql";
+const ITB_PREAGG_MIG = await readMig("20261127160000_itb_preaggregate.sql");
+const MIG_NAME ="20261127170000_issue_tags_fast.sql";
 const MIG = await readMig(MIG_NAME);
 const BENCH = Deno.env.get("ITB_BENCH") === "1";
 
@@ -48,6 +49,8 @@ const itbText = () => {
   return { tbl, base: fns.slice(0, 3), arm: fns[3] };
 };
 const ITB = itbText();
+// 臂函式以 20261127160000（itb_preaggregate，#1079）的版本為底：新版呼叫新 issues_scoped，_legacy 版呼叫 issues_scoped_legacy
+ITB.arm = fnText(ITB_PREAGG_MIG, "contribution_auto_tasks_issue_too_broad");
 const ITB_LEGACY = ITB.arm
   .replace(/contribution_auto_tasks_issue_too_broad\b/, "contribution_auto_tasks_issue_too_broad_legacy")
   .replace(/\bissues_scoped\b/g, "issues_scoped_legacy");
