@@ -515,3 +515,72 @@ Deno.test("I2 時間戳大於 PR-1 且 migration 檔名唯一", async () => {
   assertEquals(names, [MIG_NAME]);
   assert(MIG_NAME > PR1);
 });
+
+// ───────────────────────── J diff_sample（20261127044115）─────────────────────────
+const SAMPLE_MIG = "20261127044115_dispatch_gap_compare_diff_sample.sql";
+const sampleMig = await read(SAMPLE_MIG);
+const LEGACY_1 = "auto:legacy_audit:6f1c0000-0000-0000-0000-000000000001";
+const LEGACY_2 = "auto:legacy_audit:6f1c0000-0000-0000-0000-000000000002";
+
+async function shadowDb(): Promise<PGlite> {
+  const db = await freshDb();
+  await db.exec(sampleMig);
+  await db.exec(SEED_ROWS);
+  await db.query("SELECT dispatch_gap_set_mode('legacy', 'shadow')");
+  await db.query("SELECT * FROM dispatch_gap_reconcile_all(ARRAY['legacy'])"); // 先把常駐表補成與即時輸出一致
+  await db.exec("DELETE FROM dispatch_gap_reconcile_runs");
+  return db;
+}
+const shadowRun = async (db: PGlite) => (await rows(db, "SELECT * FROM dispatch_gap_shadow_compare(ARRAY['legacy'], '0 seconds')"))[0];
+
+Deno.test("J1 changed：樣本存鍵與有差異的欄位（table／live），沒變的欄位不存", async () => {
+  const db = await shadowDb();
+  await db.exec(`UPDATE fake_rows SET what_we_need = 'changed!' WHERE task_id = '${LEGACY_1}'`);
+  const run = await shadowRun(db);
+  assertEquals([Number(run.missing), Number(run.extra), Number(run.changed)], [0, 0, 1]);
+  assertEquals(await one(db, "SELECT diff_sample->'changed'->0->>'key' AS v FROM dispatch_gap_reconcile_runs"), LEGACY_1);
+  assertEquals(await one(db, "SELECT diff_sample->'changed'->0->'table' AS v FROM dispatch_gap_reconcile_runs"), { what_we_need: "need l1" });
+  assertEquals(await one(db, "SELECT diff_sample->'changed'->0->'live' AS v FROM dispatch_gap_reconcile_runs"), { what_we_need: "changed!" });
+  assertEquals(await one(db, "SELECT jsonb_array_length(diff_sample->'missing') AS v FROM dispatch_gap_reconcile_runs"), 0);
+  assertEquals(await one(db, "SELECT jsonb_array_length(diff_sample->'extra') AS v FROM dispatch_gap_reconcile_runs"), 0);
+});
+
+Deno.test("J2 missing 與 extra 各一筆：鍵有被列出；shadow 仍不改常駐表", async () => {
+  const db = await shadowDb();
+  const NEW = "auto:legacy_audit:6f1c0000-0000-0000-0000-000000000009";
+  await db.exec(`DELETE FROM fake_rows WHERE task_id = '${LEGACY_2}'`);
+  await db.exec(`INSERT INTO fake_rows VALUES ('legacy', '${NEW}', 'legacy_audit', '{"id":"n"}', 'need n', NULL, 1, NULL)`);
+  const run = await shadowRun(db);
+  assertEquals([Number(run.missing), Number(run.extra), Number(run.changed)], [1, 1, 0]);
+  assertEquals(await one(db, "SELECT diff_sample->'missing' AS v FROM dispatch_gap_reconcile_runs"), [NEW]);
+  assertEquals(await one(db, "SELECT diff_sample->'extra' AS v FROM dispatch_gap_reconcile_runs"), [LEGACY_2]);
+  assertEquals(await one(db, "SELECT jsonb_array_length(diff_sample->'changed') AS v FROM dispatch_gap_reconcile_runs"), 0);
+  assertEquals(await ints(db, "SELECT count(*)::int AS n FROM dispatch_gaps WHERE arm = 'legacy' AND closed_at IS NULL"), 2, "雙軌比對不改常駐表");
+});
+
+Deno.test("J3 每類超過 20 筆只存 20 筆，計數仍是全部", async () => {
+  const db = await shadowDb();
+  await db.exec(`INSERT INTO fake_rows SELECT 'legacy', format('auto:legacy_audit:6f1c0000-0000-0000-0000-%s', lpad(i::text, 12, '0')), 'legacy_audit', '{}', 'n', NULL, 1, NULL FROM generate_series(100, 124) i`);
+  await db.exec(`UPDATE fake_rows SET what_we_need = 'x'`); // 兩筆舊的也都變了：changed 2，missing 25
+  const run = await shadowRun(db);
+  assertEquals(Number(run.missing), 25);
+  assertEquals(await one(db, "SELECT jsonb_array_length(diff_sample->'missing') AS v FROM dispatch_gap_reconcile_runs"), 20);
+  assertEquals(await one(db, "SELECT jsonb_array_length(diff_sample->'changed') AS v FROM dispatch_gap_reconcile_runs"), 2);
+});
+
+Deno.test("J4 三類都是 0 時 diff_sample 為 NULL；對帳（reconcile）模式同樣帶樣本；apply 之後樣本仍在", async () => {
+  const db = await shadowDb();
+  await shadowRun(db);
+  assertEquals(await one(db, "SELECT diff_sample IS NULL AS v FROM dispatch_gap_reconcile_runs"), true);
+  await db.exec(`UPDATE fake_rows SET what_we_need = 'changed!' WHERE task_id = '${LEGACY_1}'`);
+  const r = (await rows(db, "SELECT * FROM dispatch_gap_reconcile_all(ARRAY['legacy'])"))[0];
+  assertEquals([r.applied, Number(r.changed)], [true, 1]);
+  assertEquals(await one(db, `SELECT diff_sample->'changed'->0->>'key' AS v FROM dispatch_gap_reconcile_runs WHERE mode = 'reconcile'`), LEGACY_1);
+});
+
+Deno.test("J5 遷移檔：新增欄位可 NULL、檔頭有回滾、時間戳大於 phase1a 且檔名唯一", () => {
+  assert(/ADD COLUMN IF NOT EXISTS diff_sample JSONB;/.test(sampleMig));
+  assert(/回滾/.test(sampleMig));
+  assert(SAMPLE_MIG > "20261126193000_dispatch_gaps_phase1a.sql");
+  assertEquals([...Deno.readDirSync(MIGRATIONS)].filter((e) => e.name.startsWith("20261127044115")).length, 1);
+});
