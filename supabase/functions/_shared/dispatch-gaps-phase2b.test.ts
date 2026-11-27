@@ -742,16 +742,13 @@ Deno.test("D2 交件與批次表：district_seats 型別從 payload 組鍵、組
   await clearEvents(db);
   await db.exec(`INSERT INTO contributions (status, contribution_type, payload) VALUES ('pending', 'correction', '{}')`);
   assertEquals(await pending(db), []);
-  // 批次表（語句層級）
+  // 批次表（語句層級）：cec_candidates 的觸發器本期拿掉（改由 cec-sync 結尾入列單位），寫它不再產生任何事件；cec_registrations 保留
   await clearEvents(db);
   await db.exec("INSERT INTO cec_candidates (name) SELECT 'n' || g FROM generate_series(1, 3) g");
-  assertEquals(await pending(db), ["roster_cec_gap|*", "roster_unit_findings|*"]);
-  await clearEvents(db);
-  await db.exec("UPDATE cec_candidates SET name = 'z' WHERE false");
-  await db.exec("DELETE FROM cec_candidates WHERE false");
-  assertEquals(await pending(db), [], "沒有影響到任何列不入");
+  await db.exec("UPDATE cec_candidates SET name = 'z'");
   await db.exec("DELETE FROM cec_candidates");
-  assertEquals(await pending(db), ["roster_cec_gap|*", "roster_unit_findings|*"]);
+  assertEquals(await pending(db), [], "cec_candidates 沒有觸發器了");
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM pg_trigger WHERE tgrelid = 'cec_candidates'::regclass AND NOT tgisinternal"), 0);
   await clearEvents(db);
   await db.exec("INSERT INTO cec_registrations (name) SELECT 'r' || g FROM generate_series(1, 300) g");
   assertEquals(await pending(db), ["district_seats|*", "roster_unit_findings|*"], "三百列一個語句只入一筆");
@@ -885,10 +882,58 @@ Deno.test("E1 drain：資料變動後四支新臂的常駐表與整表結果一�
   // 整臂事件（清查範圍、候選人名單同步）：整表版還原後走整表
   await db.exec("UPDATE roster_check_scope SET recheck_days = 1");
   assertEquals(S(only(await pending(db), "raw:roster_check").concat(only(await pending(db), "roster_villages"))), ["raw:roster_check|*", "roster_villages|*"]);
-  await db.exec("INSERT INTO cec_candidates (election_id, election_type, region, name, name_norm, elected, cand_no) VALUES (2022, '縣市長', '新北市', 'X3', 'X3', false, 3)");
-  assert((await pending(db)).includes("roster_cec_gap|*"));
   await drainAll(db);
   await assertConsistent(db, "整臂事件消化後");
+  // cec-sync 一個單位「先刪後寫」之後呼叫 dispatch_gap_enqueue_cec_units（走按鍵版，不能走整表版）
+  await breakFull();
+  await db.exec(`DELETE FROM cec_candidates WHERE election_id = 2022 AND election_type = '縣市長' AND region = '新北市';
+    INSERT INTO cec_candidates (election_id, election_type, region, name, name_norm, elected, cand_no) VALUES
+      (2022, '縣市長', '新北市', 'X3', 'X3', true, 1), (2022, '縣市長', '新北市', 'X4', 'X4', false, 2), (2022, '縣市長', '新北市', 'X5', 'X5', false, 3)`);
+  assertEquals(await pending(db), [], "寫 cec_candidates 本身不入列");
+  assert(((await one<number>(db, `SELECT dispatch_gap_enqueue_cec_units('[{"election_id": 2022, "election_type": "縣市長", "region": "新北市"}]'::jsonb) AS v`)) as number) > 0);
+  assert((await pending(db)).includes("roster_cec_gap|unit:2022:新北市:縣市長"));
+  assertEquals((await pending(db)).filter((k) => k.endsWith("|*")), [], "只入單位鍵，沒有整臂");
+  await drainAll(db);
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM dispatch_gap_events WHERE last_error IS NOT NULL"), 0, "走了整表版就會爆");
+  await fixFull();
+  await assertConsistent(db, "cec-sync 單位入列");
+  await db.close();
+});
+
+Deno.test("E2 dispatch_gap_enqueue_cec_units：縣市層級一組、村里長與代表再展開該縣市每個鄉鎮（取 cec_candidates 現有與 regions 的聯集）；不重複、非陣列與關閉事件回 0；怪輸入不丟錯", async () => {
+  const db = await freshDb({ dataBeforeMig: true });
+  await db.exec("INSERT INTO regions VALUES (20, '花蓮縣', '吉安鄉', NULL, NULL), (21, '花蓮縣', '花蓮市第03選舉區', NULL, NULL)");
+  await clearEvents(db);
+  const call = async (units: string) => (await one<number>(db, `SELECT dispatch_gap_enqueue_cec_units('${units}'::jsonb) AS v`)) as number;
+  // 縣市長：只有縣市層級
+  assert((await call(`[{"election_id": 2022, "election_type": "縣市長", "region": "臺北市"}]`)) > 0);
+  assertEquals(await pending(db), S(["raw:roster_check|unit:2022:台北市:縣市長", "roster_cec_gap|unit:2022:台北市:縣市長", "roster_unit_findings|unit:2022:台北市:縣市長"]));
+  // 同一個單位再呼叫：同鍵未處理不重複
+  assertEquals(await call(`[{"election_id": 2022, "election_type": "縣市長", "region": "臺北市"}, {"election_id": 2022, "election_type": "縣市長", "region": "臺北市"}]`), 0);
+  // 村里長：縣市層級＋花蓮縣的每個鄉鎮（花蓮市來自 cec_candidates，吉安鄉來自 regions；「花蓮市第03選舉區」去掉選舉區後也是花蓮市）
+  await clearEvents(db);
+  assert((await call(`[{"election_id": 2022, "election_type": "村里長", "region": "花蓮縣"}]`)) > 0);
+  const p = await pending(db);
+  for (const k of ["raw:roster_check|unit:2022:花蓮縣:村里長", "roster_cec_gap|unit:2022:花蓮縣花蓮市:村里長", "roster_cec_gap|unit:2022:花蓮縣吉安鄉:村里長",
+    "roster_villages|unit:2022:花蓮縣花蓮市:村里長", "roster_villages|unit:2022:花蓮縣吉安鄉:村里長", "roster_unit_findings|unit:2022:花蓮縣吉安鄉:村里長",
+    "raw:roster_check|unit:2022:花蓮縣吉安鄉:村里長"]) assert(p.includes(k), `缺事件 ${k}：${JSON.stringify(p)}`);
+  assertEquals(p.filter((k) => k.endsWith("|*")), []);
+  assertEquals(p.filter((k) => k.startsWith("ballot_numbers|") || k.startsWith("roster_gap_units|")), [], "已投票屆的名單同步不入補號次與名單缺口（只看 2026）");
+  // 2026 的名冊缺口（只看 2026）會入
+  await clearEvents(db);
+  await call(`[{"election_id": 2026, "election_type": "縣市長", "region": "臺北市"}]`);
+  assert((await pending(db)).includes("roster_gap_units|unit:2026:台北市:縣市長"));
+  // 代表：選舉區後綴去掉
+  await clearEvents(db);
+  await call(`[{"election_id": 2022, "election_type": "鄉鎮市民代表", "region": "花蓮縣"}]`);
+  assert((await pending(db)).includes("roster_cec_gap|unit:2022:花蓮縣花蓮市:鄉鎮市民代表"));
+  // 怪輸入：不是陣列、缺欄位、空白縣市、關閉事件
+  await clearEvents(db);
+  assertEquals(await call(`{"election_id": 2022}`), 0);
+  assertEquals(await call(`[{"election_type": "縣市長", "region": "臺北市"}, {"election_id": 2022, "region": "臺北市"}, {"election_id": 2022, "election_type": "縣市長", "region": "  "}]`), 0);
+  await db.exec("UPDATE dispatch_gap_settings SET events_enabled = false");
+  assertEquals(await call(`[{"election_id": 2022, "election_type": "縣市長", "region": "宜蘭縣"}]`), 0);
+  assertEquals(await pending(db), []);
   await db.close();
 });
 
@@ -1021,10 +1066,12 @@ Deno.test("H2 沒動總表、seed、被複製的臂函式本體與 PR-1 的整�
     "dispatch_gap_enqueue_roster_arms(INTEGER, TEXT, TEXT, TEXT, TEXT)", "dispatch_gap_enqueue_units(INTEGER, TEXT, TEXT, TEXT, TEXT)", "dispatch_gap_scope_key(TEXT, TEXT)",
     "dispatch_gap_recompute_roster_cec_gap(TEXT[])", "dispatch_gap_recompute_roster_villages(TEXT[])", "dispatch_gap_recompute_district_seats(TEXT[])",
     "dispatch_gap_recompute_raw_roster_check(TEXT[])", "dispatch_gap_full_raw_roster_check()", "dispatch_gap_recompute_roster_unit_findings(TEXT[])",
-    "dispatch_gap_recompute_roster_gap_units(TEXT[])", "dispatch_gap_on_change()", "dispatch_gap_on_batch_new()", "dispatch_gap_on_batch_old()", "dispatch_gap_on_stmt()"]) {
+    "dispatch_gap_recompute_roster_gap_units(TEXT[])", "dispatch_gap_on_change()", "dispatch_gap_on_batch_new()", "dispatch_gap_on_batch_old()", "dispatch_gap_on_stmt()",
+    "dispatch_gap_enqueue_cec_units(JSONB)"]) {
     assert(mig.includes(`REVOKE ALL ON FUNCTION ${f} FROM PUBLIC, anon, authenticated;`), `缺 REVOKE ${f}`);
   }
   assert(mig.includes("GRANT EXECUTE ON FUNCTION dispatch_gap_enqueue_units(INTEGER, TEXT, TEXT, TEXT, TEXT) TO service_role;"));
+  assert(mig.includes("GRANT EXECUTE ON FUNCTION dispatch_gap_enqueue_cec_units(JSONB) TO service_role;"));
   // 時間戳：大於 PR-1 與 main 最新那支
   assert(MIG_NAME > PH2A);
   assert(MIG_NAME > "20261127052000_agy_login_realtime_broadcast.sql");
@@ -1046,7 +1093,12 @@ Deno.test("H3 DDL 鎖的順序：contributions 觸發器最後、緊接結尾；
   const last = Math.max(...trig.map((t) => t.i));
   const afterLast = code.slice(code.indexOf(";", code.indexOf("EXECUTE FUNCTION", last)) + 1);
   assert(!/\b(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE)\b/.test(afterLast), `最後一個觸發器之後只該有計數檢查與 NOTIFY：${afterLast.slice(0, 200)}`);
-  assert(afterLast.includes("預期共掛 35 支觸發器"));
+  assert(afterLast.includes("預期共掛 32 支觸發器"));
+  // cec_candidates 的三支語句層級觸發器在掛新觸發器之前就拿掉（DROP 在第一個 CREATE TRIGGER 之前）
+  for (const t of ["ins", "upd", "del"]) {
+    const i = code.indexOf(`DROP TRIGGER IF EXISTS trg_dispatch_gap_cec_candidates_${t} ON cec_candidates;`);
+    assert(i >= 0 && i < first, `cec_candidates_${t} 的 DROP 要在第一個 CREATE TRIGGER 之前`);
+  }
 });
 
 Deno.test("H4 不改 seed 與總表：本支沒有 UPDATE／DELETE／INSERT task_dispatches、不改表結構、不新增表、不排 cron", () => {

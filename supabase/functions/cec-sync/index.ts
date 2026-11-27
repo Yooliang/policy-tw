@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 import { CEC_BASE, fetchCecJson, SUBJECT_MAP } from "../_shared/cec-static-fetch.ts";
+import { enqueueCecUnits, type GapUnit } from "../_shared/dispatch-gap-events.ts";
 import {
   type CecFetchDeps,
   collectUnitRows,
@@ -215,6 +216,8 @@ Deno.serve(async (req) => {
   };
   const units: UnitReport[] = [];
   const failed: UnitFailure[] = [];
+  /** 名單被動過的單位（先刪後寫，刪成功就算動過，寫到一半失敗也算）：迴圈結束後一次通知派工缺口維護（第 2 期 PR-2） */
+  const touched: GapUnit[] = [];
   const started = Date.now();
   let next: { election_id: number; election_type: string; region: string; sub_region?: string } | null = null;
 
@@ -258,6 +261,7 @@ Deno.serve(async (req) => {
       // 先抓完、確認不是抓取失敗，才在同一個單位內先刪後寫
       const { error: delError } = await scoped(supabase.from("cec_candidates").delete());
       if (delError) throw new Error(`delete: ${delError.message}`);
+      touched.push({ election_id: electionId, election_type: ourType, region, ...(subRegion ? { sub_region: subRegion } : {}) });
       for (let b = 0; b < rows.length; b += INSERT_BATCH_SIZE) {
         const { error: insError } = await supabase.from("cec_candidates").insert(rows.slice(b, b + INSERT_BATCH_SIZE));
         if (insError) throw new Error(`insert: ${insError.message}`);
@@ -289,6 +293,11 @@ Deno.serve(async (req) => {
     }
   }
 
+  // 派工缺口（第 2 期 PR-2）：名單換了的單位一次入列（migration 20261127053900 起 cec_candidates 不再有語句層級觸發器）；
+  // 入列失敗不影響同步，由雙軌比對與每日對帳補
+  const gapEvents = await enqueueCecUnits(supabase, touched);
+  if (!gapEvents.ok) console.warn(`[cec-sync] 派工缺口入列失敗（${gapEvents.units} 個單位）：${gapEvents.error}`);
+
   // 投票率（#344）：這次有跑到縣市長或總統的屆別才抓（三四個請求）；抓不到就不寫，不影響名單同步
   const turnout: Array<{ election_id: number; value?: number; election_type?: string; error?: string }> = [];
   if (electionTypeFilter === undefined ? true : electionTypeFilter in HEADLINE_TURNOUT_CEC_TYPES) {
@@ -308,5 +317,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({ success: true, units, failed, next, turnout, elapsed_ms: Date.now() - started }), { headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify({ success: true, units, failed, next, turnout, gap_events: gapEvents, elapsed_ms: Date.now() - started }), { headers: { "Content-Type": "application/json" } });
 });
