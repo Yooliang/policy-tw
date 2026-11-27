@@ -23,7 +23,8 @@ const SUBTOPICS_MIG = await readMig("20261102010000_issue_subtopics.sql");
 const ITB_PREAGG_MIG = await readMig("20261127160000_itb_preaggregate.sql");
 const MIG_NAME ="20261127170000_issue_tags_fast.sql";
 const MIG = await readMig(MIG_NAME);
-const BENCH = Deno.env.get("ITB_BENCH") === "1";
+// CI 的 deno test 沒給 --allow-env，直接讀會丟 NotCapable；讀不到就當沒開
+const BENCH = (() => { try { return Deno.env.get("ITB_BENCH") === "1"; } catch { return false; } })();
 
 const SCHEMA = `
 CREATE ROLE anon; CREATE ROLE authenticated;
