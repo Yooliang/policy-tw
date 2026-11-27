@@ -7,7 +7,9 @@ on:
   # 分支只靠 pull_request 跑一次（2026-10-13）：以前 push 到任何分支也跑，開了 PR 的分支每次推都跑兩遍一模一樣的 CI
   push:
     branches: [main]
+  # edited：補寫「每日呼叫量變化」後改 PR 說明要能重跑（重跑舊事件會帶舊說明）
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -57,6 +59,13 @@ jobs:
           node-version: '22'
       - run: node --test scripts/ci-migration-order.spec.mjs
       - run: node scripts/ci-migration-order.mjs
+      # 新增排程／輪詢／觸發器／對外呼叫的 PR，說明必須有「每日呼叫量變化：…」（2026-11-27）。
+      # PR 說明經環境變數傳入，不內插進 run 字串。
+      - run: node --test scripts/ci-migration-usage-note.spec.mjs
+      - name: 每日呼叫量變化守門
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/ci-migration-usage-note.mjs
 
   typecheck:
     name: 型別檢查與建置
