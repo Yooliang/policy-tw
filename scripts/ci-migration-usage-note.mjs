@@ -80,9 +80,12 @@ export function checkUsageNote(files, body, eventName) {
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 function collectFiles() {
-  const names = git('diff', '--name-only', '--no-renames', 'origin/main...HEAD').split(/\r?\n/).filter(Boolean);
+  // 2026-11-27：三點 `origin/main...HEAD` 要算 merge base，CI 的 PR checkout 是 main＋PR 的合併 ref、origin/main 又曾被
+  // --depth=1 抓成淺層，只要分支不是基於 main 最新 commit 就「no merge base」整支炸掉。改兩點 `origin/main HEAD`：
+  // 直接比兩棵樹，PR 的 merge ref 已含 main，差異就是這個 PR 加進來的東西，不需要歷史。
+  const names = git('diff', '--name-only', '--no-renames', 'origin/main', 'HEAD').split(/\r?\n/).filter(Boolean);
   return names.map((path) => {
-    const diff = git('diff', '-U0', '--no-renames', 'origin/main...HEAD', '--', path);
+    const diff = git('diff', '-U0', '--no-renames', 'origin/main', 'HEAD', '--', path);
     const added = diff
       .split(/\r?\n/)
       .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
@@ -98,7 +101,7 @@ function main() {
     console.log('不是 PR 事件，略過每日呼叫量檢查。');
     return;
   }
-  execFileSync('git', ['fetch', 'origin', 'main', '--depth=1'], { stdio: 'inherit' });
+  execFileSync('git', ['fetch', 'origin', 'main'], { stdio: 'inherit' });
   const errors = checkUsageNote(collectFiles(), process.env.PR_BODY ?? '', eventName);
   if (errors.length) {
     for (const e of errors) console.error(`::error title=缺每日呼叫量變化::${e.replace(/\n/g, '%0A')}`);
