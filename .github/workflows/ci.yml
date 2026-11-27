@@ -62,6 +62,7 @@ jobs:
       # 新增排程／輪詢／觸發器／對外呼叫的 PR，說明必須有「每日呼叫量變化：…」（2026-11-27）。
       # PR 說明經環境變數傳入，不內插進 run 字串。
       - run: node --test scripts/ci-migration-usage-note.spec.mjs
+      - run: node --test scripts/usage-metrics-summary.spec.mjs
       - name: 每日呼叫量變化守門
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
