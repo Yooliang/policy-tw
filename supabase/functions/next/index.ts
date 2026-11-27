@@ -79,7 +79,7 @@ async function estimateOf(supabase: any, taskId: string) {
 }
 
 async function handle(req: Request, mark: (name: string) => void): Promise<Response> {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

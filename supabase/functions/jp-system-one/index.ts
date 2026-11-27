@@ -40,7 +40,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
   if (req.method !== "POST" || action !== "precheck") return json({ success: false, error: "POST ?action=precheck のみ" }, 404);

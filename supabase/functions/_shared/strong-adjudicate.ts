@@ -267,7 +267,7 @@ function bearerOf(h: Headers): string | null {
 }
 
 export async function handleStrongAdjudicate(req: Request, deps: StrongAdjudicateDeps): Promise<Response> {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...CORS, "Access-Control-Max-Age": "7200" } });
   if (req.method !== "POST") return fail("method not allowed", 405);
 
   // 憑證先驗：沒帶就 401，不管 body 寫什麼
