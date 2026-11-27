@@ -1,6 +1,6 @@
 /**
  * 派工臂事件驅動化：legacy／mismatch／issue_too_broad／ballot_numbers 切 live
- * （migration 20261127064500_dispatch_gaps_go_live_phase1.sql）守門。
+ * （migration 20261127081000_dispatch_gaps_go_live_phase1.sql）守門。
  *
  * 環境與 dispatch-gaps-phase0b.test.ts 同一套：臂函式是「回放 fake_rows」的假函式，常駐表、對帳、模式表、
  * 總表二段式（20261126180000）與 diff_sample 版對帳（20261127044115）跑真的。
@@ -18,7 +18,7 @@ const MIGRATIONS = new URL("../../migrations/", import.meta.url);
 const PR1 = "20261126170000_dispatch_gaps_phase0.sql";
 const PR2 = "20261126180000_dispatch_gaps_phase0b.sql";
 const SAMPLE = "20261127044115_dispatch_gap_compare_diff_sample.sql";
-const MIG_NAME = "20261127064500_dispatch_gaps_go_live_phase1.sql";
+const MIG_NAME = "20261127081000_dispatch_gaps_go_live_phase1.sql";
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const pr1 = await read(PR1);
 const pr2 = await read(PR2);
@@ -224,8 +224,10 @@ Deno.test("E1 回滾：四支切回 shadow 後輸出回到即時算，常駐表�
 
 // ───────────────────────── F 文字層 ─────────────────────────
 Deno.test("F1 遷移檔名唯一、時間戳大於 main 上最後一支（agy 廣播）與 phase2a", async () => {
-  const names = [...Deno.readDirSync(MIGRATIONS)].map((e) => e.name).filter((x) => x.startsWith("20261127064500"));
+  const names = [...Deno.readDirSync(MIGRATIONS)].map((e) => e.name).filter((x) => x.startsWith("20261127081000"));
   assertEquals(names, [MIG_NAME]);
+  assert(MIG_NAME > "20261127073000_history_bundle_rpc.sql");
+  assert(MIG_NAME > "20261127061500_dispatch_gap_hourly_apply_live.sql");
   assert(MIG_NAME > "20261127052000_agy_login_realtime_broadcast.sql");
   assert(MIG_NAME > "20261127044503_dispatch_gaps_phase2a.sql");
 });
