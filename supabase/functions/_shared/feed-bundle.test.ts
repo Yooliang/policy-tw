@@ -145,7 +145,7 @@ Deno.test("limit 邊界：0 與負數夾成 1、999 夾成 50、空值 20（RPC 
 
 Deno.test("ATTENTION_STATUSES 與 SQL 裡寫的一樣（SQL 把它寫死成 disputed）", async () => {
   assertEquals([...ATTENTION_STATUSES], ["disputed"]);
-  const sql = await Deno.readTextFile(new URL("../../migrations/20261127093000_feed_report_bundle_rpc.sql", import.meta.url));
+  const sql = await Deno.readTextFile(new URL("../../migrations/20261127094500_feed_report_bundle_rpc.sql", import.meta.url));
   assert(sql.includes("c.status = ANY (ARRAY['disputed'])"));
 });
 

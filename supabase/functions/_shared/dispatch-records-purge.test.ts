@@ -461,7 +461,7 @@ Deno.test("A1 讀者清單抽得出來（不是瞎的）：public 與 policy_jp 
   // 2026-11-11 /trace 重播頁的 trace_events()：近 7 天（派工綁定的 7 天，保留天數 14 ＋ 邊際足夠）
   assertEquals(find(sql.readers, "public", "verify_dispatches", "trace_events")?.hours, 7 * 24, "trace_events：近 7 天");
   // 2026-11-14（20261114080000）再加四處：驗證池的重派冷卻、斷路器的領走數、agent_breaker_status 視圖、agent_cooldown_thaw_seconds，回看期都是 LEAST(…, 86400)＝24 小時
-  // 2026-11-27（20261127093000，內部 REST 瘦身 PR-2）再加一處：report_context_bundle(verify_pre) 的派工綁定，時限寫死 7 天＝VERIFY_BINDING_DAYS
+  // 2026-11-27（20261127094500，內部 REST 瘦身 PR-2）再加一處：report_context_bundle(verify_pre) 的派工綁定，時限寫死 7 天＝VERIFY_BINDING_DAYS
   assertEquals(find(sql.readers, "public", "verify_dispatches", "report_context_bundle")?.hours, consts.VERIFY_BINDING_DAYS * 24, "report_context_bundle：派工綁定 7 天（與 verify-handler 同一個常數）");
   assertEquals(of(sql.readers, "public", "verify_dispatches").length, 9, "SQL 端：驗證池（15 分鐘、30 分鐘、重派冷卻）、dispatch_recent、trace_events、斷路器、視圖、冷卻解凍、report_context_bundle");
   assertEquals(of(sql.readers, "public", "verify_dispatches").filter((r) => r.hours === 24).length, 4, "新增的四處都是 24 小時上限");

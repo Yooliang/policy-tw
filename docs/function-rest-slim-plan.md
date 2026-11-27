@@ -251,7 +251,7 @@
 - **風險：** 中。這是**交件主路徑**，錯誤會讓代理交件被誤擋或誤收。額度與去重的判定語意（「先數再寫、沒有原子保留」，`CLAUDE.md` 常被誤解的行為一段）**必須逐字保持**，不能趁機改成有鎖的版本（那是另一件事、另一個裁決）。
 - **守門測試：** 既有的 `dispatch-token-entry.test.ts`、`verify-*` 系列（真的載入入口跑端到端，`entry-harness.ts`）要全綠不改；新增查詢預算測試：verify 典型路徑 ≤ 4、contribute 單件 policy ≤ 5。
 
-**PR-2 已上（2026-11-27，migration `20261127093000_feed_report_bundle_rpc.sql`，守門 `_shared/feed-bundle.test.ts`、`_shared/report-bundle.test.ts`）——第 1 期的 contributions-feed 與 report 讀取端。** 做法同 PR-1，與上面的設計不同的地方：
+**PR-2 已上（2026-11-27，migration `20261127094500_feed_report_bundle_rpc.sql`，守門 `_shared/feed-bundle.test.ts`、`_shared/report-bundle.test.ts`）——第 1 期的 contributions-feed 與 report 讀取端。** 做法同 PR-1，與上面的設計不同的地方：
 - **兩支 RPC。** `contributions_feed_bundle(p_params jsonb)`：清單（多撈一筆）、第一頁的筆數與統計、名稱對照原料（形狀同 `history_bundle` 的 `summary`，只對前 limit 筆，裁決指向的原貢獻一併帶回）、出處摘要，約 6～10 次 REST 降為 1 次；`report_context_bundle(p_kind text, p_params jsonb)`：`verify_pre`（額度計數、被驗貢獻、裁決的原貢獻、派工綁定、這筆的既有票〔含 verdict 與指認，給 identity-pick-gate 的「已有人指認」用〕、自己上一票的備註）、`verify_post`（投票後重讀貢獻與目標分數）、`contribute_pre`（額度計數、這批任務的型別與多人任務內容、同 IP 在排隊的貢獻）。**只合併讀，寫入與判斷順序、回應文字一個字沒動**；額度「先數再寫、沒有原子保留」的語意不變。
 - **舊路徑留著當退路**（RPC 回錯、形狀不對、migration 還沒上都退回原本的逐項查詢並 `console.warn` 一行），一週後另一支 PR 拆掉。入口的兩條路徑用同一份程式碼：守門測試用 `entry-harness` 載入真的 `contributions-feed`／`report` 入口，PostgREST 請求翻成真的 SQL 打進 PGlite，「RPC 回不存在」與「RPC 正常」各用一份全新相同的資料庫跑同一個請求，整份回應、落庫的票與貢獻逐 byte 比對。
 - **日本站不跟。** `jp-contributions-feed` 與 `jp-report` 沒改；正見 `contributions-feed/index.ts` 的新路徑包在 `tw-only` 區段，日本站對應處包 `jp-only` 區段（裡面是原本的多次查詢），`jp-contributions-feed.test.ts` 的 `TW_SPANS` 多兩段。

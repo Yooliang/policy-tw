@@ -1,7 +1,7 @@
 /**
  * contributions-feed／report 單一 RPC 守門測試（feed-bundle.test.ts、report-bundle.test.ts）用的 PGlite 環境。不是測試檔。
  *
- *  - makeReportDb：在 history-pglite 的資料表上補 report／feed 讀寫到的欄位與表，再執行真的 migration（20261127093000）。
+ *  - makeReportDb：在 history-pglite 的資料表上補 report／feed 讀寫到的欄位與表，再執行真的 migration（20261127094500）。
  *  - pgrstRouter：entry-harness 的 router，把入口檔真的發出去的 PostgREST 請求（GET／POST／PATCH／rpc，含篩選、排序、limit、
  *    count=exact、嵌入）翻成真的 SQL 打進同一個 PGlite；入口檔的程式一行不改。
  *    legacy＝true 時，兩支單一 RPC 回「不存在」（空回應），入口檔就會退回原本的多次查詢——同一份程式碼、同一份資料，兩條路徑。
@@ -12,7 +12,7 @@ import { readMig } from "./arms-pglite.ts";
 import type { RestCall } from "./entry-harness.ts";
 import { makeHistoryDb } from "./history-pglite.ts";
 
-export const FEED_REPORT_MIG = "20261127093000_feed_report_bundle_rpc.sql";
+export const FEED_REPORT_MIG = "20261127094500_feed_report_bundle_rpc.sql";
 
 const EXTRA_SCHEMA = `
 ALTER TABLE contributions ADD COLUMN actor_id text, ADD COLUMN bundle_id uuid, ADD COLUMN bundle_released_at timestamptz,

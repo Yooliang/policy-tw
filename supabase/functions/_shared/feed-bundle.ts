@@ -1,6 +1,6 @@
 /**
  * contributions-feed 單一 RPC（contributions_feed_bundle）的呼叫與回傳轉換
- * （Edge Function 內部 REST 瘦身 第 1 期 PR-2，migration 20261127093000）。
+ * （Edge Function 內部 REST 瘦身 第 1 期 PR-2，migration 20261127094500）。
  *
  * 一次請求原本約 6～10 次 REST（清單、第一頁的筆數與統計、名稱對照兩輪、出處摘要），改成 1 次；
  * RPC 回錯（函式不存在、例外、形狀不對）就回 null，由呼叫端退回原本的多次查詢，並 console.warn 一行。

@@ -1,6 +1,6 @@
 /**
  * report 讀取端的單一 RPC（report_context_bundle）呼叫與回傳驗證
- * （Edge Function 內部 REST 瘦身 第 1 期 PR-2，migration 20261127093000；設計 docs/function-rest-slim-plan.md 第 5.3 節）。
+ * （Edge Function 內部 REST 瘦身 第 1 期 PR-2，migration 20261127094500；設計 docs/function-rest-slim-plan.md 第 5.3 節）。
  *
  * 只合併「讀」：寫入（insert 票、insert 貢獻、租約歸還、落庫）一個字沒動，判斷條件與回應文字也沒動——
  * 呼叫端照原本的順序做原本的檢查，只是資料改從這一次 RPC 的結果拿。
