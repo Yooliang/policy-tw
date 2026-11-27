@@ -63,13 +63,18 @@ export function checkOrder(added, mainFiles) {
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean);
 
 function main() {
-  execFileSync('git', ['fetch', 'origin', 'main', '--depth=1'], { stdio: 'inherit' });
-  const added = git('diff', '--name-only', '--diff-filter=A', 'origin/main...HEAD', '--', DIR).filter((f) => f.endsWith('.sql'));
+  // 2026-11-27：原本 `fetch --depth=1` 再 `diff origin/main...HEAD` 找新增檔。--depth=1 讓 origin/main 變成沒有父節點的淺層 ref，
+  // 只要 PR 分支不是剛好基於 main 最新一個 commit，git 就回「no merge base」整支炸掉（當天四支 PR 連環紅）。
+  // 改成不看歷史：新增 migration ＝ HEAD 的 migrations 目錄裡有、origin/main 沒有的檔，兩邊各 ls-tree 一次做集合差。
+  execFileSync('git', ['fetch', 'origin', 'main'], { stdio: 'inherit' });
+  const mainFiles = git('ls-tree', '--name-only', 'origin/main', DIR);
+  const mainSet = new Set(mainFiles);
+  const headFiles = git('ls-tree', '--name-only', 'HEAD', DIR);
+  const added = headFiles.filter((f) => f.endsWith('.sql') && !mainSet.has(f));
   if (added.length === 0) {
     console.log('這個 PR 沒有新增 migration，略過時間戳檢查。');
     return;
   }
-  const mainFiles = git('ls-tree', '--name-only', 'origin/main', DIR);
   const errors = checkOrder(added, mainFiles);
   if (errors.length) {
     for (const e of errors) console.error(`::error::${e}`);
