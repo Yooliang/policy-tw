@@ -156,9 +156,13 @@ Deno.test("ci.yml：部署條件——測試失敗擋部署；後端類一定要
   assertStringIncludes(fn, "needs.edge-tests.result == 'success'");
 });
 
-Deno.test("ci.yml：部署順序沒動——migration 先、函式後；Worker 排在 Hosting 之後", () => {
+Deno.test("ci.yml：部署順序沒動——migration 先、函式後；Worker 排在 Hosting 之後", async () => {
   const fn = jobBlock("deploy-functions");
-  assert(fn.indexOf("supabase@2 db push") > 0 && fn.indexOf("supabase@2 db push") < fn.indexOf("node scripts/deploy-functions.mjs"));
+  // db push 由 scripts/ci-db-push.sh 執行（避開 seed 窗口、鎖超時重試）；workflow 呼叫它，腳本內才有 db push。
+  const pushCall = fn.indexOf("bash scripts/ci-db-push.sh");
+  assert(pushCall > 0 && pushCall < fn.indexOf("node scripts/deploy-functions.mjs"));
+  const pushScript = lf(await Deno.readTextFile(new URL("../../../scripts/ci-db-push.sh", import.meta.url)));
+  assertStringIncludes(pushScript, "db push --linked");
   assertStringIncludes(jobBlock("ssr-deploy"), "needs: [deploy]");
 });
 
