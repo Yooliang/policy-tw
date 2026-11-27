@@ -195,7 +195,7 @@ const CONTRIBUTE_CASES: Case[] = [
     name: "單一答案型任務：同 IP 的那份已經退件 → 不算在排隊（放行到下一關）",
     body: noChange(TASK_P),
     setup: async (db) => { await db.query(`INSERT INTO contributions (id, contribution_type, payload, agent_name, status, created_at, contributor_ip_hash, task_id) VALUES ('b1000000-0000-4000-8000-000000000002', 'no_change', '{}', 'x', 'rejected', now(), $1, $2)`, [await netHash(N1), TASK_P]); },
-    status: -1, has: "internal_error",
+    status: 201, has: '"success":true',
   },
   { name: "自動缺口的單一答案型任務（auto:profile_gap）：同 IP 排隊中", body: noChange(`auto:profile_gap:${POL}`), setup: async (db) => { await db.query(`INSERT INTO contributions (id, contribution_type, payload, agent_name, status, created_at, contributor_ip_hash, task_id) VALUES ('b1000000-0000-4000-8000-000000000003', 'no_change', '{}', 'x', 'verified', now(), $1, $2)`, [await netHash(N1), `auto:profile_gap:${POL}`]); }, status: -1, notHas: "internal_error" },
   {
@@ -204,7 +204,7 @@ const CONTRIBUTE_CASES: Case[] = [
       payload: { politician_id: POL, title: "長者交通補助加碼", category: "社會福利", description: "每月補助乘車金額由三百元提高到六百元，預計明年一月起實施" } },
     status: 201, has: '"success":true',
   },
-  { name: "別的 IP 排隊中的不算", body: noChange(TASK_P), setup: async (db) => { await db.query(`INSERT INTO contributions (id, contribution_type, payload, agent_name, status, created_at, contributor_ip_hash, task_id) VALUES ('b1000000-0000-4000-8000-000000000004', 'no_change', '{}', 'x', 'pending', now(), 'ip-other', $1)`, [TASK_P]); }, status: -1, has: "internal_error" },
+  { name: "別的 IP 排隊中的不算", body: noChange(TASK_P), setup: async (db) => { await db.query(`INSERT INTO contributions (id, contribution_type, payload, agent_name, status, created_at, contributor_ip_hash, task_id) VALUES ('b1000000-0000-4000-8000-000000000004', 'no_change', '{}', 'x', 'pending', now(), 'ip-other', $1)`, [TASK_P]); }, status: 201, has: '"success":true' },
 ];
 
 for (const c of CONTRIBUTE_CASES) {
@@ -260,7 +260,7 @@ Deno.test("report_context_bundle：三種 kind 的回傳形狀、不支援的 ki
   assertEquals(pre.existing.length, 1);
   assertEquals(pre.dispatched, []);
   assertEquals(pre.prev, { note: "核對過了第四段的日期與金額" });
-  const bound = await q("verify_pre", { contribution_id: ID(1), quota_column: "actor_id", quota_value: "ditrust:x", window_start: ws, binding: { ip_hash: await netHash(N1), since: new Date(Date.now() - 7 * 86400_000).toISOString() }, prev: null });
+  const bound = await q("verify_pre", { contribution_id: ID(1), quota_column: "actor_id", quota_value: "ditrust:x", window_start: ws, binding: { ip_hash: await netHash(N1) }, prev: null });
   assert(isVerifyPre(bound));
   assertEquals(bound.dispatched.length, 1);
   assertEquals(bound.prev, null);

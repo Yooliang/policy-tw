@@ -38,8 +38,8 @@ export interface VerifyPreParams {
   quota_column: "actor_id" | "verifier_ip_hash";
   quota_value: string;
   window_start: string;
-  /** 沒帶派工憑證且不是併票時，要查派工綁定：{ ip_hash, since }；其他情況 null */
-  binding: { ip_hash: string; since: string } | null;
+  /** 沒帶派工憑證且不是併票時，要查派工綁定：{ ip_hash }；其他情況 null。時限在 SQL 裡寫死 7 天（＝VERIFY_BINDING_DAYS，守門見 dispatch-records-purge.test.ts） */
+  binding: { ip_hash: string } | null;
   /** 同意票帶備註時要比自己上一票：{ column, value }；其他情況 null */
   prev: { column: "actor_id" | "agent_name"; value: string } | null;
 }

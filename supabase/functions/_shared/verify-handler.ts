@@ -122,14 +122,15 @@ async function handleVerifyInner(supabase: SupabaseLike, body: unknown, reportIp
   const vq = verifyQuotaFor(actor, ipHash, await loadQuotaLimits(supabase, "tw", QUOTA_DEFAULTS));
   // 內部 REST 瘦身第 1 期 PR-2（2026-11-27）：投票前要讀的（額度計數、被驗貢獻、裁決的原貢獻、派工綁定、既有票、自己上一票的備註）
   // 先用一支 RPC 一次撈齊（report_context_bundle，原本 4～6 次 REST）；RPC 回錯（pre 為 null）就退回下面原本的逐項查詢。
-  // 只合併讀取：判斷順序、回應文字與寫入都沒動。派工綁定的時限與下面查詢同一個算法。
+  // 只合併讀取：判斷順序、回應文字與寫入都沒動。派工綁定的時限：SQL 端寫死 7 天，與這裡的 VERIFY_BINDING_DAYS 同一個值（守門：dispatch-records-purge.test.ts）。
+  // 只認派出後 VERIFY_BINDING_DAYS 天內的紀錄（派工紀錄會定時清掉更舊的，#485；時限明寫，清理前後結果才一樣）
   const bindingSince = new Date(Date.now() - VERIFY_BINDING_DAYS * 86_400_000).toISOString();
   const pre = await readVerifyPre(supabase, {
     contribution_id: input.contribution_id,
     quota_column: vq.column,
     quota_value: vq.value,
     window_start: windowStart.toISOString(),
-    binding: !tokenBinding && via !== "merge" ? { ip_hash: ipHash, since: bindingSince } : null,
+    binding: !tokenBinding && via !== "merge" ? { ip_hash: ipHash } : null,
     prev: input.verdict === "agree" && input.note
       ? (actor.level === "ditrust" ? { column: "actor_id", value: actor.actor_id } : { column: "agent_name", value: input.agent_name })
       : null,

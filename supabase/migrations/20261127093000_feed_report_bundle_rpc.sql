@@ -14,7 +14,7 @@
 --    p_kind＝verify_pre：驗證投票前要讀的（額度計數、被驗貢獻、裁決的原貢獻、派工綁定、既有票、自己上一票的備註）
 --      p_params：contribution_id, quota_column（actor_id｜verifier_ip_hash）, quota_value, window_start,
 --                want_original（貢獻是裁決時 TS 端不知道型別，所以 SQL 端自己判斷，這個旗標固定 true）,
---                binding（{ip_hash, since}，null＝不查）, prev（{column: actor_id｜agent_name, value}，null＝不查）
+--                binding（{ip_hash}，null＝不查；時限寫死 7 天＝VERIFY_BINDING_DAYS）, prev（{column: actor_id｜agent_name, value}，null＝不查）
 --      回傳：used, contribution（null＝查無）, original, dispatched（0 或 1 列）,
 --            existing（這筆的全部票：id, agent_name, actor_id, verifier_ip_hash, note, verdict, resolved_politician_id；
 --            verdict 與 resolved_politician_id 給 identity-pick-gate 的「已有人指認」用）, prev（最近一張票的 note 或 null）
@@ -239,7 +239,9 @@ BEGIN
       SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) INTO v_dispatched FROM (
         SELECT vd.contribution_id, vd.agent_name FROM verify_dispatches vd
          WHERE vd.contribution_id = v_cid AND vd.ip_hash = p_params->'binding'->>'ip_hash'
-           AND vd.dispatched_at >= (p_params->'binding'->>'since')::timestamptz LIMIT 2) r;
+           -- 時限：只認派出後 7 天內的紀錄＝verify-handler 的 VERIFY_BINDING_DAYS（_shared/dispatch.ts；dispatch-records-purge.test.ts
+           -- 會從這裡抽回看期、核對保留天數與常數）。派工紀錄定時清理的保留天數必須大於這個，改常數要連這裡一起改
+           AND vd.dispatched_at >= now() - interval '7 days' LIMIT 2) r;
     END IF;
 
     SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) INTO v_existing FROM (
