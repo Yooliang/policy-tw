@@ -81,6 +81,17 @@ jobs:
           done < usage/fn-list.txt
           get project-billing-addons "$API/projects/$REF/billing/addons"
           exit 0
+      - name: 抓資料庫主機記憶體等指標
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set +e
+          mkdir -p usage
+          REF=$(node -p "require('./.github/usage-watch.json').project_ref")
+          # 指標端點用 Basic Auth（service_role＋service_role key）；失敗不讓 job 紅，不印金鑰
+          curl -s -m 60 -o usage/metrics.prom -w 'metrics HTTP %{http_code}\n' -u "service_role:$SUPABASE_SERVICE_ROLE_KEY" "https://$REF.supabase.co/customer/v1/privileged/metrics" || true
+          node scripts/usage-metrics-summary.mjs usage/metrics.prom usage/metrics.json || true
+          exit 0
       - name: 摘要與門檻
         run: node scripts/usage-watch.mjs usage .github/usage-watch.json
       - uses: actions/upload-artifact@v4
