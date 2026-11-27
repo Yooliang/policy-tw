@@ -82,10 +82,12 @@ Deno.serve(async (req) => {
     // 統計在資料庫算（contribution_feed_summary，見 migration 20260917000012）：
     // 一次 GROUP BY，不把上千列搬進函式。實測 808ms → 225ms，而且資料再長也是一次查詢。
     // 仍只在第一頁算——翻頁用不到它。
+    // jp-only:begin 日本站不跟正見的單一 RPC（contributions_feed_bundle）：這裡維持原本的多次查詢，正見那段標 tw-only
     const [feedRes, summaryRes] = await Promise.all([
       q,
       wantSummary ? supabase.rpc("contribution_feed_summary") : Promise.resolve({ data: null, error: null }),
     ]);
+    // jp-only:end
     if (feedRes.error) throw new Error(feedRes.error.message);
     if (summaryRes.error) throw new Error(`summary: ${summaryRes.error.message}`);
 
@@ -106,8 +108,10 @@ Deno.serve(async (req) => {
     // jp-only:end
 
     // 交件的網址在出處表的等級、認定根據與存檔網址（#347 第二階段 A）；拿不到就照網域自動判斷
+    // jp-only:begin 日本站不跟正見的單一 RPC：出處摘要照舊單獨查（正見那段標 tw-only）
     // deno-lint-ignore no-explicit-any
     const sourceBriefs = await fetchSourceBriefs(supabase, page.flatMap((r: any) => (Array.isArray(r.source_urls) ? r.source_urls : [])));
+    // jp-only:end
 
     const items = page.map((r) => {
       // jp-only:begin 摘要：election 補上 elections 表的名稱，四種日本站型別用日本站的摘要，不回正見網站的人物／政見連結

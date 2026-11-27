@@ -251,6 +251,16 @@
 - **風險：** 中。這是**交件主路徑**，錯誤會讓代理交件被誤擋或誤收。額度與去重的判定語意（「先數再寫、沒有原子保留」，`CLAUDE.md` 常被誤解的行為一段）**必須逐字保持**，不能趁機改成有鎖的版本（那是另一件事、另一個裁決）。
 - **守門測試：** 既有的 `dispatch-token-entry.test.ts`、`verify-*` 系列（真的載入入口跑端到端，`entry-harness.ts`）要全綠不改；新增查詢預算測試：verify 典型路徑 ≤ 4、contribute 單件 policy ≤ 5。
 
+**PR-2 已上（2026-11-27，migration `20261127094500_feed_report_bundle_rpc.sql`，守門 `_shared/feed-bundle.test.ts`、`_shared/report-bundle.test.ts`）——第 1 期的 contributions-feed 與 report 讀取端。** 做法同 PR-1，與上面的設計不同的地方：
+- **兩支 RPC。** `contributions_feed_bundle(p_params jsonb)`：清單（多撈一筆）、第一頁的筆數與統計、名稱對照原料（形狀同 `history_bundle` 的 `summary`，只對前 limit 筆，裁決指向的原貢獻一併帶回）、出處摘要，約 6～10 次 REST 降為 1 次；`report_context_bundle(p_kind text, p_params jsonb)`：`verify_pre`（額度計數、被驗貢獻、裁決的原貢獻、派工綁定、這筆的既有票〔含 verdict 與指認，給 identity-pick-gate 的「已有人指認」用〕、自己上一票的備註）、`verify_post`（投票後重讀貢獻與目標分數）、`contribute_pre`（額度計數、這批任務的型別與多人任務內容、同 IP 在排隊的貢獻）。**只合併讀，寫入與判斷順序、回應文字一個字沒動**；額度「先數再寫、沒有原子保留」的語意不變。
+- **舊路徑留著當退路**（RPC 回錯、形狀不對、migration 還沒上都退回原本的逐項查詢並 `console.warn` 一行），一週後另一支 PR 拆掉。入口的兩條路徑用同一份程式碼：守門測試用 `entry-harness` 載入真的 `contributions-feed`／`report` 入口，PostgREST 請求翻成真的 SQL 打進 PGlite，「RPC 回不存在」與「RPC 正常」各用一份全新相同的資料庫跑同一個請求，整份回應、落庫的票與貢獻逐 byte 比對。
+- **日本站不跟。** `jp-contributions-feed` 與 `jp-report` 沒改；正見 `contributions-feed/index.ts` 的新路徑包在 `tw-only` 區段，日本站對應處包 `jp-only` 區段（裡面是原本的多次查詢），`jp-contributions-feed.test.ts` 的 `TW_SPANS` 多兩段。
+- **權限：** 三支函式（含小工具 `feed_summary_material`）`SECURITY INVOKER`、固定 `search_path`、只給 `service_role`、兩支 RPC 帶 `statement_timeout = '8s'`。
+- **一個守門測試被它擋下來過：** `dispatch-records-purge.test.ts` 會從 migration 抽每一處讀 `verify_dispatches` 的回看期；`report_context_bundle` 的派工綁定一開始用參數傳時限，抽不出來而紅，改成 SQL 內寫死 7 天（＝`VERIFY_BINDING_DAYS`），並在該測試登記這一處（SQL 端讀者 8→9，時限等於常數）。**之後改 `VERIFY_BINDING_DAYS` 要連 SQL 的 `interval '7 days'` 一起改。**
+- **每條路徑的 REST 次數（守門測試印出來的實測，測試資料庫上）：** contributions-feed 第一頁舊 11→新 1、翻頁舊 7→新 1、`status=pending` 舊 9→新 1；report verify 同意票成功（暖快取）舊 10→新 4（RPC 投票前、寫入票、RPC 投票後、agent 工具提醒；沒備註的票沒有「上一票」那一次，舊 9）；contribute 交件前的讀取舊 2～5→新 1（自動缺口任務最少省 1 次，帶手動任務 uuid 的省 3～4 次），早退路徑（多人任務缺 person_key）舊 3→新 1。
+- **還在大量打 `contribution_votes`／`contributions` 的函式**（靜態呼叫點加本計畫第 4 節的每次請求次數）：`next`（約 3,460 次／天，每次貢獻表 5～7 次、票 2～3 次，翻頁的「我答過的」會放大）、`system-one`（約 3,420 次／天，多為 cron，貢獻表 8 個呼叫點、票 3 個）、落庫路徑（`apply-contribution`、`auto-apply`，由 verify 最後一票、`apply-verified`、`cec-verify` 觸發，一次落庫 8～20 次，第 3 期處理）、`tasks`／`request-task`（`task-context` 每個任務 2～8 次）、`verifications`、`apply`。這些不在本 PR 範圍。
+- **預估省量：** contributions-feed 約 152 次／天 × 約 −7 ＝ **−1,000 行／天**；report verify 約 2,200 次／天（比例是假設）× 約 −5.5 ＝ **−12,000 行／天**；report contribute 約 1,800 次／天（比例是假設）× 約 −1.5 ＝ **−2,700 行／天**；合計約 **−1.6 萬行／天**（約佔函式內部 21.6 萬行／天的 7%）。verify 與 contribute 的比例沒有實測，去 Logs 看 `/report` 的 `kind` 才準。
+
 ### 5.4 M4：落庫寫入合併成交易型 RPC（第 3 期，只做最單純的型別）
 
 **範圍限定。** `apply-contribution.ts` 有 2,989 行、每型別各自寫幾張表（附錄 B 表 4）。**只對兩種做**：`no_change`（auto 任務，約 5 次：task_checks、edit_history、select、update…）與 `policy`（約 8 到 10 次：select、insert、edit_history、出處 rpc、任務結案）。candidacy 約 12 到 20 次、牽涉身分比對與選區解析，風險與收益比太差，**不做**。
@@ -310,7 +320,7 @@
 | 期 | 內容 | 工作天（估） | 順序理由 |
 |---|---|---|---|
 | 第 0 期 | 驗證：用 Logs Explorer 取 24 小時 history／contributions-feed／verifications／contribution-status 的呼叫數與 id 重複率；量「我答過的」翻頁頁數的分布；量 verify 與 contribute 在 report 的比例 | 0.5 | 零風險；決定第 1 期內容與預期，**必須最先做** |
-| 第 1 期 | M1＋M2 history、contributions-feed；M3 report 讀取合併 | 7（history 3、feed 1、report 3） | **與主線原訂「先做 report」不同**：依第 3 節對帳，history 是推定最大戶（約 70%）、report 約 7%。若第 0 期證實，先做 history；若證偽，回到 report 先做、history 降到第 3 期 |
+| 第 1 期（PR-1 history 與 PR-2 contributions-feed＋report 讀取已上，2026-11-27） | M1＋M2 history、contributions-feed；M3 report 讀取合併 | 7（history 3、feed 1、report 3） | **與主線原訂「先做 report」不同**：依第 3 節對帳，history 是推定最大戶（約 70%）、report 約 7%。若第 0 期證實，先做 history；若證偽，回到 report 先做、history 降到第 3 期 |
 | 第 2 期 | M5 next；M6 system-one | 5.5（next 4、system-one 1.5） | `next` 是第二大戶，但它是心臟、日本站共用檔多，放在第 1 期驗證 RPC 手法之後 |
 | 第 3 期 | M4 落庫合併（只 no_change、policy）；M7 tasks／request-task；M8 去重 | 4 | 收益小、落庫風險最高，最後做；M4 先要有死鎖的證據 |
 

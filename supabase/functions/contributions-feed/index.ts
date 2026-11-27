@@ -5,6 +5,7 @@ import { contributionScore, SCORE_COLUMNS } from "../_shared/contribution-score.
 import { loadSummaryLookup } from "../_shared/summary-lookup.ts";
 import { ATTENTION_STATUSES, type FeedSummary, safePayload, summarizeContribution } from "../_shared/contribution-summary.ts";
 import { fetchSourceBriefs, viewSources } from "../_shared/source-read.ts";
+import { readFeedBundle } from "../_shared/feed-bundle.ts";
 
 // 代理交的 payload 可能把 id 寫成 "null"、"unknown"；不是 uuid 的不拿去查，否則整頁 400
 
@@ -77,10 +78,19 @@ Deno.serve(async (req) => {
     // 統計在資料庫算（contribution_feed_summary，見 migration 20260917000012）：
     // 一次 GROUP BY，不把上千列搬進函式。實測 808ms → 225ms，而且資料再長也是一次查詢。
     // 仍只在第一頁算——翻頁用不到它。
-    const [feedRes, summaryRes] = await Promise.all([
-      q,
-      wantSummary ? supabase.rpc("contribution_feed_summary") : Promise.resolve({ data: null, error: null }),
-    ]);
+    // tw-only:begin feed-rpc-read
+    // 2026-11-27（內部 REST 瘦身第 1 期 PR-2）：清單、筆數、統計、名稱對照、出處摘要先用一支 RPC 一次撈齊
+    // （contributions_feed_bundle，約 6～10 次 REST 降為 1 次）；RPC 回錯就退回原本的多次查詢（下面的 q 與 summary rpc）。日本站不跟。
+    const bundled = await readFeedBundle(supabase, {
+      status, agent_name: agentName, actor_id: actorId, type, limit, cursor, want_count: wantCount, want_summary: wantSummary,
+    });
+    const [feedRes, summaryRes] = bundled
+      ? [bundled.feedRes, bundled.summaryRes]
+      : await Promise.all([
+        q,
+        wantSummary ? supabase.rpc("contribution_feed_summary") : Promise.resolve({ data: null, error: null }),
+      ]);
+    // tw-only:end feed-rpc-read
     if (feedRes.error) throw new Error(feedRes.error.message);
     if (summaryRes.error) throw new Error(`summary: ${summaryRes.error.message}`);
 
@@ -91,11 +101,13 @@ Deno.serve(async (req) => {
     // 摘要是純函式、沒有資料庫：代理可以只帶 id 交件（politician_id、policy_id、lineage_id、party_id、
     // 參選紀錄列 id、行政區代碼、裁決指向的貢獻 id…），這裡把用到的 id 一次批次換成名稱（每張表一個 `in` 查詢）
     // 傳進去，讀者永遠只看到名稱；查不到的由摘要退成「某位政治人物」這類中性說法，不印 id。
-    const lookup = await loadSummaryLookup(supabase, page);
+    const lookup = bundled ? bundled.lookup : await loadSummaryLookup(supabase, page);
 
     // 交件的網址在出處表的等級、認定根據與存檔網址（#347 第二階段 A）；拿不到就照網域自動判斷
+    // tw-only:begin feed-rpc-briefs
     // deno-lint-ignore no-explicit-any
-    const sourceBriefs = await fetchSourceBriefs(supabase, page.flatMap((r: any) => (Array.isArray(r.source_urls) ? r.source_urls : [])));
+    const sourceBriefs = bundled ? bundled.briefs : await fetchSourceBriefs(supabase, page.flatMap((r: any) => (Array.isArray(r.source_urls) ? r.source_urls : [])));
+    // tw-only:end feed-rpc-briefs
 
     const items = page.map((r) => {
       const s = summarizeContribution({ contribution_type: r.contribution_type, payload: r.payload, applied_politician_id: r.applied_politician_id, applied_policy_id: r.applied_policy_id, lookup });

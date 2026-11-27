@@ -8,6 +8,7 @@ import { effectiveRosterBatchCap, loadQuotaLimits, type QuotaLimits } from "./qu
 import { rosterBatchProblems } from "./roster-batch-gate.ts";
 import { clientIpFrom, networkOf, proxySecretFromEnv } from "./ip-network.ts";
 import { chunksOf } from "./in-chunks.ts";
+import { type ContributePre, readContributePre } from "./report-bundle.ts";
 import { quotaWindowEnd, quotaWindowFields, quotaWindowStart } from "./quota-window.ts";
 import { type Actor, anonReservedBlock, resolveActor, resolveActorFromRequest } from "./actor.ts";
 import { requiredAgree } from "./consensus.ts";
@@ -101,10 +102,16 @@ export async function legacyIpHashOf(req: Request, ipSalt: string): Promise<stri
 }
 
 /** 撈這批任務的型別與同 IP 排隊中的貢獻，交給純函式判斷要擋哪幾筆 */
-async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyArray<{ task_id?: string | null }>, ipHash: string): Promise<Set<number>> {
+async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyArray<{ task_id?: string | null }>, ipHash: string, pre: ContributePre | null = null): Promise<Set<number>> {
   const taskIds = [...new Set(items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))];
   if (taskIds.length === 0) return new Set();
   const manualIds = taskIds.filter((t) => !t.startsWith("auto:") && UUID_RE.test(t));
+  if (pre) {
+    // 資料已由 report_context_bundle(contribute_pre) 一次帶回：任務型別只取這批的手動任務，在排隊的是同 IP 這批 task_id 底下的貢獻
+    const manualSet = new Set(manualIds.map((t) => t.toLowerCase()));
+    const manualTypes = new Map<string, string>(pre.tasks.filter((t) => manualSet.has(t.id.toLowerCase())).map((t) => [t.id, t.task_type]));
+    return blockedSingleAnswerIndexes(items, manualTypes, new Set<string>(pre.in_flight));
+  }
   // 名冊大批次最多 80 筆、每筆可帶不同 task_id：每 IN_CHUNK 個一查（網址長度，#455 審查）
   const [manualResList, inFlightResList] = await Promise.all([
     Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, task_type").in("id", chunk))),
@@ -119,6 +126,17 @@ async function findBlockedSingleAnswers(supabase: SupabaseLike, items: ReadonlyA
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 這批交件裡所有 uuid 形狀的任務 id（頂層 task_id 與 payload.task_id），給 report_context_bundle(contribute_pre) 一次查任務型別 */
+function taskUuidsOf(items: ReadonlyArray<{ task_id?: string | null; payload?: unknown }>): string[] {
+  const out = new Set<string>();
+  for (const it of items) {
+    for (const t of [it.task_id, (it.payload as Record<string, unknown> | null | undefined)?.task_id]) {
+      if (typeof t === "string" && UUID_RE.test(t)) out.add(t);
+    }
+  }
+  return [...out];
+}
 
 // ---- no_change＋unreachable：交件時伺服器當場試抓一次（2026-09-26 裁決） ----
 //
@@ -326,10 +344,26 @@ export async function handleContribute(
 
   const windowStart = quotaWindowStart();
   const sq = submitQuotaFor(actor, ipHash, quotaLimits);
-  const { count: usedToday, error: countError } = await supabase
-    .from("contributions").select("id", { count: "exact", head: true })
-    .eq(sq.column, sq.value).gte("created_at", windowStart.toISOString());
-  if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
+  // 內部 REST 瘦身第 1 期 PR-2（2026-11-27）：交件前要讀的（額度計數、這批任務的型別與多人任務內容、同 IP 在排隊的貢獻）
+  // 先用一支 RPC 一次撈齊（report_context_bundle，原本 4～5 次 REST）；RPC 回錯（pre 為 null）就退回下面原本的逐項查詢。
+  // 只合併讀取：判斷順序、回應文字與寫入都沒動（額度仍是「先數再寫、沒有原子保留」）。
+  const pre = await readContributePre(supabase, {
+    quota_column: sq.column, quota_value: sq.value, window_start: windowStart.toISOString(),
+    task_ids: taskUuidsOf(validation.items),
+    inflight_task_ids: [...new Set(validation.items.map((it) => it.task_id).filter((t): t is string => typeof t === "string" && t.length > 0))],
+    ip_hash: ipHash,
+    quota_limit: sq.limit,
+    batch_size: validation.items.length,
+  });
+  let usedToday: number | null;
+  if (pre) usedToday = pre.used;
+  else {
+    const { count, error: countError } = await supabase
+      .from("contributions").select("id", { count: "exact", head: true })
+      .eq(sq.column, sq.value).gte("created_at", windowStart.toISOString());
+    if (countError) throw new Error(`rate limit lookup: ${countError.message}`);
+    usedToday = count;
+  }
   const used = usedToday ?? 0;
   if (used + validation.items.length > sq.limit) {
     return {
@@ -343,8 +377,11 @@ export async function handleContribute(
   // 查不到、連結打不開也要回一份說明——那才是訪客看得到的東西。
   const manualNoChange = validation.items.filter((it) => it.contribution_type === "no_change" && typeof it.task_id === "string" && !it.task_id.startsWith("auto:")).map((it) => it.task_id as string);
   if (manualNoChange.length > 0) {
-    const qTaskLists = await Promise.all(chunksOf(manualNoChange).map((chunk) => supabase.from("contribution_tasks").select("id").in("id", chunk).eq("task_type", "question").limit(50)));
-    const qTasks = qTaskLists.flatMap((r) => (r.data ?? []) as unknown[]);
+    const noChangeSet = new Set(manualNoChange.map((t) => t.toLowerCase()));
+    const qTasks = pre
+      ? pre.tasks.filter((t) => t.task_type === "question" && noChangeSet.has(t.id.toLowerCase())).map((t) => ({ id: t.id }))
+      : (await Promise.all(chunksOf(manualNoChange).map((chunk) => supabase.from("contribution_tasks").select("id").in("id", chunk).eq("task_type", "question").limit(50))))
+        .flatMap((r) => (r.data ?? []) as unknown[]);
     if (qTasks.length > 0) {
       return { status: 400, body: { success: false, error: "question_needs_answer", message: "提問任務只收 question_answer：查不到、連結需登入打不開，也請用 question_answer 回一份說明（訪客看得到的是回答，不是 no_change）", task_ids: ((qTasks ?? []) as Array<{ id: string }>).map((t) => t.id) } };
     }
@@ -354,10 +391,15 @@ export async function handleContribute(
     const manualIds = [...new Set(validation.items.map((it) => (it.task_id ?? (it.payload as Record<string, unknown>)?.task_id) as unknown)
       .filter((t): t is string => typeof t === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)))];
     if (manualIds.length > 0) {
-      // query-bounds: ok — 按 id 清單查（chunksOf），且只取 multi_person 的手動任務
-      const lists = await Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, target").in("id", chunk).eq("target->>multi_person", "true").limit(100)));
       const targets = new Map<string, unknown>();
-      for (const r of lists) for (const t of ((r.data ?? []) as Array<{ id: string; target: unknown }>)) if (isMultiPersonTarget(t.target)) targets.set(t.id, t.target);
+      if (pre) {
+        const idSet = new Set(manualIds.map((t) => t.toLowerCase()));
+        for (const t of pre.tasks) if (t.multi_person && idSet.has(t.id.toLowerCase()) && isMultiPersonTarget(t.target)) targets.set(t.id, t.target);
+      } else {
+        // query-bounds: ok — 按 id 清單查（chunksOf），且只取 multi_person 的手動任務
+        const lists = await Promise.all(chunksOf(manualIds).map((chunk) => supabase.from("contribution_tasks").select("id, target").in("id", chunk).eq("target->>multi_person", "true").limit(100)));
+        for (const r of lists) for (const t of ((r.data ?? []) as Array<{ id: string; target: unknown }>)) if (isMultiPersonTarget(t.target)) targets.set(t.id, t.target);
+      }
       if (targets.size > 0) {
         const problems = groupPersonProblems(validation.items, targets);
         if (problems.length > 0) {
@@ -366,7 +408,7 @@ export async function handleContribute(
       }
     }
   }
-  const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash);
+  const blocked = await findBlockedSingleAnswers(supabase, validation.items, ipHash, pre);
 
   // 搜尋結果頁不是出處、也不算查過的網址（2026-10-06，見 search-page.ts）：不計入網址數，
   // 扣掉之後一個實際頁面都不剩（或單一出處欄本身就是搜尋結果頁）→ 整批 400，不算被拒。

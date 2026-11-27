@@ -24,6 +24,9 @@ const TW_SPANS: Span[] = [
   { from: "// 摘要是純函式、沒有資料庫：", to: "// 交件的網址在出處表的等級", toExclusive: true, why: "標題解析（政策、人物、參選紀錄）" },
   { from: "const s = summarizeContribution(", to: "const s = summarizeContribution(", why: "摘要本身（正見帶 lookup）" },
   { from: 'console.error("contributions-feed error:"', to: 'console.error("contributions-feed error:"', why: "日誌名稱" },
+  // 2026-11-27 內部 REST 瘦身 PR-2：正見先用單一 RPC 撈齊、失敗退回舊查詢；日本站不跟（兩段各對應日本站一個 jp-only 區段，裡面是原本的多次查詢）
+  { from: "// tw-only:begin feed-rpc-read", to: "// tw-only:end feed-rpc-read", why: "正見的單一 RPC（清單、筆數、統計）" },
+  { from: "// tw-only:begin feed-rpc-briefs", to: "// tw-only:end feed-rpc-briefs", why: "正見的單一 RPC（出處摘要）" },
 ];
 
 /** 拿掉空行、行首縮排與行尾空白，剩下要逐行相同 */
