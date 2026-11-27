@@ -3,4 +3,14 @@ Disallow: /admin/
 Disallow: /auth/
 Allow: /
 
+# SEO 分析類爬蟲：逐頁爬取、會執行 JS 觸發履歷查詢，對搜尋收錄沒有幫助
+User-agent: AhrefsBot
+User-agent: SemrushBot
+User-agent: MJ12bot
+User-agent: DotBot
+User-agent: DataForSeoBot
+User-agent: BLEXBot
+User-agent: PetalBot
+Disallow: /
+
 Sitemap: https://xn--2lw665d.tw/sitemap.xml
