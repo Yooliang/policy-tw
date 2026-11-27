@@ -127,6 +127,7 @@
 - shadow 比對：每小時一次，先 `gap_drain()` 清空、再算整表、與常駐表比（排除最近 2 分鐘內才重算的鍵，避免暫態誤報），差異寫入 `gap_reconcile_log`。
 - **切 `live` 的門檻：連續 7 天每小時比對差異皆為 0**（含一個週六的中選會同步與凌晨名冊鏡像窗口；第 2 期要求涵蓋兩個週六）。暫態差異若需列入白名單，必須在 PR 寫明原因。
 - 回滾：`UPDATE dispatch_gap_arms SET mode='shadow' WHERE arm='…'`，下一輪 seed（10 分鐘內）起該臂回到呼叫臂函式，常駐表仍繼續維護，可隨時再切回。
+- 差異樣本（`20261127044115`）：`dispatch_gap_reconcile_runs.diff_sample`（JSONB）在 missing／extra／changed 任一大於 0 時存每類最多 20 個鍵，`{"missing":[鍵],"extra":[鍵],"changed":[{"key","table","live"}]}`，`table`／`live` 只放 payload 裡值不同的欄位；全 0 時為 NULL。查法：`SELECT arm, run_at, diff_sample FROM dispatch_gap_reconcile_runs WHERE changed > 0 ORDER BY id DESC`。
 
 ### 2.8 觀測（進巡檢）
 
