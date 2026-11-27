@@ -1,5 +1,5 @@
 /**
- * 派工臂事件驅動化 第 2 期 PR-2（migration 20261127080000_dispatch_gaps_phase2b.sql）守門。
+ * 派工臂事件驅動化 第 2 期 PR-2（migration 20261127082000_dispatch_gaps_phase2b.sql）守門。
  * 設計：docs/dispatch-arms-event-driven-plan.md 第 5 節「第 2 期」與附錄 A.1／A.3。
  *
  * 用 PGlite 真的把第 0 期兩支、第 1 期、第 2 期 PR-1 與本支跑一遍。四支新臂（roster_cec_gap、roster_villages、district_seats、raw 的 roster_check 型）
@@ -23,7 +23,7 @@ const PR1 = "20261126170000_dispatch_gaps_phase0.sql";
 const PR2 = "20261126180000_dispatch_gaps_phase0b.sql";
 const PH1A = "20261126193000_dispatch_gaps_phase1a.sql";
 const PH2A = "20261127044503_dispatch_gaps_phase2a.sql";
-const MIG_NAME = "20261127080000_dispatch_gaps_phase2b.sql";
+const MIG_NAME = "20261127082000_dispatch_gaps_phase2b.sql";
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const pr1 = await read(PR1);
 const pr2 = await read(PR2);
@@ -1064,6 +1064,26 @@ Deno.test("G1 資料先在、遷移後才掛觸發器：四支新臂常駐表立
   await db.close();
 });
 
+Deno.test("G3 先前四支已切 live（20261127081000 之後的世界）：本期 migration 照常通過自我檢查，四支新臂 shadow、原四支仍 live；多一支別的 live 臂就整支失敗", async () => {
+  const db = await freshDb({ dataBeforeMig: true, mig: false });
+  for (const arm of ["legacy", "mismatch", "issue_too_broad", "ballot_numbers"]) await db.exec(`SELECT dispatch_gap_set_mode('${arm}', 'live')`);
+  await db.exec(mig);
+  const modes = await rows(db, "SELECT arm, mode FROM dispatch_gap_arms WHERE mode <> 'off' ORDER BY mode, arm");
+  assertEquals(modes.filter((m) => m.mode === "live").map((m) => m.arm), ["ballot_numbers", "issue_too_broad", "legacy", "mismatch"]);
+  assertEquals(modes.filter((m) => m.mode === "shadow").map((m) => m.arm), ["district_seats", "raw:roster_check", "roster_cec_gap", "roster_gap_units", "roster_unit_findings", "roster_villages"]);
+  await db.close();
+  const bad = await freshDb({ dataBeforeMig: true, mig: false });
+  await bad.exec("SELECT dispatch_gap_set_mode('roster_unit_findings', 'shadow'); INSERT INTO dispatch_gap_arms (arm, mode) VALUES ('manual_open', 'live') ON CONFLICT (arm) DO UPDATE SET mode = 'live'");
+  let msg = "";
+  try {
+    await bad.exec(mig);
+  } catch (e) {
+    msg = String((e as Error).message);
+  }
+  assert(msg.includes("不能有別的 live 臂"), msg);
+  await bad.close();
+});
+
 Deno.test("G2 切 live：四支新臂可切 live（總表分支）再切回；總表輸出在 live 時與即時算一致（drain 之後）", async () => {
   const db = await freshDb({ dataBeforeMig: true });
   await drainAll(db);
@@ -1140,7 +1160,7 @@ Deno.test("H3 DDL 鎖的順序：contributions 觸發器最後、緊接結尾；
   const hot = trig.find((t) => t.name === "trg_dispatch_gap_contributions")!;
   assert(hot.i > Math.max(...trig.filter((t) => t !== hot).map((t) => t.i)), "熱表觸發器要排在所有低頻表之後");
   const first = Math.min(...trig.map((t) => t.i));
-  for (const marker of ["DROP FUNCTION IF EXISTS cec_roster_diff()", "DROP FUNCTION IF EXISTS roster_diff_findings()", "只有前兩期的六支加", "四支臂的按鍵版或整表版沒有登記",
+  for (const marker of ["DROP FUNCTION IF EXISTS cec_roster_diff()", "DROP FUNCTION IF EXISTS roster_diff_findings()", "本期四支要是 shadow", "四支臂的按鍵版或整表版沒有登記",
     "要只剩帶 p_keys 的新簽名", "SELECT dispatch_gap_enqueue('raw:roster_check', '*', 'migration')", "dispatch_gap_reconcile_all(ARRAY['roster_cec_gap'"]) {
     const i = code.indexOf(marker);
     assert(i >= 0 && i < first, `${marker} 要在第一個 CREATE TRIGGER 之前`);
@@ -1158,9 +1178,9 @@ Deno.test("H3 DDL 鎖的順序：contributions 觸發器最後、緊接結尾；
 });
 
 Deno.test("H5 回滾檔：兩支舊簽名完整定義（本體與遷移裡的新版只差鍵過濾）、本期全部觸發器的 DROP、未處理事件的 DELETE；檔頭指到它", async () => {
-  const rb = await Deno.readTextFile(new URL("../../../docs/rollback/20261127080000_dispatch_gaps_phase2b_rollback.sql", import.meta.url));
+  const rb = await Deno.readTextFile(new URL("../../../docs/rollback/20261127082000_dispatch_gaps_phase2b_rollback.sql", import.meta.url));
   const rbn = rb.replace(/\r\n/g, "\n");
-  assert(mig.includes("docs/rollback/20261127080000_dispatch_gaps_phase2b_rollback.sql"));
+  assert(mig.includes("docs/rollback/20261127082000_dispatch_gaps_phase2b_rollback.sql"));
   assert(rbn.includes("DELETE FROM dispatch_gap_events WHERE arm IN ('roster_cec_gap', 'roster_villages', 'district_seats', 'raw:roster_check') AND processed_at IS NULL;"));
   const created = [...noComments(mig).matchAll(/CREATE TRIGGER (\w+)/g)].map((m) => m[1]).filter((n) => n !== "trg_dispatch_gap_contributions");
   assertEquals(created.length, 12);

@@ -293,7 +293,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 派工缺口（第 2 期 PR-2）：名單換了的單位一次入列（migration 20261127080000 起 cec_candidates 不再有語句層級觸發器）；
+  // 派工缺口（第 2 期 PR-2）：名單換了的單位一次入列（migration 20261127082000 起 cec_candidates 不再有語句層級觸發器）；
   // 入列失敗不影響同步，由雙軌比對與每日對帳補
   const gapEvents = await enqueueCecUnits(supabase, touched);
   if (!gapEvents.ok) console.warn(`[cec-sync] 派工缺口入列失敗（${gapEvents.units} 個單位）：${gapEvents.error}`);

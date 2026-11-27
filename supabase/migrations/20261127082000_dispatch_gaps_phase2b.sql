@@ -39,7 +39,7 @@
 --   dispatch_gap_on_batch_new／_old 加 cec_candidates → roster_cec_gap、cec_registrations → district_seats 整臂；
 --   contributions 觸發器重建一次（WHEN 多一個 district_seats 型別，其餘不變）。
 --
--- 徹底回滾：貼 docs/rollback/20261127080000_dispatch_gaps_phase2b_rollback.sql（兩支舊簽名的完整定義、31 支觸發器的 DROP、未處理事件的 DELETE 都在裡面，
+-- 徹底回滾：貼 docs/rollback/20261127082000_dispatch_gaps_phase2b_rollback.sql（兩支舊簽名的完整定義、31 支觸發器的 DROP、未處理事件的 DELETE 都在裡面，
 --   PR-1 函式的換回照該檔註解貼 20261127044503 的行範圍，不需要字串替換）。下面是逐項說明：
 -- 回滾（互不依賴）：
 --   退回即時算：SELECT dispatch_gap_set_mode('roster_cec_gap', 'off'); roster_villages、district_seats、raw:roster_check 同樣。
@@ -1419,13 +1419,13 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION dispatch_gap_seats_unit_key(INTEGER, TEXT, TEXT) IS '20261127080000：應選名額單位鍵 seats:<選舉>:<縣市>:<職位>（臺→台）。task_id 去掉前綴就是它，鍵與 dispatch_gap_scope_key 的 district_seats 分支同一個組法。';
-COMMENT ON FUNCTION dispatch_gap_recompute_roster_cec_gap(TEXT[]) IS '20261127080000：roster_cec_gap 的按鍵版（鍵＝unit:<選舉>:<縣市＋鄉鎮>:<職位>），本體同現行臂函式、只在 marked 的來源多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
-COMMENT ON FUNCTION dispatch_gap_recompute_roster_villages(TEXT[]) IS '20261127080000：roster_villages 的按鍵版（鍵同上），本體同現行臂函式、只在最後的 WHERE 多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
-COMMENT ON FUNCTION dispatch_gap_recompute_district_seats(TEXT[]) IS '20261127080000：district_seats 的按鍵版（鍵＝seats:<選舉>:<縣市>:<職位>），本體同現行臂函式、只在最後的 WHERE 多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
-COMMENT ON FUNCTION dispatch_gap_recompute_raw_roster_check(TEXT[]) IS '20261127080000：raw 臂裡 roster_check 這一型的按鍵版（鍵同名冊族），本體同現行 raw 函式的 roster_check 段、只在 WHERE 多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
-COMMENT ON FUNCTION dispatch_gap_full_raw_roster_check() IS '20261127080000：raw:roster_check 的整表版（現行 contribution_auto_tasks_raw() 只取 roster_check），雙軌比對與保底重算用。';
-COMMENT ON FUNCTION dispatch_gap_enqueue_roster_arms(INTEGER, TEXT, TEXT, TEXT, TEXT) IS '20261127080000：入列一個單位在 raw:roster_check、roster_cec_gap、roster_villages 的所有可能鍵（PR-1 的 dispatch_gap_roster_keys 超集，再補 raw 的縣市層級鍵）。';
+COMMENT ON FUNCTION dispatch_gap_seats_unit_key(INTEGER, TEXT, TEXT) IS '20261127082000：應選名額單位鍵 seats:<選舉>:<縣市>:<職位>（臺→台）。task_id 去掉前綴就是它，鍵與 dispatch_gap_scope_key 的 district_seats 分支同一個組法。';
+COMMENT ON FUNCTION dispatch_gap_recompute_roster_cec_gap(TEXT[]) IS '20261127082000：roster_cec_gap 的按鍵版（鍵＝unit:<選舉>:<縣市＋鄉鎮>:<職位>），本體同現行臂函式、只在 marked 的來源多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
+COMMENT ON FUNCTION dispatch_gap_recompute_roster_villages(TEXT[]) IS '20261127082000：roster_villages 的按鍵版（鍵同上），本體同現行臂函式、只在最後的 WHERE 多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
+COMMENT ON FUNCTION dispatch_gap_recompute_district_seats(TEXT[]) IS '20261127082000：district_seats 的按鍵版（鍵＝seats:<選舉>:<縣市>:<職位>），本體同現行臂函式、只在最後的 WHERE 多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
+COMMENT ON FUNCTION dispatch_gap_recompute_raw_roster_check(TEXT[]) IS '20261127082000：raw 臂裡 roster_check 這一型的按鍵版（鍵同名冊族），本體同現行 raw 函式的 roster_check 段、只在 WHERE 多一行單位鍵過濾。登記在 dispatch_gap_arm_keys.recompute_fn。';
+COMMENT ON FUNCTION dispatch_gap_full_raw_roster_check() IS '20261127082000：raw:roster_check 的整表版（現行 contribution_auto_tasks_raw() 只取 roster_check），雙軌比對與保底重算用。';
+COMMENT ON FUNCTION dispatch_gap_enqueue_roster_arms(INTEGER, TEXT, TEXT, TEXT, TEXT) IS '20261127082000：入列一個單位在 raw:roster_check、roster_cec_gap、roster_villages 的所有可能鍵（PR-1 的 dispatch_gap_roster_keys 超集，再補 raw 的縣市層級鍵）。';
 
 REVOKE ALL ON FUNCTION dispatch_gap_seats_unit_key(INTEGER, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION dispatch_gap_seats_scope(TEXT) FROM PUBLIC, anon, authenticated;
@@ -1485,16 +1485,19 @@ END $$;
 
 -- ------------------------------------------------------------
 -- 8. 自我檢查（觸發器之前；DDL 的表鎖到交易結束才放，所以能先做的檢查都先做完）：
---    十支臂是 shadow（第 1 期三支、PR-1 三支、本期四支）、沒有 live、按鍵版都在且已登記、新簽名的兩支函式在而且舊簽名不在、兩個開關開著
+--    本期四支是 shadow、除已切 live 的四支外沒有 live、按鍵版都在且已登記、新簽名的兩支函式在而且舊簽名不在、兩個開關開著
 -- ------------------------------------------------------------
 DO $$
 BEGIN
-  IF (SELECT count(*) FROM dispatch_gap_arms WHERE mode = 'shadow') <> 10
+  -- 前面 20261127081000 已把 legacy、mismatch、issue_too_broad、ballot_numbers 切 live：這裡不能有別的 live 臂，本期四支必須是 shadow
+  --（實際臂數：這支跑完 shadow 是 roster_unit_findings、roster_gap_units 加本期四支共 6、live 是那四支；測試環境沒有 081000，四支是 shadow，所以不寫死總數）
+  IF (SELECT count(*) FROM dispatch_gap_arms WHERE mode = 'shadow' AND arm IN ('roster_cec_gap', 'roster_villages', 'district_seats', 'raw:roster_check')) <> 4
      OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'shadow'
                  AND arm NOT IN ('legacy', 'mismatch', 'issue_too_broad', 'roster_unit_findings', 'roster_gap_units', 'ballot_numbers',
                                  'roster_cec_gap', 'roster_villages', 'district_seats', 'raw:roster_check'))
-     OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'live') THEN
-    RAISE EXCEPTION '第 2 期 PR-2：只有前兩期的六支加 roster_cec_gap、roster_villages、district_seats、raw:roster_check 可以是 shadow，不能有 live';
+     OR EXISTS (SELECT 1 FROM dispatch_gap_arms WHERE mode = 'live'
+                 AND arm NOT IN ('legacy', 'mismatch', 'issue_too_broad', 'ballot_numbers')) THEN
+    RAISE EXCEPTION '第 2 期 PR-2：本期四支要是 shadow；除了已切 live 的 legacy、mismatch、issue_too_broad、ballot_numbers，不能有別的 live 臂';
   END IF;
   IF EXISTS (SELECT 1 FROM dispatch_gap_arm_keys k WHERE k.arm IN ('roster_cec_gap', 'roster_villages', 'district_seats', 'raw:roster_check')
               AND (k.recompute_fn IS NULL OR to_regprocedure(k.recompute_fn) IS NULL OR to_regprocedure(k.full_fn) IS NULL)) THEN
