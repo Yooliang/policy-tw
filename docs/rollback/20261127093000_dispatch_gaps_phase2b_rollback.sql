@@ -1,4 +1,4 @@
--- 回滾 20261127082000_dispatch_gaps_phase2b.sql（第 2 期 PR-2）：整支可直接貼進 SQL 編輯器，一個交易跑完，不需要任何字串替換。
+-- 回滾 20261127093000_dispatch_gaps_phase2b.sql（第 2 期 PR-2）：整支可直接貼進 SQL 編輯器，一個交易跑完，不需要任何字串替換。
 -- 只要退回即時算、不拆掉物件，用這兩行就夠（不需要這支檔）：
 --   SELECT dispatch_gap_set_mode('roster_cec_gap', 'off'); roster_villages、district_seats、'raw:roster_check' 同樣；UPDATE dispatch_gap_settings SET events_enabled = false WHERE id = 1;
 -- 這支是「徹底退回到 20261127044503（PR-1）的狀態」。前三段（①②③）貼完這支檔就做完了；第④段要你照註解貼 20261127044503_dispatch_gaps_phase2a.sql 的行範圍（那些行是完整的 CREATE OR REPLACE，不用改）。

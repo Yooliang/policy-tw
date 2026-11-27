@@ -1,5 +1,5 @@
 /**
- * 派工臂事件驅動化 第 2 期 PR-2（migration 20261127082000_dispatch_gaps_phase2b.sql）守門。
+ * 派工臂事件驅動化 第 2 期 PR-2（migration 20261127093000_dispatch_gaps_phase2b.sql）守門。
  * 設計：docs/dispatch-arms-event-driven-plan.md 第 5 節「第 2 期」與附錄 A.1／A.3。
  *
  * 用 PGlite 真的把第 0 期兩支、第 1 期、第 2 期 PR-1 與本支跑一遍。四支新臂（roster_cec_gap、roster_villages、district_seats、raw 的 roster_check 型）
@@ -23,7 +23,7 @@ const PR1 = "20261126170000_dispatch_gaps_phase0.sql";
 const PR2 = "20261126180000_dispatch_gaps_phase0b.sql";
 const PH1A = "20261126193000_dispatch_gaps_phase1a.sql";
 const PH2A = "20261127044503_dispatch_gaps_phase2a.sql";
-const MIG_NAME = "20261127082000_dispatch_gaps_phase2b.sql";
+const MIG_NAME = "20261127093000_dispatch_gaps_phase2b.sql";
 const read = async (name: string) => (await Deno.readTextFile(new URL(name, MIGRATIONS))).replace(/\r\n/g, "\n");
 const pr1 = await read(PR1);
 const pr2 = await read(PR2);
@@ -1178,9 +1178,9 @@ Deno.test("H3 DDL 鎖的順序：contributions 觸發器最後、緊接結尾；
 });
 
 Deno.test("H5 回滾檔：兩支舊簽名完整定義（本體與遷移裡的新版只差鍵過濾）、本期全部觸發器的 DROP、未處理事件的 DELETE；檔頭指到它", async () => {
-  const rb = await Deno.readTextFile(new URL("../../../docs/rollback/20261127082000_dispatch_gaps_phase2b_rollback.sql", import.meta.url));
+  const rb = await Deno.readTextFile(new URL("../../../docs/rollback/20261127093000_dispatch_gaps_phase2b_rollback.sql", import.meta.url));
   const rbn = rb.replace(/\r\n/g, "\n");
-  assert(mig.includes("docs/rollback/20261127082000_dispatch_gaps_phase2b_rollback.sql"));
+  assert(mig.includes("docs/rollback/20261127093000_dispatch_gaps_phase2b_rollback.sql"));
   assert(rbn.includes("DELETE FROM dispatch_gap_events WHERE arm IN ('roster_cec_gap', 'roster_villages', 'district_seats', 'raw:roster_check') AND processed_at IS NULL;"));
   const created = [...noComments(mig).matchAll(/CREATE TRIGGER (\w+)/g)].map((m) => m[1]).filter((n) => n !== "trg_dispatch_gap_contributions");
   assertEquals(created.length, 12);
