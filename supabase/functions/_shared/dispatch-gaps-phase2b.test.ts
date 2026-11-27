@@ -151,7 +151,7 @@ CREATE FUNCTION issue_too_broad_election() RETURNS INTEGER LANGUAGE sql STABLE A
 -- 觸發器會碰到的真表（欄位只放用得到的）
 CREATE TABLE elections (id INTEGER PRIMARY KEY, election_date DATE NOT NULL, election_types TEXT[]);
 CREATE TABLE regions (id INTEGER PRIMARY KEY, region TEXT, sub_region TEXT, village TEXT, admin_code TEXT);
-CREATE TABLE politicians (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT, birth_year INTEGER, status TEXT, region TEXT, merged_into UUID, party TEXT);
+CREATE TABLE politicians (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT, birth_year INTEGER, status TEXT, region TEXT, sub_region TEXT, merged_into UUID, party TEXT);
 CREATE TABLE politician_elections (id SERIAL PRIMARY KEY, politician_id UUID, election_id INTEGER, election_type TEXT, candidacy_status TEXT, region_id INTEGER,
   cand_no INTEGER, party_id BIGINT, party_basis TEXT, withdrawn_after_filing BOOLEAN);
 CREATE TABLE policies (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), politician_id UUID, title TEXT, description TEXT, category TEXT, tags TEXT[],
@@ -309,6 +309,9 @@ INSERT INTO roster_reconcile_units (election_id, election_type, county, town, to
 INSERT INTO politicians (id, name, region) VALUES ('${U(1)}', 'P甲', '臺北市'), ('${U(2)}', 'P乙', '新北市'), ('${U(3)}', '里長1', '花蓮縣'),
   ('${U(4)}', 'Y甲', '花蓮縣'), ('${U(5)}', 'c1', '臺北市'), ('${U(6)}', 'c2', '臺北市'), ('${U(7)}', 'P丁', '新北市'), ('${U(8)}', 'M甲', '臺北市'), ('${U(9)}', 'Z甲', '宜蘭縣'),
   ('${U(10)}', '多餘人', '臺北市');
+-- 參選紀錄沒指到選舉區列（region_id 空），鄉鎮只記在人物上：結果類的單位要用人物的縣市與鄉鎮（election_result_cec_matches 的回退）
+INSERT INTO politicians (id, name, region, sub_region) VALUES ('${U(11)}', '無選區人', '花蓮縣', '花蓮市');
+INSERT INTO politician_elections (id, politician_id, election_id, election_type, candidacy_status, region_id, cand_no) VALUES (1011, '${U(11)}', 2022, '鄉鎮市民代表', 'elected', NULL, NULL);
 INSERT INTO politician_elections (id, politician_id, election_id, election_type, candidacy_status, region_id, cand_no) VALUES
   (1001, '${U(1)}', 2026, '縣市長', 'filed', 1, 1), (1002, '${U(2)}', 2026, '縣市長', 'filed', 4, 1), (1003, '${U(3)}', 2026, '村里長', 'filed', 3, 1),
   (1004, '${U(4)}', 2022, '縣市長', 'elected', 5, NULL), (1005, '${U(5)}', 2022, '縣市議員', 'elected', 2, NULL), (1006, '${U(6)}', 2022, '縣市議員', 'not_elected', 7, NULL),
@@ -355,10 +358,12 @@ INSERT INTO fake_rows VALUES
   ('owner_mismatch', 'auto:candidacy_owner_mismatch:1001', 'candidacy_owner_mismatch', '{"signals":[]}', 'x', ARRAY['h'], 1, '臺北市'),
   ('elected_missing', 'auto:elected_missing:1', 'elected_missing', '{"election_id":2022,"election_type":"縣市長","region":"臺北市","name":"某當選人"}', 'x', ARRAY['h'], 1, '臺北市'),
   ('election_results', 'auto:election_results_missing:2022:x', 'election_results_missing', '{"politician_election_ids":[1004]}', 'x', ARRAY['h'], 1, '花蓮縣'),
-  ('election_results', 'auto:election_result_unmatched:1005', 'election_result_unmatched', '{}', 'x', ARRAY['h'], 1, '臺北市');
+  ('election_results', 'auto:election_result_unmatched:1005', 'election_result_unmatched', '{}', 'x', ARRAY['h'], 1, '臺北市'),
+  ('election_results', 'auto:election_result_unmatched:1011', 'election_result_unmatched', '{}', 'x', ARRAY['h'], 1, '花蓮縣');
 INSERT INTO _cm VALUES
   (1004, 2022, '縣市長', '花蓮縣', '', NULL, NULL, '${U(4)}', 'Y甲', 'elected', true, 1, NULL, 41, NULL),
-  (1005, 2022, '縣市議員', '臺北市', '', NULL, '第01選舉區', '${U(5)}', 'c1', 'elected', false, 1, NULL, 21, NULL);
+  (1005, 2022, '縣市議員', '臺北市', '', NULL, '第01選舉區', '${U(5)}', 'c1', 'elected', false, 1, NULL, 21, NULL),
+  (1011, 2022, '鄉鎮市民代表', '花蓮縣', '花蓮市', NULL, NULL, '${U(11)}', '無選區人', 'elected', false, 1, NULL, 61, NULL);
 INSERT INTO _rm VALUES (2026, '新北市', '${U(2)}', 1002, 'P乙', '臺北市', 1, 4, 'http://m');
 `;
 
@@ -574,7 +579,11 @@ Deno.test("B3 roster_diff_findings(p_keys)：NULL、全部鍵、部分鍵與舊�
   // 成本證據：election_result_cec_matches（整份最貴的一段）整表算兩位，只給一個單位只算一位
   await db.exec("DELETE FROM _cm_calls");
   await db.exec("SELECT count(*) FROM roster_diff_findings()");
-  assertEquals((await rows(db, "SELECT n FROM _cm_calls")).map((r) => r.n), [2]);
+  assertEquals((await rows(db, "SELECT n FROM _cm_calls")).map((r) => r.n), [3]);
+  // region_id 空、鄉鎮只記在人物上的參選紀錄：帶鍵路徑也要找得到（回退用人物的鄉鎮）
+  const fb = await rows(db, `SELECT politician_election_id AS pe FROM roster_diff_findings(ARRAY['unit:2022:花蓮縣花蓮市:鄉鎮市民代表']) WHERE kind = '結果'`);
+  assertEquals(fb.map((r) => r.pe), [1011], "鄉鎮來自人物的 sub_region 時，結果類 finding 仍要在帶鍵路徑出現");
+  assertEquals(await one(db, `SELECT count(*)::int AS v FROM old_roster_diff_findings() WHERE kind = '結果' AND politician_election_id = 1011 AND town = '花蓮市'`), 1);
   await db.exec("DELETE FROM _cm_calls");
   await db.exec(`SELECT count(*) FROM roster_diff_findings(ARRAY['unit:2022:花蓮縣:縣市長'])`);
   assertEquals((await rows(db, "SELECT n FROM _cm_calls")).map((r) => r.n), [1], "只給花蓮縣縣市長，結果類只該對一位參選紀錄去配中選會名單");
@@ -766,7 +775,12 @@ Deno.test("D3 設定與小表：elections／election_milestones／regions／part
   assertEquals(await pending(db), S(["ballot_numbers|*", "raw:roster_check|*", "roster_gap_units|*", "roster_unit_findings|*"]));
   await clearEvents(db);
   await db.exec("INSERT INTO regions VALUES (1, '臺北市', NULL, NULL, NULL), (2, '新北市', NULL, NULL, NULL)");
+  assertEquals(await pending(db), [], "regions 只掛 UPDATE／DELETE：新選區 INSERT 不入列（apply-contribution 建選區時不要每次整臂）");
+  await db.exec("UPDATE regions SET sub_region = '第01選舉區' WHERE id = 1");
   assertEquals(await pending(db), S(["ballot_numbers|*", "raw:roster_check|*", "roster_cec_gap|*", "roster_gap_units|*", "roster_unit_findings|*", "roster_villages|*"]), "兩列一個語句");
+  await clearEvents(db);
+  await db.exec("DELETE FROM regions WHERE id = 2");
+  assertEquals((await pending(db)).length, 6);
   await clearEvents(db);
   await db.exec("INSERT INTO parties VALUES (1, 'x')");
   assertEquals(await pending(db), ["roster_unit_findings|*"]);
@@ -774,8 +788,11 @@ Deno.test("D3 設定與小表：elections／election_milestones／regions／part
   await db.exec("INSERT INTO party_aliases (alias) VALUES ('y')");
   assertEquals(await pending(db), ["roster_unit_findings|*"]);
   await clearEvents(db);
+  // cec_results_auto_plan_rows 不掛觸發器（refresh 每次整表 DELETE，語句觸發器會每 10 分鐘入整臂）
   await db.exec("INSERT INTO cec_results_auto_plan_rows VALUES (1)");
-  assertEquals(await pending(db), ["roster_unit_findings|*"]);
+  await db.exec("DELETE FROM cec_results_auto_plan_rows");
+  assertEquals(await pending(db), []);
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM pg_trigger WHERE tgrelid = 'cec_results_auto_plan_rows'::regclass AND NOT tgisinternal"), 0);
   await clearEvents(db);
   await db.exec("INSERT INTO electoral_district_areas VALUES ('臺北市', '文山區')");
   assertEquals(await pending(db), ["roster_villages|*"]);
@@ -831,6 +848,45 @@ Deno.test("D5 politician_elections 與人物：改一列，入名冊三支＋新
   await db.exec("INSERT INTO electoral_district_areas VALUES ('a', 'b')");
   await db.exec("INSERT INTO task_checks (task_id) VALUES ('auto:candidacy_owner_mismatch:1')");
   assertEquals(await pending(db), []);
+  await db.close();
+});
+
+Deno.test("D6 時間翻轉：名單公告日前後補 raw:roster_check、roster_villages；投票日前後多補 district_seats；其餘日子不補", async () => {
+  const db = await freshDb();
+  await db.exec("SET app.activity_today = ''");
+  const today = await one<string>(db, "SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS v");
+  await db.exec(`SET app.activity_today = '${today}'`);
+  await db.exec("INSERT INTO roster_check_scope (election_id, election_type, list_announced_on) VALUES (2026, '縣市長', CURRENT_DATE + 30)");
+  await clearEvents(db);
+  assertEquals(await one(db, "SELECT dispatch_gap_date_flip_roster() AS v"), 0, "離名單公告日 30 天、沒有選舉，什麼都不做");
+  await db.exec("UPDATE roster_check_scope SET list_announced_on = CURRENT_DATE + 1");
+  await clearEvents(db);
+  assertEquals(await one(db, "SELECT dispatch_gap_date_flip_roster() AS v"), 1);
+  assertEquals(await pending(db), ["raw:roster_check|*", "roster_villages|*"]);
+  await db.exec("UPDATE roster_check_scope SET list_announced_on = CURRENT_DATE - 2");
+  await clearEvents(db);
+  assertEquals(await one(db, "SELECT dispatch_gap_date_flip_roster() AS v"), 1, "公告日後 2 天內還補（時區與每日兩次排程的空窗）");
+  await db.exec("UPDATE roster_check_scope SET list_announced_on = CURRENT_DATE - 3");
+  await clearEvents(db);
+  assertEquals(await one(db, "SELECT dispatch_gap_date_flip_roster() AS v"), 0);
+  await db.exec("INSERT INTO elections VALUES (2026, CURRENT_DATE + 1, ARRAY['縣市議員'])");
+  await clearEvents(db);
+  assertEquals(await one(db, "SELECT dispatch_gap_date_flip_roster() AS v"), 1);
+  assertEquals(await pending(db), ["ballot_numbers|*", "district_seats|*", "roster_unit_findings|*"]);
+  await db.close();
+});
+
+Deno.test("D7 新增分支的入列出錯只丟 WARNING、不讓來源表寫入失敗：edit_history（每筆貢獻都寫）、task_checks、roster_checks、roster_reconcile_units", async () => {
+  const db = await freshDb({ dataBeforeMig: true });
+  await db.exec(`CREATE OR REPLACE FUNCTION dispatch_gap_enqueue_reg(p_arm TEXT, p_key TEXT, p_kind TEXT) RETURNS BOOLEAN LANGUAGE plpgsql AS $f$ BEGIN RAISE EXCEPTION '入列壞了'; END $f$`);
+  await db.exec("INSERT INTO edit_history (table_name, record_id, field) VALUES ('politician_elections', '1001', '*')");
+  await db.exec("INSERT INTO task_checks (task_id, outcome) VALUES ('auto:candidacy_owner_mismatch:1001', 'confirmed')");
+  await db.exec("INSERT INTO roster_checks (election_id, region, election_type, cec_count) VALUES (2026, '臺北市', '縣市長', 1)");
+  await db.exec("INSERT INTO roster_reconcile_units (election_id, election_type, county, town, needs_agent) VALUES (2026, '縣市長', '宜蘭縣', '', true)");
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM edit_history WHERE record_id = '1001'"), 1);
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM task_checks"), 1);
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM roster_checks WHERE region = '臺北市'"), 1);
+  assertEquals(await one(db, "SELECT count(*)::int AS v FROM roster_reconcile_units WHERE county = '宜蘭縣'"), 1);
   await db.close();
 });
 
@@ -1025,7 +1081,7 @@ Deno.test("G2 切 live：四支新臂可切 live（總表分支）再切回；�
 // ───────────────────────── H 遷移文字守門 ─────────────────────────
 Deno.test("H1 觸發器：全部 AFTER；列層級 UPDATE 帶 OF 欄位或 WHEN（低頻設定表例外並列名）；語句層級走 dispatch_gap_on_stmt；本支新掛 13 支＋contributions 重建", () => {
   const stmts = noComments(mig).split(/;\s*\n/).filter((s) => /CREATE TRIGGER/.test(s));
-  assertEquals(stmts.length, 14, "十三支新增＋contributions 一支重建");
+  assertEquals(stmts.length, 13, "十二支新增＋contributions 一支重建");
   const LOW_FREQ = ["roster_check_scope", "verification_sources", "cec_registration_sources"];
   for (const s of stmts) {
     const head = s.replace(/\s+/g, " ");
@@ -1080,7 +1136,7 @@ Deno.test("H2 沒動總表、seed、被複製的臂函式本體與 PR-1 的整�
 Deno.test("H3 DDL 鎖的順序：contributions 觸發器最後、緊接結尾；DROP／CREATE 函式與自我檢查、補整臂事件都在第一個 CREATE TRIGGER 之前；最後之後只剩計數檢查與 NOTIFY", () => {
   const code = noComments(mig);
   const trig = [...code.matchAll(/CREATE TRIGGER (\w+)/g)].map((m) => ({ name: m[1], i: m.index! }));
-  assertEquals(trig.length, 14);
+  assertEquals(trig.length, 13);
   const hot = trig.find((t) => t.name === "trg_dispatch_gap_contributions")!;
   assert(hot.i > Math.max(...trig.filter((t) => t !== hot).map((t) => t.i)), "熱表觸發器要排在所有低頻表之後");
   const first = Math.min(...trig.map((t) => t.i));
@@ -1093,12 +1149,32 @@ Deno.test("H3 DDL 鎖的順序：contributions 觸發器最後、緊接結尾；
   const last = Math.max(...trig.map((t) => t.i));
   const afterLast = code.slice(code.indexOf(";", code.indexOf("EXECUTE FUNCTION", last)) + 1);
   assert(!/\b(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE)\b/.test(afterLast), `最後一個觸發器之後只該有計數檢查與 NOTIFY：${afterLast.slice(0, 200)}`);
-  assert(afterLast.includes("預期共掛 32 支觸發器"));
+  assert(afterLast.includes("預期共掛 31 支觸發器"));
   // cec_candidates 的三支語句層級觸發器在掛新觸發器之前就拿掉（DROP 在第一個 CREATE TRIGGER 之前）
   for (const t of ["ins", "upd", "del"]) {
     const i = code.indexOf(`DROP TRIGGER IF EXISTS trg_dispatch_gap_cec_candidates_${t} ON cec_candidates;`);
     assert(i >= 0 && i < first, `cec_candidates_${t} 的 DROP 要在第一個 CREATE TRIGGER 之前`);
   }
+});
+
+Deno.test("H5 回滾檔：兩支舊簽名完整定義（本體與遷移裡的新版只差鍵過濾）、本期全部觸發器的 DROP、未處理事件的 DELETE；檔頭指到它", async () => {
+  const rb = await Deno.readTextFile(new URL("../../../docs/rollback/20261127053900_dispatch_gaps_phase2b_rollback.sql", import.meta.url));
+  const rbn = rb.replace(/\r\n/g, "\n");
+  assert(mig.includes("docs/rollback/20261127053900_dispatch_gaps_phase2b_rollback.sql"));
+  assert(rbn.includes("DELETE FROM dispatch_gap_events WHERE arm IN ('roster_cec_gap', 'roster_villages', 'district_seats', 'raw:roster_check') AND processed_at IS NULL;"));
+  const created = [...noComments(mig).matchAll(/CREATE TRIGGER (\w+)/g)].map((m) => m[1]).filter((n) => n !== "trg_dispatch_gap_contributions");
+  assertEquals(created.length, 12);
+  for (const t of created) assert(rbn.includes(`DROP TRIGGER IF EXISTS ${t} ON`), `回滾檔缺 ${t} 的 DROP`);
+  for (const t of ["ins", "upd", "del"]) assert(rbn.includes(`CREATE TRIGGER trg_dispatch_gap_cec_candidates_${t}`));
+  // 舊簽名的定義：整表版每一行（去掉本期鍵過濾行）都在回滾檔裡
+  const oldDiff = fnText(rbn, "cec_roster_diff");
+  const oldFind = fnText(rbn, "roster_diff_findings");
+  const code = (fn: string) => bodyLines(fn).map((l) => l.replace(/\s*--.*$/, "")).filter((l) => l);   // 行尾註解不算
+  assertEquals(code(oldDiff).filter((l) => !code(diffSrc).includes(l)), [], "回滾檔的 cec_roster_diff 要等於舊版本體");
+  assertEquals(code(diffSrc).filter((l) => !code(oldDiff).includes(l)), []);
+  assertEquals(code(oldFind).filter((l) => !code(findingsSrc).includes(l)), []);
+  assertEquals(code(findingsSrc).filter((l) => !code(oldFind).includes(l)), []);
+  assert(oldDiff.includes("SET enable_nestloop = off"));
 });
 
 Deno.test("H4 不改 seed 與總表：本支沒有 UPDATE／DELETE／INSERT task_dispatches、不改表結構、不新增表、不排 cron", () => {

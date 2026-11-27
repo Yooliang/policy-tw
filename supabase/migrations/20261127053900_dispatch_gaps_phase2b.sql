@@ -23,7 +23,7 @@
 --      cec_registrations 的語句層級觸發器保留（只有 migration 載入登記彙總表時才寫；本期多入 district_seats 整臂）。
 --      部署順序：migration 先（CI 本來就是先 db push 再部署函式）；兩者之間的幾分鐘內若剛好有同步，那幾個單位沒有事件，由每小時雙軌比對與每日對帳補。
 --   D. 事件盲區：regions、election_districts、task_checks、edit_history（參選紀錄建立那一筆）、verification_sources、cec_registration_sources、
---      cec_results_auto_plan_rows、parties／party_aliases 掛上觸發器；另補新臂自己的來源：roster_checks、roster_reconcile_units、roster_check_scope、electoral_district_areas，
+--      parties／party_aliases 掛上觸發器（cec_results_auto_plan_rows 不掛：cec_results_auto_refresh 狀態鍵一變就整表 DELETE，語句觸發器連空表也觸發，會把拿掉的整臂觸發器換個地方加回來；它的輸入 cec_candidates、參選紀錄、選舉區已有單位事件；regions 只掛 UPDATE／DELETE，INSERT 新選區的影響靠該選區後續的參選紀錄事件與對帳）；另補新臂自己的來源：roster_checks、roster_reconcile_units、roster_check_scope、electoral_district_areas，
 --      contributions 多收 district_seats 型別。politician_pair_resolutions 查過：它只改 cec_roster_diff 的 dup 輸出，而 dup 不進名單族任何一支臂，所以不掛。
 --      掛不了單位鍵的（regions、parties 這類）入整臂；task_dispatches 對 roster_cec_gap 的自我參照（已派出去的單位補到一半仍留著）不是事件，見風險。
 --
@@ -39,12 +39,14 @@
 --   dispatch_gap_on_batch_new／_old 加 cec_candidates → roster_cec_gap、cec_registrations → district_seats 整臂；
 --   contributions 觸發器重建一次（WHEN 多一個 district_seats 型別，其餘不變）。
 --
+-- 徹底回滾：貼 docs/rollback/20261127053900_dispatch_gaps_phase2b_rollback.sql（兩支舊簽名的完整定義、31 支觸發器的 DROP、未處理事件的 DELETE 都在裡面，
+--   PR-1 函式的換回照該檔註解貼 20261127044503 的行範圍，不需要字串替換）。下面是逐項說明：
 -- 回滾（互不依賴）：
 --   退回即時算：SELECT dispatch_gap_set_mode('roster_cec_gap', 'off'); roster_villages、district_seats、raw:roster_check 同樣。
 --   關事件：UPDATE dispatch_gap_settings SET events_enabled = false WHERE id = 1;
 --   新增的觸發器：trg_dispatch_gap_roster_checks、_roster_reconcile_units、_roster_check_scope、_election_districts、_verification_sources、
 --     _cec_registration_sources、_task_checks_owner、_edit_history_pe（各 DROP TRIGGER ... ON <表>）；語句層級：trg_dispatch_gap_regions_stmt、_parties_stmt、
---     _party_aliases_stmt、_cec_results_auto_plan_rows_stmt、_electoral_district_areas_stmt。contributions 的觸發器換回 20261127044503 的 WHEN。
+--     _party_aliases_stmt、_electoral_district_areas_stmt。contributions 的觸發器換回 20261127044503 的 WHEN。
 --   cec_candidates 的三支語句層級觸發器補回（照 20261127044503 的寫法）：trg_dispatch_gap_cec_candidates_ins／_upd／_del（REFERENCING NEW／OLD TABLE AS new_rows／old_rows，
 --     FOR EACH STATEMENT，EXECUTE FUNCTION dispatch_gap_on_batch_new／_old）；cec-sync 結尾的呼叫留著無害（函式還在就會入列），要拿掉就把 Edge Function 那幾行還原。
 --   dispatch_gap_on_change()、dispatch_gap_on_batch_new／_old、dispatch_gap_enqueue_units()、dispatch_gap_scope_key()、
@@ -64,6 +66,10 @@
 --   shadow 期間每小時比對多約 3 秒。
 --   roster_cec_gap 的缺口門檻有一條自我參照（單位已經在 task_dispatches 裡就繼續派，補到一半缺口變小也不收）：派工列被收回／出生是 seed 的輸出，不是來源表事件，
 --   所以「單位剛好從派工列消失」這種變化要等下一次該單位有任何事件、或每小時雙軌比對與每日對帳才補（雙軌短暫出現差異，不是漏接）；它與現行即時算的語意一致。
+--   時間型的變化沒有事件（靠每小時雙軌比對與每日對帳補）：roster_checks 的重查冷卻（recheck_days、roster_attempt_cooldown_days 到期）、
+--   名冊鏡像 3 天新鮮度；投票日與名單公告日的翻面由 dispatch_gap_date_flip_roster 補整臂事件（本期擴到 district_seats、raw:roster_check、roster_villages）。
+--   roster_cec_gap 的「我們是否已對上」是縣市層級（ours 以選舉＋職位＋縣市＋姓名鍵比），而缺口鍵是鄉鎮層級：鄉鎮 A 的事件（例如補了一位）
+--   可能讓同縣市鄉鎮 B 的 matched 也變，這種連動不會自動入列，靠雙軌比對與對帳補（雙軌短暫出現差異，不是漏接錯誤）。
 --   cec_roster_diff／roster_diff_findings 的 DROP＋CREATE 取函式鎖，CREATE TRIGGER 取表鎖，放在最後、SET LOCAL lock_timeout 30 秒，拿不到就整支失敗（重跑即可）。
 
 -- ------------------------------------------------------------
@@ -416,7 +422,7 @@ LANGUAGE sql STABLE AS $$
                                         JOIN politicians pp ON pp.id = pk.politician_id
                                         LEFT JOIN regions rk ON rk.id = pk.region_id
                                        WHERE pk.id = x.id::INTEGER
-                                         AND dispatch_gap_roster_keys(pk.election_id, pk.election_type, COALESCE(rk.region, pp.region), rk.sub_region) && p_keys))
+                                         AND dispatch_gap_roster_keys(pk.election_id, pk.election_type, COALESCE(rk.region, pp.region), COALESCE(rk.sub_region, pp.sub_region)) && p_keys))
   ),
   cm AS MATERIALIZED (SELECT * FROM election_result_cec_matches(ARRAY(SELECT DISTINCT i.pe_id FROM er_ids i))),
   er_f AS (
@@ -1034,13 +1040,18 @@ BEGIN
       PERFORM dispatch_gap_enqueue('legacy', 'policy:' || (v_row ->> 'record_id'), v_kind);
     ELSIF TG_OP = 'INSERT' AND v_row ->> 'table_name' = 'politician_elections' AND v_row ->> 'field' = '*' AND (v_row ->> 'record_id') ~ '^[0-9]{1,9}$' THEN
       -- region_gap 看「建立這筆參選紀錄的交件寫的縣市」（edit_history 的 '*' 那一筆）：入這筆參選紀錄所屬的單位
-      v_pe := (v_row ->> 'record_id')::INTEGER;
-      SELECT pe.election_id, pe.election_type, COALESCE(rg.region, p.region), rg.sub_region INTO v_ceid, v_cet, v_county, v_sub
-        FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id LEFT JOIN regions rg ON rg.id = pe.region_id
-       WHERE pe.id = v_pe;
-      IF v_county IS NOT NULL THEN
-        PERFORM dispatch_gap_enqueue_units(v_ceid, v_cet, v_county, v_sub, v_kind);
-      END IF;
+      -- 每筆貢獻都會寫 edit_history：入列出任何錯都只丟 WARNING，不能讓貢獻套用失敗
+      BEGIN
+        v_pe := (v_row ->> 'record_id')::INTEGER;
+        SELECT pe.election_id, pe.election_type, COALESCE(rg.region, p.region), rg.sub_region INTO v_ceid, v_cet, v_county, v_sub
+          FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id LEFT JOIN regions rg ON rg.id = pe.region_id
+         WHERE pe.id = v_pe;
+        IF v_county IS NOT NULL THEN
+          PERFORM dispatch_gap_enqueue_units(v_ceid, v_cet, v_county, v_sub, v_kind);
+        END IF;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'dispatch_gap_on_change（edit_history）：%', SQLERRM;
+      END;
     END IF;
 
   ELSIF TG_TABLE_NAME = 'source_refs' THEN
@@ -1237,29 +1248,37 @@ BEGIN
 
   ELSIF TG_TABLE_NAME = 'roster_checks' THEN
     -- 名單清查回報（一個單位一筆）：region 就是單位字串（縣市，或縣市＋鄉鎮），三支清查臂各用自己的鍵形，鍵同一個組法
-    FOR v_r IN SELECT x FROM unnest(ARRAY[v_new, v_old]) AS x WHERE x IS NOT NULL LOOP
-      IF COALESCE(v_r ->> 'election_id', '') ~ '^[0-9]{1,9}$' AND COALESCE(v_r ->> 'region', '') <> '' AND COALESCE(v_r ->> 'election_type', '') <> '' THEN
-        v_tid := dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, v_r ->> 'region', v_r ->> 'election_type');
-        PERFORM dispatch_gap_enqueue_reg('raw:roster_check', v_tid, v_kind);
-        PERFORM dispatch_gap_enqueue_reg('roster_cec_gap', v_tid, v_kind);
-        PERFORM dispatch_gap_enqueue_reg('roster_villages', v_tid, v_kind);
-      END IF;
-    END LOOP;
+    BEGIN
+      FOR v_r IN SELECT x FROM unnest(ARRAY[v_new, v_old]) AS x WHERE x IS NOT NULL LOOP
+        IF COALESCE(v_r ->> 'election_id', '') ~ '^[0-9]{1,9}$' AND COALESCE(v_r ->> 'region', '') <> '' AND COALESCE(v_r ->> 'election_type', '') <> '' THEN
+          v_tid := dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, v_r ->> 'region', v_r ->> 'election_type');
+          PERFORM dispatch_gap_enqueue_reg('raw:roster_check', v_tid, v_kind);
+          PERFORM dispatch_gap_enqueue_reg('roster_cec_gap', v_tid, v_kind);
+          PERFORM dispatch_gap_enqueue_reg('roster_villages', v_tid, v_kind);
+        END IF;
+      END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE WARNING 'dispatch_gap_on_change（roster_checks）：%', SQLERRM;
+    END;
 
   ELSIF TG_TABLE_NAME = 'roster_reconcile_units' THEN
     -- 名冊對帳單位彙總（內容沒變的單位不寫，所以每次觸發都是真的變了）：縣市層級的清查（raw）與縣市＋鄉鎮的清查（村里長）各入自己的鍵
-    FOR v_r IN SELECT x FROM unnest(ARRAY[v_new, v_old]) AS x WHERE x IS NOT NULL LOOP
-      IF COALESCE(v_r ->> 'election_id', '') ~ '^[0-9]{1,9}$' AND COALESCE(v_r ->> 'county', '') <> '' AND COALESCE(v_r ->> 'election_type', '') <> '' THEN
-        PERFORM dispatch_gap_enqueue_reg('raw:roster_check',
-          dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, v_r ->> 'county', v_r ->> 'election_type'), v_kind);
-        PERFORM dispatch_gap_enqueue_reg('raw:roster_check',
-          dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, (v_r ->> 'county') || COALESCE(v_r ->> 'town', ''), v_r ->> 'election_type'), v_kind);
-        IF v_r ->> 'election_type' = '村里長' THEN
-          PERFORM dispatch_gap_enqueue_reg('roster_villages',
-            dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, (v_r ->> 'county') || COALESCE(v_r ->> 'town', ''), '村里長'), v_kind);
+    BEGIN
+      FOR v_r IN SELECT x FROM unnest(ARRAY[v_new, v_old]) AS x WHERE x IS NOT NULL LOOP
+        IF COALESCE(v_r ->> 'election_id', '') ~ '^[0-9]{1,9}$' AND COALESCE(v_r ->> 'county', '') <> '' AND COALESCE(v_r ->> 'election_type', '') <> '' THEN
+          PERFORM dispatch_gap_enqueue_reg('raw:roster_check',
+            dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, v_r ->> 'county', v_r ->> 'election_type'), v_kind);
+          PERFORM dispatch_gap_enqueue_reg('raw:roster_check',
+            dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, (v_r ->> 'county') || COALESCE(v_r ->> 'town', ''), v_r ->> 'election_type'), v_kind);
+          IF v_r ->> 'election_type' = '村里長' THEN
+            PERFORM dispatch_gap_enqueue_reg('roster_villages',
+              dispatch_gap_roster_unit_key((v_r ->> 'election_id')::INTEGER, (v_r ->> 'county') || COALESCE(v_r ->> 'town', ''), '村里長'), v_kind);
+          END IF;
         END IF;
-      END IF;
-    END LOOP;
+      END LOOP;
+    EXCEPTION WHEN OTHERS THEN
+      RAISE WARNING 'dispatch_gap_on_change（roster_reconcile_units）：%', SQLERRM;
+    END;
 
   ELSIF TG_TABLE_NAME = 'roster_check_scope' THEN
     -- 清查範圍（開關、重查天數、日期欄）：低頻設定，整臂
@@ -1291,13 +1310,17 @@ BEGIN
   ELSIF TG_TABLE_NAME = 'task_checks' THEN
     -- 掛錯人（owner_mismatch）任務的查核紀錄（確認過是同一人的不再派）：task_id 最後一段是參選紀錄 id，入那筆所屬的單位
     IF TG_OP = 'INSERT' AND (v_row ->> 'task_id') ~ '^auto:candidacy_owner_mismatch:[0-9]{1,9}$' THEN
-      v_pe := regexp_replace(v_row ->> 'task_id', '^.*:', '')::INTEGER;
-      SELECT pe.election_id, pe.election_type, COALESCE(rg.region, p.region), rg.sub_region INTO v_ceid, v_cet, v_county, v_sub
-        FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id LEFT JOIN regions rg ON rg.id = pe.region_id
-       WHERE pe.id = v_pe;
-      IF v_county IS NOT NULL THEN
-        PERFORM dispatch_gap_enqueue_roster_units(v_ceid, v_cet, v_county, v_sub, v_kind);
-      END IF;
+      BEGIN
+        v_pe := regexp_replace(v_row ->> 'task_id', '^.*:', '')::INTEGER;
+        SELECT pe.election_id, pe.election_type, COALESCE(rg.region, p.region), rg.sub_region INTO v_ceid, v_cet, v_county, v_sub
+          FROM politician_elections pe JOIN politicians p ON p.id = pe.politician_id LEFT JOIN regions rg ON rg.id = pe.region_id
+         WHERE pe.id = v_pe;
+        IF v_county IS NOT NULL THEN
+          PERFORM dispatch_gap_enqueue_roster_units(v_ceid, v_cet, v_county, v_sub, v_kind);
+        END IF;
+      EXCEPTION WHEN OTHERS THEN
+        RAISE WARNING 'dispatch_gap_on_change（task_checks）：%', SQLERRM;
+      END;
     END IF;
 
   ELSIF TG_TABLE_NAME = 'activity_rules' THEN
@@ -1366,10 +1389,33 @@ BEGIN
   ELSIF TG_TABLE_NAME = 'electoral_district_areas' THEN
     -- 鄉鎮清單（村里長逐鄉鎮清查的來源，靜態參考資料）
     PERFORM dispatch_gap_enqueue_reg('roster_villages', '*', lower(TG_OP));
-  ELSIF TG_TABLE_NAME IN ('parties', 'party_aliases', 'cec_results_auto_plan_rows') THEN
+  ELSIF TG_TABLE_NAME IN ('parties', 'party_aliases') THEN
     PERFORM dispatch_gap_enqueue_reg('roster_unit_findings', '*', lower(TG_OP));
   END IF;
   RETURN NULL;
+END;
+$$;
+
+-- 時間翻轉（以 20261127044503 版為底）：投票日前後多補 district_seats（hint_sources 看 election_date < CURRENT_DATE）；
+-- 名單公告日前後補 raw:roster_check、roster_villages 整臂（說明分「登記階段」「審定名單階段」，看 CURRENT_DATE >= list_announced_on）。回傳 1＝有補事件
+CREATE OR REPLACE FUNCTION dispatch_gap_date_flip_roster() RETURNS INTEGER
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_n INTEGER := 0;
+BEGIN
+  IF EXISTS (SELECT 1 FROM elections e
+              WHERE e.election_date BETWEEN LEAST(CURRENT_DATE, activity_today()) - 3 AND GREATEST(CURRENT_DATE, activity_today()) + 1) THEN
+    PERFORM dispatch_gap_enqueue_reg('roster_unit_findings', '*', 'date_flip');
+    PERFORM dispatch_gap_enqueue_reg('ballot_numbers', '*', 'date_flip');
+    PERFORM dispatch_gap_enqueue_reg('district_seats', '*', 'date_flip');
+    v_n := 1;
+  END IF;
+  IF EXISTS (SELECT 1 FROM roster_check_scope s WHERE s.list_announced_on BETWEEN CURRENT_DATE - 2 AND CURRENT_DATE + 1) THEN
+    PERFORM dispatch_gap_enqueue_reg('raw:roster_check', '*', 'date_flip');
+    PERFORM dispatch_gap_enqueue_reg('roster_villages', '*', 'date_flip');
+    v_n := 1;
+  END IF;
+  RETURN v_n;
 END;
 $$;
 
@@ -1399,6 +1445,7 @@ REVOKE ALL ON FUNCTION dispatch_gap_on_change() FROM PUBLIC, anon, authenticated
 REVOKE ALL ON FUNCTION dispatch_gap_on_batch_new() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION dispatch_gap_on_batch_old() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION dispatch_gap_on_stmt() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION dispatch_gap_date_flip_roster() FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION dispatch_gap_enqueue_cec_units(JSONB) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION dispatch_gap_enqueue_units(INTEGER, TEXT, TEXT, TEXT, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION dispatch_gap_enqueue_cec_units(JSONB) TO service_role;
@@ -1514,7 +1561,7 @@ CREATE TRIGGER trg_dispatch_gap_cec_registration_sources
 -- 低頻小表（語句層級，沒有轉換表）
 DROP TRIGGER IF EXISTS trg_dispatch_gap_regions_stmt ON regions;
 CREATE TRIGGER trg_dispatch_gap_regions_stmt
-  AFTER INSERT OR UPDATE OR DELETE ON regions FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_stmt();
+  AFTER UPDATE OR DELETE ON regions FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_stmt();   -- 不掛 INSERT：新選區由 apply-contribution 建，影響靠該選區後續的參選紀錄事件與對帳
 
 DROP TRIGGER IF EXISTS trg_dispatch_gap_electoral_district_areas_stmt ON electoral_district_areas;
 CREATE TRIGGER trg_dispatch_gap_electoral_district_areas_stmt
@@ -1528,9 +1575,6 @@ DROP TRIGGER IF EXISTS trg_dispatch_gap_party_aliases_stmt ON party_aliases;
 CREATE TRIGGER trg_dispatch_gap_party_aliases_stmt
   AFTER INSERT OR UPDATE OR DELETE ON party_aliases FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_stmt();
 
-DROP TRIGGER IF EXISTS trg_dispatch_gap_cec_results_auto_plan_rows_stmt ON cec_results_auto_plan_rows;
-CREATE TRIGGER trg_dispatch_gap_cec_results_auto_plan_rows_stmt
-  AFTER INSERT OR UPDATE OR DELETE ON cec_results_auto_plan_rows FOR EACH STATEMENT EXECUTE FUNCTION dispatch_gap_on_stmt();
 
 -- 有 WHEN 的表（task_checks、edit_history 都是寫入頻繁的表，WHEN 擋掉不相干的列，連函式都不叫）
 DROP TRIGGER IF EXISTS trg_dispatch_gap_task_checks_owner ON task_checks;
@@ -1553,14 +1597,14 @@ CREATE TRIGGER trg_dispatch_gap_contributions
   WHEN (NEW.contribution_type IN ('policy', 'policy_subtopics', 'cand_numbers', 'candidacy', 'election_results', 'reassign_candidacy', 'district_seats'))
   EXECUTE FUNCTION dispatch_gap_on_change();
 
--- 觸發器計數（只讀 pg_catalog，不取任何表鎖）：前兩期 22 支－cec_candidates 三支＋本期新增 13 支，contributions 重建不增加
+-- 觸發器計數（只讀 pg_catalog，不取任何表鎖）：前兩期 22 支－cec_candidates 三支＋本期新增 12 支，contributions 重建不增加
 DO $$
 DECLARE
   v_n INTEGER;
 BEGIN
   SELECT count(*) INTO v_n FROM pg_trigger WHERE tgname LIKE 'trg\_dispatch\_gap\_%' AND NOT tgisinternal;
-  IF v_n <> 32 THEN
-    RAISE EXCEPTION '第 2 期 PR-2：預期共掛 32 支觸發器（前兩期 22 支－cec_candidates 三支＋本期新增 13 支，contributions 重建不增加），實際 %', v_n;
+  IF v_n <> 31 THEN
+    RAISE EXCEPTION '第 2 期 PR-2：預期共掛 31 支觸發器（前兩期 22 支－cec_candidates 三支＋本期新增 12 支，contributions 重建不增加），實際 %', v_n;
   END IF;
 END $$;
 
