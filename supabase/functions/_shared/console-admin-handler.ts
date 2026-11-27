@@ -52,7 +52,7 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 export function corsPreflight(): Response {
-  return new Response("ok", { headers: corsHeaders });
+  return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
 }
 
 function bearerOf(headers: Headers): string | null {

@@ -96,7 +96,7 @@ function storeOf(db: any): NewsStore {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
   if (req.method !== "POST") return json({ success: false, error: "POST のみ" }, 405);
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const supabaseUrl = Deno.env.get("SUPABASE_URL");

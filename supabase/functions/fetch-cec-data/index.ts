@@ -145,7 +145,7 @@ async function handleByName(name: string, electionId?: number): Promise<Response
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+    return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
   }
 
   try {

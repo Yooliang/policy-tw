@@ -521,7 +521,7 @@ async function newsScreen(supabase: Sb, apiKey: JevKeyLike, limit: number) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
   if (req.method !== "POST") return json({ success: false, error: "只收 POST" }, 405);
 
   try {

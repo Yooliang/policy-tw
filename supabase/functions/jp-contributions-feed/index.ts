@@ -34,7 +34,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
   try {
     // jp-only:begin client 固定 schema policy_jp
     const supabase = jpClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);

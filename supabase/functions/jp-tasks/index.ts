@@ -75,7 +75,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
 
   try {
     // jp-only:begin client 固定 policy_jp

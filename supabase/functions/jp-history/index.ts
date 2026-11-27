@@ -31,7 +31,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === "OPTIONS") return new Response("ok", { headers: { ...corsHeaders, "Access-Control-Max-Age": "7200" } });
   try {
     const url = new URL(req.url);
     const target = url.searchParams.get("target") as HistoryTarget | null;
