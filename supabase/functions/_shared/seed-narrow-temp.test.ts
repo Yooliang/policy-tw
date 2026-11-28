@@ -44,7 +44,7 @@ Deno.test("A3 這支是 seed 的最後一版，緊接著 20261114010000", async 
   const i = defining.indexOf(MIG_NAME);
   assert(i > 0);
   assertEquals(defining[i - 1], "20261114010000_election_type_priority_days.sql", "前一版變了：要以最新的為底重做");
-  assertEquals(defining.slice(i + 1), ["20261121193000_priority_bands.sql", "20261126150000_seed_arm_timings.sql", "20261126180000_dispatch_gaps_phase0b.sql", "20261127110000_seed_priority_skip_locked.sql", "20261127120000_gap_drain_batch.sql", "20261128020000_seed_priority_cache.sql"],"這支之後只允許層級×種類帶狀優先（守門在 priority-bands.test.ts）與各段計時（守門在 seed-arm-timings.test.ts）；又有人改了 seed：後合併的以最新那版為底重做，並更新各 seed 守門測試的版本清單");
+  assertEquals(defining.slice(i + 1), ["20261121193000_priority_bands.sql", "20261126150000_seed_arm_timings.sql", "20261126180000_dispatch_gaps_phase0b.sql", "20261127110000_seed_priority_skip_locked.sql", "20261127120000_gap_drain_batch.sql", "20261128020000_seed_priority_cache.sql", "20261128030000_seed_priority_substage_timing.sql"],"這支之後只允許層級×種類帶狀優先（守門在 priority-bands.test.ts）與各段計時（守門在 seed-arm-timings.test.ts）；又有人改了 seed：後合併的以最新那版為底重做，並更新各 seed 守門測試的版本清單");
 });
 
 Deno.test("A4 _gaps 只帶 task_id、src_rn、arm、target、opened_by；寬欄不進 _gaps，也沒有人從 _gaps 讀寬欄", () => {
