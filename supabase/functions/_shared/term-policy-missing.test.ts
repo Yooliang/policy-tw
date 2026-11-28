@@ -37,7 +37,7 @@ async function latestFunctionBody(fn: string): Promise<string> {
 }
 
 Deno.test("SQL：任務臂掛進 contribution_auto_tasks_arms()", async () => {
-  const arms = await latestFunctionBody("contribution_auto_tasks_arms");
+  const arms = await latestFunctionBody("contribution_auto_tasks_arms_tail");  // 20261128040000 起總表本體在 tail 函式
   assertStringIncludes(arms, "FROM contribution_auto_tasks_term_policies()");
   // 原本七支臂一支都不能少（CREATE OR REPLACE 整份重寫，漏抄一行就是靜默拿掉一種任務）
   for (const arm of ["raw", "dup", "legacy", "mismatch", "policy_dup", "not_running", "mayor_policies"]) {
