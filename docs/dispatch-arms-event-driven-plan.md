@@ -422,7 +422,7 @@ seed 是「總表這一輪沒回這個缺口＝缺口消失」：
 
 #### 各段增量化做法、風險、PR
 
-**3-A（本支實作）：優先秒數的靜態部分改快取。**
+**3-A（本支實作，`20261128020000_seed_priority_cache.sql`，守門 `seed-priority-cache.test.ts`）：優先秒數的靜態部分改快取。** 實作時的兩處補充：①為了讓守門測試能固定「輪到哪一桶」，`seed_priority_year_band(p_bucket)` 多一個只給測試用的參數，seed 不傳；②守門把前一版 seed 裡那句舊 UPDATE 原文抽出來當 oracle，與新函式對同一份資料逐列比，涵蓋首輪、沒變動、目標變、插隊旗標變、職位變（新增、刪除、修改）、選舉日期變、adjudicate、缺口消失、輪替自癒，並有三個還原驗證（觸發器不標 stale、版本不加、sig 少插隊旗標都必須讓測試變紅）。
 - 優先秒數＝流量部分＋需求疊加＋（屆基準＋帶狀秒數）。後兩項只由「任務型別、目標、是不是插隊中」與選舉、參選紀錄決定，**不看現在時間**（讀碼確認：`election_year_priority_seconds`、`latest_election_base_seconds`、`task_band_seconds` 都沒有 `now()`）。流量與需求兩項稀疏（只有熱頁名下與有訊號的卡），每輪照舊算。
 - 新表 `task_priority_cache(task_id, sig, static_seconds, pid, stale, computed_at)`：`sig`＝型別＋目標＋插隊旗標＋全域版本的雜湊。每輪：算每列的 `sig`（便宜），只對「沒快取、`sig` 不同、被標 `stale`、屬於 24 小時輪替那一桶」的列呼叫兩支函式，其餘直接讀快取。`adjudicate`（層級繼承母交件，依賴 `contributions`）**不快取**，每輪照舊算，量小。
 - 失效來源：`politician_elections` 變動（職位、選舉、人物）→ 觸發器把該人物名下的快取列標 `stale`；`elections` 變動（日期、屆別性質，極低頻）→ 全域版本加 1，等於全部失效一次。其餘函式（職位對天數、型別對天數）是純函式，改定義時要換 `sig` 的版本字串，**守門測試擋「定義被改但版本字串沒換」**。
