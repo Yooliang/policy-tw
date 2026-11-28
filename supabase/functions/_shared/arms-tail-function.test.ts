@@ -68,7 +68,7 @@ Deno.test("A4 開頭註解寫了為什麼、每日呼叫量變化、回滾；沒
   assert(!/cron\.schedule\(|CREATE TRIGGER|net\.http_/i.test(code), "不新增排程、觸發器或對外呼叫");
   // 沒有任何其他 migration 或函式在用新函式（seed、drain 都沒接）
   for (const n of await migrationNames()) {
-    if (n <= MIG_NAME) continue;
+    if (n <= MIG_NAME || n === "20261128070000_roster_helper_live.sql") continue;  // 070000 是 tail 的後續版本（fnd／gapu 讀常駐表），守門在 roster-helper-live.test.ts
     assert(!(await readMig(n)).includes("contribution_auto_tasks_arms_tail"), `${n} 用了新函式：本期不接呼叫者`);
   }
 });
