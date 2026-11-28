@@ -226,8 +226,9 @@ Deno.test("派工臂：task_id 是 auto:district_seats_missing:<屆別>:<縣市>
 });
 
 Deno.test("派工臂接進最新的 contribution_auto_tasks_arms，而且前一版的臂一支都沒掉", async () => {
-  const { sql } = await latestDefining("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()");
-  const body = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()"), sql.indexOf("COMMENT ON FUNCTION contribution_auto_tasks_arms"));
+  // 20261128040000 起總表本體在 contribution_auto_tasks_arms_tail
+  const { sql } = await latestDefining("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms_tail(");
+  const body = sql.slice(sql.indexOf("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms_tail("), sql.indexOf("COMMENT ON FUNCTION contribution_auto_tasks_arms_tail"));
   const arms = new Set([...body.matchAll(/FROM\s+(contribution_auto_tasks_[a-z_]+)\(\)/g)].map((m) => m[1]));
   for (const a of ["contribution_auto_tasks_raw", "contribution_auto_tasks_roster_cec_gap", "contribution_auto_tasks_region_gap", "contribution_auto_tasks_elected_missing", "contribution_auto_tasks_district_seats"]) {
     assert(arms.has(a), `arms 少了 ${a}`);

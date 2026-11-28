@@ -43,7 +43,7 @@ Deno.test("A1 總表＝20261105200000 的現行定義只多兩行 UNION；臂名
   const after = [];
   for (const n of await migrationNames()) if (n > "20261105200000_lineage_status.sql" && n !== MIG_NAME && (await readMig(n)).includes("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms(")) after.push(n);
   // 例外：20261126180000（派工臂事件驅動第 0 期 PR-2）把總表改成二段式，守門在 dispatch-gaps-phase0b.test.ts
-  assertEquals(after, ["20261126180000_dispatch_gaps_phase0b.sql"], "20261105200000 之後沒有別支重定義總表");
+  assertEquals(after, ["20261126180000_dispatch_gaps_phase0b.sql", "20261128040000_arms_tail_function.sql"], "20261105200000 之後沒有別支重定義總表");
 });
 
 Deno.test("A2 規則：只把 lineage_status 改啟用；兩支新臂種成 always＋enabled；不碰既有三支臂（lineage_candidates／links／roles）；沒有別的 UPDATE", () => {

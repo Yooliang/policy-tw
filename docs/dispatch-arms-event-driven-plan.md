@@ -440,7 +440,16 @@ seed 是「總表這一輪沒回這個缺口＝缺口消失」：
 - 風險：中。階梯規則（公報上架前不計、5 次、no_change）有細節，守門＝同一份假資料全量版與增量版的 `blocked`／`cool_until`／`cooling` 三欄逐列相同，包含「補一筆查核後」「冷卻到期後」「`no_change` 加入後」三種序列。保留每小時全量版對帳。
 - 預估：2.7 秒 → <1 秒。
 
-**3-D：drain 直接套用 live 臂到 task_dispatches（原「close／insert／update 只處理有變動的鍵」）。**
+**3-D（2026-11-28 改版）：改為「總表後半段抽成可吃臂集合＋鍵集合的函式」（地基），drain 直接套用併入 3-F。** 原設計見下方，保留當脈絡。
+- **為什麼改**：讀碼發現原設計做不到逐列一致。live 臂的列在總表 `contribution_auto_tasks_arms()` 之後還要經過一串**整表狀態**的處理，這些不是鍵事件，drain 只套用「一批鍵」會漏：
+  1. 窗口（`opened` CTE，`activity_open(臂, 選舉, 職位)` 每組約 84 組）依時間與里程碑開關，窗口翻面沒有事件；`opened_by`（basis、rule_id、milestone）也在這裡產生，`task_dispatches.opened_by` 要用它。
+  2. 名單族 `roster_check` 的 `target`／`what_we_need` 被 MATERIALIZED 的整表 CTE（`fnd`＝`roster_unit_findings`、`gapu`＝`roster_gap_units`、`roster_gap_fresh_units`、`roster_unify_attach`）改寫，`findings_only` 的列根本不是臂的列；這些內容會因別處資料變動而變。
+  3. 測試名人物過濾（`ph`／`phe`）、流量臂的 `page_traffic_hot` 閘與 `traffic:<型別>` 臂改名，也都是整表狀態。
+  所以 drain 套用要嘛重做一份「按鍵版的總表後半段」，要嘛 seed 仍每輪組全量總表來補——後者等於 3-D 沒有減少 seed 的事，只多了第二個寫 `task_dispatches` 的人（本節原本就寫「不拿掉 `arms_all`，3-D 只增加複雜度、不減尖峰」）。
+- **這支做什麼**（`20261128040000_arms_tail_function.sql`，純重構、不接任何呼叫者、不動 seed）：總表本體整句搬進 `contribution_auto_tasks_arms_tail(p_arms TEXT[], p_keys TEXT[])`，兩者 NULL＝全量；總表只剩 `SELECT * FROM … tail(NULL, NULL)`，輸出與前一版逐列相同。給了臂集合，沒被選到的臂分支被一次性條件剪掉（`roster_villages`、`roster_cec_gap`、`raw:roster_check` 不剪，名單族彙總要拿它們比對）；給了鍵集合，只回 `dispatch_gap_scope_key(來源臂, task_id)` 在集合內的列。守門：PGlite 對前一版總表雙向差集 0（名單收斂開／關、live 臂讀常駐表）、子集＝全量用同條件過濾、還原驗證。
+- **下一步**：drain 套用併入 3-F，先接上這支函式（只對一批臂與鍵取輸出再套用），再加「窗口狀態變化套用」「名單族彙總重算」，seed 對 live 臂才能不再組全量。
+
+**（原 3-D，歷史）drain 直接套用 live 臂到 task_dispatches（原「close／insert／update 只處理有變動的鍵」）。**
 - 現在：seed 先組出全部缺口，再對 `task_dispatches` 做收回、更新、新增三次全表對帳。live 臂的開關本來就是 drain 處理的事件。改成：`dispatch_gap_drain()` 在同步完 `dispatch_gaps` 之後，對**這一批處理到的鍵**做同樣的收回、更新、新增（同一份 SQL 只加鍵條件，窗口、測試名過濾、優先秒數靜態部分、換號沿用位置都在套用函式內做），收回原因照現況（`filled`／`window`）。seed 裡的 `_gaps` 只剩 off／shadow 臂。
 - **為什麼不是第一支做**：三段合計只有約 3 秒，而且 seed 仍要組出 live 臂的缺口才有東西對帳，**不拿掉 `arms_all` 的整輪組裝，這一步只增加複雜度、不減尖峰**。它是 3-F 的前置。
 - 風險：高。套用與 seed 同時動 `task_dispatches`（共用 advisory lock `dispatch_gap_writer` 防重入）、換號沿用排隊位置要在同一批內配對舊新列、`gap.close_reason` 要在套用函式內設定。守門＝PGlite 把「全量 seed」當 oracle，對同一組事件序列比 `task_dispatches` 的所有業務欄位逐列相同（時間戳欄除外）。保留 03:32 每日對帳與每小時 :42 修正兜底，並新增「套用後 vs 全量」每日一次的比對（差異寫 `dispatch_gap_reconcile_runs`）。
@@ -476,13 +485,13 @@ seed 是「總表這一輪沒回這個缺口＝缺口消失」：
 
 #### 分期預估（推測，每支上線後以 `seed_arm_timings` 修正）
 
-**施工順序（主線 11-28 審定）**：3-A → 3-D → 3-E 第 ① 批 → 3-F。擁有者要的是整十分鐘尖峰消失，尖峰來源是 `arms_all` 與 `gap_drain`；3-B（流量鍵快取）與 3-C（阻擋標記增量）各只省 1～3 秒、不碰尖峰，排在 3-F 之後或併進 3-F。
+**施工順序（主線 11-28 審定，同日 3-D 改版）**：3-A → 3-D（總表後半段抽函式，地基）→ 3-E 第 ① 批 → 3-F（含 drain 套用）。擁有者要的是整十分鐘尖峰消失，尖峰來源是 `arms_all` 與 `gap_drain`；3-B（流量鍵快取）與 3-C（阻擋標記增量）各只省 1～3 秒、不碰尖峰，排在 3-F 之後或併進 3-F。
 
 | 步驟 | 整輪秒數 | 尖峰 |
 |---|---|---|
 | 現況 | 約 30 | 撞上限 |
 | 3-A 優先秒數快取 | 約 21 | 小降（縮短時間窗） |
-| 3-D 套用進 drain | 約 18 | 看不出差別（`arms_all` 還在） |
+| 3-D 總表後半段抽函式（純重構，不接呼叫者） | 約 21（不變） | 不變；drain 套用併入 3-F，原「約 18」的 3 秒歸到 3-F |
 | 3-E 第 ① 批 | 約 16 | `arms_all` 變小 |
 | 3-F seed 瘦身 | 約 8（<5 目標） | 消失 |
 | 3-B、3-C（3-F 之後或併入） | 再省 3～6 | 不影響尖峰 |

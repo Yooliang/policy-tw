@@ -46,7 +46,10 @@ const regionGapSql = await latestSqlDefining("contribution_auto_tasks_region_gap
 
 /** 一支 migration 裡 contribution_auto_tasks_arms 的本體呼叫了哪幾支臂 */
 function armsCalled(text: string): Set<string> {
-  const body = between(text, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()", "COMMENT ON FUNCTION contribution_auto_tasks_arms");
+  // 20261128040000 起總表本體搬到 contribution_auto_tasks_arms_tail，總表只剩呼叫
+  const body = text.includes("CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms_tail(")
+    ? between(text, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms_tail(", "COMMENT ON FUNCTION contribution_auto_tasks_arms_tail")
+    : between(text, "CREATE OR REPLACE FUNCTION contribution_auto_tasks_arms()", "COMMENT ON FUNCTION contribution_auto_tasks_arms");
   // 總表自己不是臂：同一支 migration 若也重定義了 seed_auto_task_queue（FROM contribution_auto_tasks_arms()），本體區間會把它算進來（2026-10-08 補號次那支只改總表、不動 seed）
   return new Set([...body.matchAll(/FROM\s+(contribution_auto_tasks_[a-z_]+)\(\)/g)].map((m) => m[1]).filter((n) => n !== "contribution_auto_tasks_arms"));
 }

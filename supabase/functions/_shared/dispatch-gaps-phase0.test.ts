@@ -338,7 +338,7 @@ Deno.test("⑧ 守門：本支沒改現行派工函式、沒掛觸發器、沒�
     for (const n of names) if ((await read(n)).includes(`FUNCTION ${fn}(`) && n !== MIG_NAME) defs.push(n);
     const last = defs.filter((n) => n < MIG_NAME).pop() ?? "";
     assert(last !== "", `${fn} 在本支之前沒有定義`);
-    assert(defs.every((n) => n < MIG_NAME || n === "20261126180000_dispatch_gaps_phase0b.sql" || n === "20261127110000_seed_priority_skip_locked.sql" || n === "20261127120000_gap_drain_batch.sql" || n === "20261128020000_seed_priority_cache.sql" || n === "20261128030000_seed_priority_substage_timing.sql" /* seed 兩句 UPDATE 改 SKIP LOCKED，守門在 seed-priority-skip-locked.test.ts */), `${fn} 在本支之後只允許 PR-2 重新定義（現在有 ${defs.join("、")}）`);
+    assert(defs.every((n) => n < MIG_NAME || n === "20261126180000_dispatch_gaps_phase0b.sql" || n === "20261128040000_arms_tail_function.sql" || n === "20261127110000_seed_priority_skip_locked.sql" || n === "20261127120000_gap_drain_batch.sql" || n === "20261128020000_seed_priority_cache.sql" || n === "20261128030000_seed_priority_substage_timing.sql" /* seed 兩句 UPDATE 改 SKIP LOCKED，守門在 seed-priority-skip-locked.test.ts */), `${fn} 在本支之後只允許 PR-2 重新定義（現在有 ${defs.join("、")}）`);
     assert(!mig.includes(`FUNCTION ${fn}(`), `本支不准定義 ${fn}`);
     assert(!noComments(mig).includes(fn), `本支的 SQL 不准引用 ${fn}`);
   }

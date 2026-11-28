@@ -237,7 +237,8 @@ async function allAutoTaskTypes(): Promise<string[]> {
   const seen = new Set<string>();
   while (queue.length > 0) {
     const body = queue.shift()!;
-    for (const m of body.matchAll(/FROM (contribution_auto_tasks_[a-z_]+)\(\)/g)) {
+    // 20261128040000 起總表只剩一句 FROM contribution_auto_tasks_arms_tail(NULL, NULL)，本體在 tail 函式
+    for (const m of [...body.matchAll(/FROM (contribution_auto_tasks_[a-z_]+)\(\)/g), ...body.matchAll(/FROM (contribution_auto_tasks_arms_tail)\(NULL::TEXT\[\], NULL::TEXT\[\]\)/g)]) {
       const name = m[1];
       if (seen.has(name)) continue;
       seen.add(name);
