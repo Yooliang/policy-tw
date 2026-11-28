@@ -316,6 +316,29 @@ Deno.test("B10 24 小時輪替：失效漏接（快取被改壞）輪到那一�
   assert([...seen].every((b) => b >= 0 && b < 144));
 });
 
+Deno.test("B11 改 target 任一欄位（含內嵌的 election_type 文字、巢狀欄位）task_id 不變，sig 必變、重算且與舊的相同", async () => {
+  const db = await freshDb(MIG);
+  await loadGaps(db, GAPS);
+  await runBoth(db);
+  const variants: Array<[string, (t: Record<string, unknown>) => Record<string, unknown>]> = [
+    ["內嵌 election_type 文字", (t) => ({ ...t, election_type: "縣市長" })],
+    ["新增無關欄位", (t) => ({ ...t, note: "x" })],
+    ["巢狀欄位", (t) => ({ ...t, missing: ["avatar_url", { deep: 1 }] })],
+  ];
+  for (const [label, mut] of variants) {
+    const before = await scalar(db, "SELECT sig FROM task_priority_cache WHERE task_id = 'auto:roster:e'");
+    const changed = GAPS.map((g) => (g.id === "auto:roster:e" ? { ...g, target: mut(g.target) } : g));
+    await loadGaps(db, changed);
+    const miss = await runBoth(db);
+    const after = await scalar(db, "SELECT sig FROM task_priority_cache WHERE task_id = 'auto:roster:e'");
+    assertNotEquals(after, before, `${label}：sig 沒變`);
+    assertEquals(miss, 1, label);
+    assertEquals(await diff(db), 0, label);
+    await loadGaps(db, GAPS);
+    await runBoth(db);  // 換回原狀，下一個變體從同一個起點
+  }
+});
+
 // ============================================================
 // C. 還原驗證：失效觸發器壞掉，B5 的情境必須與舊的不同
 // ============================================================
